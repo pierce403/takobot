@@ -507,12 +507,13 @@
             <div style="color: var(--muted-2); font-size: 13px">tiny XMTP hello bot</div>
           </div>
         </div>
-        <nav class="nav" aria-label="Links">
-          <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
-          <a class="btn" href="#quickstart">Quickstart</a>
-          <a class="btn" href="#config">Config</a>
-        </nav>
-      </header>
+	        <nav class="nav" aria-label="Links">
+	          <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
+	          <a class="btn" href="#quickstart">Quickstart</a>
+	          <a class="btn" href="#features">Features</a>
+	          <a class="btn" href="#config">Config</a>
+	        </nav>
+	      </header>
 
       <main>
         <section class="hero">
@@ -646,9 +647,9 @@
           </figure>
         </section>
 
-        <section class="section-grid" id="quickstart">
-          <div class="card panel">
-            <h2>Quickstart</h2>
+	        <section class="section-grid" id="quickstart">
+	          <div class="card panel">
+	            <h2>Quickstart</h2>
             <p>
               The simplest path is the helper script. It creates a local venv, installs deps, and
               sends a DM:
@@ -673,12 +674,39 @@
               If you want a full bot framework, this probably isn’t it — this is the minimal,
               single-purpose “can I message you from a box?” tool.
             </p>
-          </div>
-        </section>
+	          </div>
+	        </section>
 
-        <section class="section-grid">
-          <div class="card panel">
-            <h2>What happens on first run</h2>
+	        <section class="section-grid" id="features">
+	          <div class="card panel">
+	            <h2>Features</h2>
+	            <ul>
+	              <li><b>One-command bootstrap</b>: <code>./tako.sh …</code> sets up a venv and runs the client.</li>
+	              <li><b>Address + ENS</b>: send to <code>0x…</code> or resolve <code>.eth</code> names.</li>
+	              <li><b>Local keys + DB</b>: config in <code>.tako/config.json</code>, DBs in <code>.tako/xmtp-db/</code>.</li>
+	              <li><b>Ops knobs</b>: endpoint overrides + sync toggles via environment variables.</li>
+	            </ul>
+	            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
+	              The canonical spec lives in <code>FEATURES.md</code> (with stability + test criteria).
+	            </p>
+	          </div>
+
+	          <div class="card panel">
+	            <h2>Feature tracker</h2>
+	            <p>
+	              This repo keeps a living <code>FEATURES.md</code> file (inspired by
+	              <a href="https://features.md">features.md</a>) so humans and agents can see what’s stable,
+	              in-progress, or planned.
+	            </p>
+	            <p style="margin-top: 12px">
+	              <a class="btn" href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">Open FEATURES.md on GitHub</a>
+	            </p>
+	          </div>
+	        </section>
+
+	        <section class="section-grid">
+	          <div class="card panel">
+	            <h2>What happens on first run</h2>
             <ul>
               <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
               <li>Installs dependencies from <code>requirements.txt</code>.</li>
@@ -782,17 +810,21 @@
             </ul>
           </div>
 
-          <div class="card panel">
-            <h2>Links</h2>
-            <ul>
-              <li>
-                GitHub:
-                <a href="https://github.com/pierce403/tako-bot">github.com/pierce403/tako-bot</a>
-              </li>
-              <li>
-                Entrypoint script:
-                <code>tako.sh</code>
-              </li>
+	          <div class="card panel">
+	            <h2>Links</h2>
+	            <ul>
+	              <li>
+	                GitHub:
+	                <a href="https://github.com/pierce403/tako-bot">github.com/pierce403/tako-bot</a>
+	              </li>
+	              <li>
+	                Features:
+	                <a href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">FEATURES.md</a>
+	              </li>
+	              <li>
+	                Entrypoint script:
+	                <code>tako.sh</code>
+	              </li>
               <li>
                 Core client:
                 <code>tako.py</code>
@@ -813,4 +845,3 @@
     </div>
   </body>
 </html>
-

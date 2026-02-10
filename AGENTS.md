@@ -25,6 +25,13 @@ This repo is a tiny XMTP client that lets a server send a friendly DM (“hi”)
 - `tako.sh`: venv/bootstrap + optional install-from-source for `xmtp`
 - `.tako/`: local, ignored runtime state
 
+## Working Agreements
+
+- Commit and push on every meaningful update (keep changes small and easy to review).
+- Keep `index.html` in sync with current behavior, usage, and configuration.
+- Keep `FEATURES.md` in sync with reality (stability + test criteria) whenever features change.
+- When changing CLI flags or env vars, update `README.md`, `index.html`, and `FEATURES.md` together.
+
 ## Lessons Learned (append-only)
 
 Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullets:
@@ -40,4 +47,3 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened: local `*.db3` files were easy to accidentally leave in the repo root.
 - Fix: ignore `*.db3`, `*.db3-wal`, and `*.db3-shm`.
 - Prevention: treat all local XMTP DB artifacts and `.tako/config.json` as sensitive runtime state.
-

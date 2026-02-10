@@ -2,6 +2,12 @@
 
 A tiny XMTP client that lets a server say hi to an XMTP address or ENS name.
 
+## Docs
+
+- Website: https://tako.bot (or `index.html` in this repo)
+- Features: `FEATURES.md`
+- Agent notes / lessons learned: `AGENTS.md`
+
 ## Quickstart
 
 ```bash

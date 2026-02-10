@@ -3,25 +3,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ $# -lt 1 ]]; then
-  cat >&2 <<'EOF'
-Usage:
-  ./tako.sh <xmtp_address_or_ens> [message]          # legacy (maps to: tako hi)
-  ./tako.sh hi <xmtp_address_or_ens> [message]       # explicit one-off DM
-  ./tako.sh run --operator <xmtp_address_or_ens>     # daemon / heartbeat
-  ./tako.sh doctor                                  # environment checks
-EOF
-  exit 1
-fi
-
 case "${1:-}" in
   -h|--help|help)
     cat <<'EOF'
 Usage:
-  ./tako.sh <xmtp_address_or_ens> [message]          # legacy (maps to: tako hi)
-  ./tako.sh hi <xmtp_address_or_ens> [message]       # explicit one-off DM
-  ./tako.sh run --operator <xmtp_address_or_ens>     # daemon / heartbeat
-  ./tako.sh doctor                                  # environment checks
+  ./tako.sh [start]                                  # start daemon (XMTP pairing happens in-chat)
+  ./tako.sh doctor                                   # (dev) environment checks
+  ./tako.sh hi <xmtp_address_or_ens> [message]        # (dev) one-off DM
 EOF
     exit 0
     ;;
@@ -29,7 +17,7 @@ esac
 
 SUBCMD=""
 case "${1:-}" in
-  hi|run|doctor)
+  start|hi|run|doctor)
     SUBCMD="$1"
     shift
     ;;
@@ -40,13 +28,20 @@ MESSAGE=""
 ARGS=()
 
 if [[ -z "$SUBCMD" ]]; then
-  TARGET="$1"
-  MESSAGE="${2:-}"
-  ARGS=("hi" "--to" "$TARGET")
-  if [[ -n "$MESSAGE" ]]; then
-    ARGS+=("--message" "$MESSAGE")
+  if [[ $# -eq 0 ]]; then
+    ARGS=("run")
+  else
+    TARGET="$1"
+    MESSAGE="${2:-}"
+    ARGS=("hi" "--to" "$TARGET")
+    if [[ -n "$MESSAGE" ]]; then
+      ARGS+=("--message" "$MESSAGE")
+    fi
   fi
 else
+  if [[ "$SUBCMD" == "start" ]]; then
+    SUBCMD="run"
+  fi
   if [[ "$SUBCMD" == "hi" ]]; then
     if [[ $# -ge 1 && "${1:-}" != --* ]]; then
       TARGET="$1"

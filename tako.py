@@ -178,9 +178,13 @@ async def send_hi(recipient: str, message: str, env: str, db_root: Path) -> None
     api_url = os.environ.get("XMTP_API_URL")
     history_sync_url = os.environ.get("XMTP_HISTORY_SYNC_URL")
     gateway_host = os.environ.get("XMTP_GATEWAY_HOST")
-    disable_history_sync, normalized_history_sync_url = parse_history_sync(
+    disable_history_sync_from_url, normalized_history_sync_url = parse_history_sync(
         history_sync_url
     )
+    disable_history_sync = is_truthy(os.environ.get("XMTP_DISABLE_HISTORY_SYNC"))
+    disable_history_sync = disable_history_sync or disable_history_sync_from_url
+    if disable_history_sync:
+        normalized_history_sync_url = None
     disable_device_sync = True
     if "XMTP_DISABLE_DEVICE_SYNC" in os.environ:
         disable_device_sync = is_truthy(os.environ.get("XMTP_DISABLE_DEVICE_SYNC"))

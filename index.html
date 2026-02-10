@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="tako-bot is a tiny XMTP client that lets a server send a friendly DM (“hi”) to an XMTP address or ENS name."
+    />
+    <title>tako-bot — tiny XMTP hello bot</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg0: #061320;
+        --bg1: #071a2d;
+        --card: rgba(255, 255, 255, 0.06);
+        --card-2: rgba(255, 255, 255, 0.08);
+        --border: rgba(255, 255, 255, 0.12);
+        --text: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.72);
+        --muted-2: rgba(255, 255, 255, 0.56);
+        --accent: #7c3aed;
+        --accent-2: #22d3ee;
+        --good: #34d399;
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        --radius: 18px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+          "Apple Color Emoji", "Segoe UI Emoji";
+        color: var(--text);
+        background: radial-gradient(1200px 600px at 15% 0%, rgba(124, 58, 237, 0.25), transparent 55%),
+          radial-gradient(900px 520px at 85% 12%, rgba(34, 211, 238, 0.22), transparent 60%),
+          linear-gradient(180deg, var(--bg1), var(--bg0));
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+      }
+
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+      }
+
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 28px 20px 72px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 6px 0 22px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        letter-spacing: 0.2px;
+      }
+
+      .brand-badge {
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(124, 58, 237, 0.85), rgba(34, 211, 238, 0.65));
+        box-shadow: 0 10px 25px rgba(124, 58, 237, 0.25);
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+      }
+
+      .brand-badge span {
+        font-weight: 800;
+        font-size: 16px;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        text-decoration: none;
+      }
+
+      .btn:hover {
+        background: rgba(255, 255, 255, 0.07);
+        text-decoration: none;
+      }
+
+      .btn.primary {
+        border-color: rgba(124, 58, 237, 0.5);
+        background: linear-gradient(135deg, rgba(124, 58, 237, 0.35), rgba(34, 211, 238, 0.18));
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 22px;
+        align-items: stretch;
+        padding: 18px 0 10px;
+      }
+
+      @media (max-width: 900px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-copy {
+        padding: 22px 22px 18px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero-copy:before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        background: radial-gradient(600px 220px at 20% 0%, rgba(124, 58, 237, 0.22), transparent 55%);
+        pointer-events: none;
+      }
+
+      .hero-copy > * {
+        position: relative;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(34px, 3.8vw, 52px);
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-size: 17px;
+        max-width: 62ch;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 14px 0 0;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(0, 0, 0, 0.14);
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .chip b {
+        color: var(--text);
+      }
+
+      .tank {
+        padding: 16px 16px 12px;
+        display: grid;
+        grid-template-rows: 1fr auto;
+      }
+
+      .tank-viewport {
+        position: relative;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        overflow: hidden;
+        background: radial-gradient(800px 380px at 40% 0%, rgba(34, 211, 238, 0.25), transparent 55%),
+          linear-gradient(180deg, rgba(4, 20, 32, 0.9), rgba(6, 27, 44, 0.92));
+        min-height: 280px;
+      }
+
+      .tank-viewport:before {
+        content: "";
+        position: absolute;
+        inset: -2px;
+        background: radial-gradient(700px 240px at 15% 15%, rgba(124, 58, 237, 0.22), transparent 58%);
+        pointer-events: none;
+      }
+
+      .waves {
+        position: absolute;
+        left: -20%;
+        right: -20%;
+        bottom: -8px;
+        height: 44px;
+        opacity: 0.55;
+        background: radial-gradient(24px 16px at 20px 18px, rgba(255, 255, 255, 0.22), transparent 65%),
+          radial-gradient(26px 18px at 70px 24px, rgba(255, 255, 255, 0.18), transparent 65%),
+          radial-gradient(24px 16px at 120px 18px, rgba(255, 255, 255, 0.22), transparent 65%);
+        background-size: 140px 44px;
+        animation: waveDrift 6.5s linear infinite;
+        filter: blur(0.2px);
+      }
+
+      @keyframes waveDrift {
+        0% {
+          transform: translateX(0);
+        }
+        100% {
+          transform: translateX(140px);
+        }
+      }
+
+      .octo-swim {
+        position: absolute;
+        top: 52%;
+        left: 0;
+        width: min(380px, 82%);
+        transform: translate(-120%, -50%);
+        animation: swimAcross 16s linear infinite;
+        pointer-events: none;
+        will-change: transform;
+      }
+
+      .octo-bob {
+        animation: bob 2.8s ease-in-out infinite;
+        will-change: transform;
+      }
+
+      @keyframes swimAcross {
+        0% {
+          transform: translate(-125%, -50%) rotate(0deg);
+        }
+        45% {
+          transform: translate(8%, -54%) rotate(2deg);
+        }
+        50% {
+          transform: translate(18%, -50%) rotate(0deg);
+        }
+        100% {
+          transform: translate(140%, -52%) rotate(-1deg);
+        }
+      }
+
+      @keyframes bob {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+        50% {
+          transform: translateY(-10px) rotate(-1deg);
+        }
+      }
+
+      .tank-caption {
+        margin: 10px 2px 0;
+        color: var(--muted-2);
+        font-size: 13px;
+      }
+
+      .section-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      @media (max-width: 900px) {
+        .section-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .panel {
+        padding: 18px 18px 16px;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 18px;
+        letter-spacing: -0.01em;
+      }
+
+      p {
+        margin: 10px 0;
+        color: var(--muted);
+      }
+
+      ul {
+        margin: 10px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+      }
+
+      li {
+        margin: 7px 0;
+      }
+
+      pre {
+        margin: 12px 0 0;
+        padding: 14px 14px;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.26);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        overflow: auto;
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        margin-top: 10px;
+        overflow: hidden;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(0, 0, 0, 0.14);
+      }
+
+      .table th,
+      .table td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        vertical-align: top;
+        font-size: 14px;
+      }
+
+      .table th {
+        color: rgba(255, 255, 255, 0.86);
+        font-weight: 700;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .table tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(52, 211, 153, 0.28);
+        background: rgba(52, 211, 153, 0.08);
+        color: rgba(52, 211, 153, 0.95);
+        font-size: 13px;
+        margin-top: 10px;
+      }
+
+      footer {
+        margin-top: 24px;
+        padding-top: 18px;
+        color: var(--muted-2);
+        font-size: 13px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      /* SVG styling + tentacle wiggles */
+      .octo-svg {
+        width: 100%;
+        height: auto;
+        display: block;
+        overflow: visible;
+      }
+
+      .tentacle {
+        transform-box: fill-box;
+        transform-origin: top center;
+        animation: wiggle 1.7s ease-in-out infinite;
+      }
+
+      .tentacle.t2 {
+        animation-delay: -0.2s;
+      }
+      .tentacle.t3 {
+        animation-delay: -0.35s;
+      }
+      .tentacle.t4 {
+        animation-delay: -0.5s;
+      }
+      .tentacle.t5 {
+        animation-delay: -0.12s;
+      }
+      .tentacle.t6 {
+        animation-delay: -0.28s;
+      }
+      .tentacle.t7 {
+        animation-delay: -0.42s;
+      }
+      .tentacle.t8 {
+        animation-delay: -0.62s;
+      }
+
+      @keyframes wiggle {
+        0%,
+        100% {
+          transform: rotate(2.6deg);
+        }
+        50% {
+          transform: rotate(-2.6deg);
+        }
+      }
+
+      .bubble {
+        transform-box: fill-box;
+        transform-origin: center;
+        opacity: 0;
+        animation: bubbleRise 6.2s ease-in infinite;
+      }
+
+      .bubble.b2 {
+        animation-delay: -1.1s;
+      }
+      .bubble.b3 {
+        animation-delay: -2.2s;
+      }
+      .bubble.b4 {
+        animation-delay: -3.4s;
+      }
+      .bubble.b5 {
+        animation-delay: -4.7s;
+      }
+
+      @keyframes bubbleRise {
+        0% {
+          transform: translateY(26px) scale(0.9);
+          opacity: 0;
+        }
+        10% {
+          opacity: 0.6;
+        }
+        70% {
+          opacity: 0.35;
+        }
+        100% {
+          transform: translateY(-110px) scale(1.12);
+          opacity: 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .waves,
+        .octo-swim,
+        .octo-bob,
+        .tentacle,
+        .bubble {
+          animation: none !important;
+        }
+
+        .octo-swim {
+          left: 50%;
+          transform: translate(-50%, -50%) !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="brand" aria-label="tako-bot">
+          <div class="brand-badge" aria-hidden="true"><span>🐙</span></div>
+          <div>
+            <div style="font-weight: 800; letter-spacing: -0.01em">tako-bot</div>
+            <div style="color: var(--muted-2); font-size: 13px">tiny XMTP hello bot</div>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Links">
+          <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
+          <a class="btn" href="#quickstart">Quickstart</a>
+          <a class="btn" href="#config">Config</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div class="card hero-copy">
+            <h1>Send a friendly XMTP “hi” from your server.</h1>
+            <p class="subtitle">
+              <b>tako-bot</b> is a tiny XMTP client that DMs an XMTP address (or ENS name) with a
+              simple message — perfect for “it’s alive” pings, backup-server check-ins, or a
+              lightweight notification hook.
+            </p>
+            <div class="chips" aria-label="Project highlights">
+              <span class="chip"><b>1 command</b> bootstrap</span>
+              <span class="chip"><b>ENS</b> supported</span>
+              <span class="chip"><b>Local</b> keys + DB</span>
+              <span class="chip"><b>Minimal</b> Python</span>
+            </div>
+            <div class="tag" role="note">Tako (たこ) = octopus. Thus: a very serious mascot.</div>
+          </div>
+
+          <figure class="card tank">
+            <div class="tank-viewport" aria-label="Animated octopus mascot">
+              <div class="octo-swim" aria-hidden="true">
+                <div class="octo-bob">
+                  <svg
+                    class="octo-svg"
+                    viewBox="0 0 360 260"
+                    xmlns="http://www.w3.org/2000/svg"
+                    role="img"
+                    aria-label="A cute animated octopus swimming"
+                  >
+                    <defs>
+                      <linearGradient id="octoGrad" x1="0" x2="1" y1="0" y2="1">
+                        <stop offset="0%" stop-color="#c4a4ff" />
+                        <stop offset="55%" stop-color="#8b5cf6" />
+                        <stop offset="100%" stop-color="#22d3ee" />
+                      </linearGradient>
+                      <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+                        <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.35" />
+                      </filter>
+                    </defs>
+
+                    <!-- bubbles -->
+                    <g fill="rgba(255,255,255,0.55)">
+                      <circle class="bubble b1" cx="260" cy="190" r="5" />
+                      <circle class="bubble b2" cx="290" cy="212" r="3.8" />
+                      <circle class="bubble b3" cx="310" cy="196" r="4.4" />
+                      <circle class="bubble b4" cx="236" cy="214" r="3.2" />
+                      <circle class="bubble b5" cx="280" cy="232" r="2.8" />
+                    </g>
+
+                    <g filter="url(#softShadow)">
+                      <!-- tentacles (stroke paths) -->
+                      <g
+                        fill="none"
+                        stroke="url(#octoGrad)"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="16"
+                        opacity="0.96"
+                      >
+                        <path class="tentacle t1" d="M125 150 C100 175, 96 205, 120 214 C145 224, 146 244, 116 246" />
+                        <path class="tentacle t2" d="M145 154 C128 182, 130 210, 156 220 C182 230, 190 250, 160 252" />
+                        <path class="tentacle t3" d="M165 156 C160 186, 168 212, 194 220 C220 228, 232 248, 204 252" />
+                        <path class="tentacle t4" d="M188 156 C196 186, 214 210, 242 214 C270 218, 282 240, 256 250" />
+                        <path class="tentacle t5" d="M115 142 C88 156, 72 176, 78 196 C84 216, 66 234, 46 226" />
+                        <path class="tentacle t6" d="M205 146 C236 160, 256 178, 252 200 C248 222, 270 238, 292 232" />
+                        <path class="tentacle t7" d="M135 144 C112 160, 102 176, 110 194 C118 212, 104 226, 90 218" />
+                        <path class="tentacle t8" d="M210 148 C234 166, 246 184, 238 202 C230 220, 244 232, 258 224" />
+                      </g>
+
+                      <!-- body -->
+                      <g>
+                        <path
+                          d="M180 44
+                             C132 44, 96 80, 96 124
+                             C96 154, 112 172, 132 176
+                             C140 178, 148 178, 156 176
+                             C166 174, 174 172, 180 172
+                             C186 172, 194 174, 204 176
+                             C212 178, 220 178, 228 176
+                             C248 172, 264 154, 264 124
+                             C264 80, 228 44, 180 44 Z"
+                          fill="url(#octoGrad)"
+                        />
+
+                        <path
+                          d="M124 92 C138 72, 162 60, 188 58 C210 56, 232 62, 246 76"
+                          fill="none"
+                          stroke="rgba(255,255,255,0.35)"
+                          stroke-width="10"
+                          stroke-linecap="round"
+                          opacity="0.55"
+                        />
+
+                        <!-- face -->
+                        <g>
+                          <circle cx="156" cy="112" r="16" fill="rgba(255,255,255,0.95)" />
+                          <circle cx="205" cy="112" r="16" fill="rgba(255,255,255,0.95)" />
+                          <circle cx="161" cy="116" r="7.5" fill="rgba(6,19,32,0.9)" />
+                          <circle cx="200" cy="116" r="7.5" fill="rgba(6,19,32,0.9)" />
+                          <circle cx="164" cy="114" r="2.2" fill="rgba(255,255,255,0.85)" />
+                          <circle cx="203" cy="114" r="2.2" fill="rgba(255,255,255,0.85)" />
+                          <path
+                            d="M168 136 C176 146, 184 146, 192 136"
+                            fill="none"
+                            stroke="rgba(6,19,32,0.75)"
+                            stroke-width="6"
+                            stroke-linecap="round"
+                          />
+                        </g>
+                      </g>
+
+                      <!-- little suckers -->
+                      <g fill="rgba(255,255,255,0.22)">
+                        <circle cx="126" cy="186" r="4" />
+                        <circle cx="146" cy="196" r="3.6" />
+                        <circle cx="170" cy="202" r="3.8" />
+                        <circle cx="196" cy="202" r="3.8" />
+                        <circle cx="220" cy="196" r="3.6" />
+                        <circle cx="238" cy="186" r="4" />
+                      </g>
+                    </g>
+                  </svg>
+                </div>
+              </div>
+              <div class="waves" aria-hidden="true"></div>
+            </div>
+            <figcaption class="tank-caption">
+              Tako swims by to deliver your message, then vanishes into the abyss (loops forever).
+            </figcaption>
+          </figure>
+        </section>
+
+        <section class="section-grid" id="quickstart">
+          <div class="card panel">
+            <h2>Quickstart</h2>
+            <p>
+              The simplest path is the helper script. It creates a local venv, installs deps, and
+              sends a DM:
+            </p>
+            <pre><code>./tako.sh deanpierce.eth
+./tako.sh deanpierce.eth "hi from the backup server"</code></pre>
+            <p>
+              Under the hood, it runs <code>tako.py</code> with <code>--to</code> and an optional
+              <code>--message</code>.
+            </p>
+          </div>
+
+          <div class="card panel">
+            <h2>Objectives</h2>
+            <ul>
+              <li>DM an XMTP address (or ENS) with a small “hello” message.</li>
+              <li>Make first-run setup frictionless and repeatable.</li>
+              <li>Keep config local and explicit (no hidden cloud state).</li>
+              <li>Provide practical failure hints for common networking/DB issues.</li>
+            </ul>
+            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
+              If you want a full bot framework, this probably isn’t it — this is the minimal,
+              single-purpose “can I message you from a box?” tool.
+            </p>
+          </div>
+        </section>
+
+        <section class="section-grid">
+          <div class="card panel">
+            <h2>What happens on first run</h2>
+            <ul>
+              <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
+              <li>Installs dependencies from <code>requirements.txt</code>.</li>
+              <li>
+                Installs the XMTP Python SDK (<code>xmtp</code>) — if it’s not available on PyPI,
+                it clones <code>xmtp-py</code> and installs from source.
+              </li>
+              <li>
+                Generates <code>.tako/config.json</code> with a wallet key and DB encryption key.
+              </li>
+              <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
+            </ul>
+          </div>
+
+          <div class="card panel" id="config">
+            <h2>Configuration</h2>
+            <p>
+              Most configuration is via environment variables. Keys are generated once and stored
+              locally, unless you override them.
+            </p>
+            <table class="table" aria-label="Environment variables">
+              <thead>
+                <tr>
+                  <th>Variable</th>
+                  <th>Purpose</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>XMTP_ENV</code></td>
+                  <td>XMTP environment (defaults to <code>production</code>).</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_API_URL</code></td>
+                  <td>Override the XMTP API endpoint.</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_HISTORY_SYNC_URL</code></td>
+                  <td>Override the history sync endpoint (set to <code>off</code> to disable).</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_GATEWAY_HOST</code></td>
+                  <td>Override the gateway host.</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_DISABLE_HISTORY_SYNC</code></td>
+                  <td>Set to <code>1</code> to disable history sync.</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_DISABLE_DEVICE_SYNC</code></td>
+                  <td>Set to <code>1</code> to disable the device sync worker.</td>
+                </tr>
+                <tr>
+                  <td><code>TAKO_ENABLE_DEVICE_SYNC</code></td>
+                  <td>Set to <code>1</code> to force-enable device sync (default is disabled).</td>
+                </tr>
+                <tr>
+                  <td><code>TAKO_RESET_DB</code></td>
+                  <td>Set to <code>1</code> to delete the local DB before starting.</td>
+                </tr>
+                <tr>
+                  <td><code>TAKO_ENS_RPC_URL</code></td>
+                  <td>ETH RPC endpoint used for ENS resolution.</td>
+                </tr>
+                <tr>
+                  <td><code>TAKO_ENS_RPC_URLS</code></td>
+                  <td>Comma-separated ETH RPC endpoints to try in order.</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_WALLET_KEY</code></td>
+                  <td>Override the generated wallet private key.</td>
+                </tr>
+                <tr>
+                  <td><code>XMTP_DB_ENCRYPTION_KEY</code></td>
+                  <td>Override the generated DB encryption key.</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
+              Note: treat <code>.tako/config.json</code> as sensitive. It contains keys.
+            </p>
+          </div>
+        </section>
+
+        <section class="section-grid">
+          <div class="card panel">
+            <h2>Operational notes</h2>
+            <ul>
+              <li>
+                XMTP requires outbound network access; if messaging fails, double-check your HTTPS /
+                HTTP2 egress and consider overriding endpoints.
+              </li>
+              <li>
+                If you see DB errors (e.g., “file is not a database”), delete <code>.tako/xmtp-db</code>
+                or set <code>TAKO_RESET_DB=1</code>.
+              </li>
+              <li>
+                ENS resolution tries configured RPC endpoints first and may fall back to a public
+                resolver if needed.
+              </li>
+            </ul>
+          </div>
+
+          <div class="card panel">
+            <h2>Links</h2>
+            <ul>
+              <li>
+                GitHub:
+                <a href="https://github.com/pierce403/tako-bot">github.com/pierce403/tako-bot</a>
+              </li>
+              <li>
+                Entrypoint script:
+                <code>tako.sh</code>
+              </li>
+              <li>
+                Core client:
+                <code>tako.py</code>
+              </li>
+            </ul>
+            <p style="margin-top: 12px">
+              Want this page hosted? Enable GitHub Pages and point it at the branch/folder that
+              contains <code>index.html</code>.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        Built to be tiny, friendly, and easy to deploy. If it breaks, add a note in <code>AGENTS.md</code>
+        so future-us suffers less.
+      </footer>
+    </div>
+  </body>
+</html>
+

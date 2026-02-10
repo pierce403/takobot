@@ -31,7 +31,7 @@ def hint_for_xmtp_error(error: Exception) -> str | None:
     return None
 
 
-async def send_dm(recipient: str, message: str, env: str, db_root: Path) -> None:
+async def create_client(env: str, db_root: Path) -> object:
     from xmtp import Client
     from xmtp.signers import create_signer
     from xmtp.types import ClientOptions
@@ -66,7 +66,11 @@ async def send_dm(recipient: str, message: str, env: str, db_root: Path) -> None
         db_path=db_path_for,
         db_encryption_key=os.environ.get("XMTP_DB_ENCRYPTION_KEY"),
     )
-    client = await Client.create(signer, options)
+    return await Client.create(signer, options)
+
+
+async def send_dm(recipient: str, message: str, env: str, db_root: Path) -> None:
+    client = await create_client(env, db_root)
     dm = await client.conversations.new_dm(recipient)
     await dm.send(message)
 

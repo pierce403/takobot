@@ -32,6 +32,8 @@ Daemon scaffold (operator imprint on first run):
 ./tako.sh run --operator deanpierce.eth
 ```
 
+Tako will DM the operator on startup; reply `help` for the current command set.
+
 Environment checks:
 
 ```bash

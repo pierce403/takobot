@@ -28,6 +28,7 @@ def imprint_operator(path: Path, operator_address: str) -> dict[str, Any]:
         raise RuntimeError("Operator address is required.")
     data: dict[str, Any] = {
         "operator_address": operator_address,
+        "operator_inbox_id": None,
         "paired_at": utc_now_iso(),
         "allowlisted_controller_commands": [
             "help",
@@ -38,3 +39,13 @@ def imprint_operator(path: Path, operator_address: str) -> dict[str, Any]:
     save_operator(path, data)
     return data
 
+
+def set_operator_inbox_id(path: Path, operator_inbox_id: str) -> None:
+    operator_inbox_id = operator_inbox_id.strip()
+    if not operator_inbox_id:
+        return
+    data = load_operator(path) or {}
+    if not isinstance(data, dict):
+        data = {}
+    data["operator_inbox_id"] = operator_inbox_id
+    save_operator(path, data)

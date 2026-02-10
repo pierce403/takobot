@@ -1,22 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import argparse
+import contextlib
 import os
 import random
 import sys
 import time
 from datetime import date
-from pathlib import Path
 
 from . import __version__
 from .daily import ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
 from .keys import apply_key_env_overrides, load_or_create_keys
-from .operator import imprint_operator, load_operator
+from .locks import instance_lock
+from .operator import imprint_operator, load_operator, set_operator_inbox_id
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .util import is_truthy
-from .xmtp import default_message, hint_for_xmtp_error, send_dm_sync
+from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
 
 
 DEFAULT_ENV = "production"
@@ -109,7 +111,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     paths = ensure_runtime_dirs(runtime_paths())
     root = repo_root()
 
+    env = args.env or os.environ.get("XMTP_ENV", DEFAULT_ENV)
+    lines, problems = _doctor_report(root, paths, env)
+    print("\n".join(lines))
+    if problems:
+        print("\nProblems:", file=sys.stderr)
+        for problem in problems:
+            print(f"- {problem}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
     problems: list[str] = []
+    operator = load_operator(paths.operator_json)
 
     try:
         panic_check_runtime_secrets(root, paths.root)
@@ -122,39 +137,35 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001
             problems.append(str(exc))
 
-    operator = load_operator(paths.operator_json)
+    lines = [
+        "tako doctor",
+        f"- repo: {root}",
+        f"- runtime: {paths.root} (ignored)",
+        f"- daily: {daily_root()} (committed)",
+        f"- env: {env}",
+        f"- keys: {'present' if paths.keys_json.exists() else 'missing'}",
+    ]
 
-    env = args.env or os.environ.get("XMTP_ENV", DEFAULT_ENV)
-
-    print("tako doctor")
-    print(f"- repo: {root}")
-    print(f"- runtime: {paths.root} (ignored)")
-    print(f"- daily: {daily_root()} (committed)")
-    print(f"- env: {env}")
-    print(f"- keys: {'present' if paths.keys_json.exists() else 'missing'}")
     if operator and isinstance(operator.get("operator_address"), str):
-        print(f"- operator: {operator['operator_address']}")
+        lines.append(f"- operator: {operator['operator_address']}")
     else:
-        print("- operator: not imprinted")
+        lines.append("- operator: not imprinted")
 
     try:
         import xmtp  # noqa: F401
-        print("- xmtp: import OK")
+
+        lines.append("- xmtp: import OK")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"xmtp import failed: {exc}")
 
     try:
         import web3  # noqa: F401
-        print("- web3: import OK")
+
+        lines.append("- web3: import OK")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"web3 import failed: {exc}")
 
-    if problems:
-        print("\nProblems:", file=sys.stderr)
-        for problem in problems:
-            print(f"- {problem}", file=sys.stderr)
-        return 1
-    return 0
+    return lines, problems
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -201,17 +212,56 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("Invalid operator config.", file=sys.stderr)
         return 2
 
+    try:
+        with instance_lock(paths.locks_dir / "tako.lock"):
+            return asyncio.run(_run_daemon(args, paths, operator_addr, env))
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+async def _run_daemon(
+    args: argparse.Namespace,
+    paths,
+    operator_addr: str,
+    env: str,
+) -> int:
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
 
-    # Minimal onboarding ping to the operator (safe, non-destructive).
     try:
-        send_dm_sync(
-            operator_addr,
-            f"tako online (env={env}). Reply 'help' for commands.\n\n(repo: {root.name})",
-            env,
-            paths.xmtp_db_dir,
-        )
+        client = await create_client(env, paths.xmtp_db_dir)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        print(f"XMTP client init failed: {exc}", file=sys.stderr)
+        hint = hint_for_xmtp_error(exc)
+        if hint:
+            print(hint, file=sys.stderr)
+        return 1
+
+    operator_inbox_id: str | None = None
+    if isinstance(load_operator(paths.operator_json), dict):
+        value = load_operator(paths.operator_json).get("operator_inbox_id")  # type: ignore[union-attr]
+        operator_inbox_id = value if isinstance(value, str) and value else None
+
+    if operator_inbox_id is None:
+        try:
+            from xmtp.identifiers import Identifier, IdentifierKind
+
+            identifier = Identifier(kind=IdentifierKind.ETHEREUM, value=operator_addr)
+            operator_inbox_id = client.get_inbox_id_by_identifier(identifier)
+            if operator_inbox_id:
+                set_operator_inbox_id(paths.operator_json, operator_inbox_id)
+        except Exception:
+            operator_inbox_id = None
+
+    # Onboarding ping to the operator (safe, non-destructive).
+    try:
+        dm = await client.conversations.new_dm(operator_addr)
+        await dm.send(f"tako online (env={env}). Reply 'help' for commands.\n\n(repo: {repo_root().name})")
     except Exception as exc:  # noqa: BLE001
         print(f"XMTP send failed: {exc}", file=sys.stderr)
         hint = hint_for_xmtp_error(exc)
@@ -219,20 +269,107 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(hint, file=sys.stderr)
         return 1
 
-    print("Heartbeat started (sensors/tools disabled by default). Press Ctrl+C to stop.")
+    if args.once:
+        return 0
 
-    first_tick = True
+    print("Daemon started. Press Ctrl+C to stop.")
+
+    start = time.monotonic()
+    heartbeat = asyncio.create_task(_heartbeat_loop(args))
+    stream = client.conversations.stream_all_messages()
+
     try:
-        while True:
-            if first_tick:
-                first_tick = False
-                ensure_daily_log(daily_root(), date.today())
-            if args.once:
-                return 0
-            interval = max(1.0, float(args.interval))
-            time.sleep(interval + random.uniform(-0.2 * interval, 0.2 * interval))
-    except KeyboardInterrupt:
-        return 130
+        async for item in stream:
+            if isinstance(item, Exception):
+                print(f"XMTP stream error: {item}", file=sys.stderr)
+                continue
+
+            sender = getattr(item, "sender_inbox_id", None)
+            if not isinstance(sender, str):
+                continue
+            if sender == client.inbox_id:
+                continue
+
+            content = getattr(item, "content", None)
+            if not isinstance(content, str):
+                continue
+            text = content.strip()
+            if not text:
+                continue
+
+            convo_id = getattr(item, "conversation_id", None)
+            if not isinstance(convo_id, (bytes, bytearray)):
+                continue
+
+            convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
+            if convo is None:
+                continue
+
+            if operator_inbox_id and sender != operator_inbox_id:
+                # Non-operator: only respond to obvious command attempts with a boundary.
+                lowered = text.lower()
+                if lowered.startswith(("help", "tako", "/")):
+                    await convo.send("Operator-only: I can chat, but config/tools/permissions/routines require the operator.")
+                continue
+
+            cmd, rest = _parse_command(text)
+            if cmd in {"help", "h", "?"}:
+                await convo.send(_help_text())
+                continue
+            if cmd == "status":
+                uptime = int(time.monotonic() - start)
+                await convo.send(f"status: ok\nenv: {env}\nuptime_s: {uptime}\nversion: {__version__}")
+                continue
+            if cmd == "doctor":
+                lines, problems = _doctor_report(repo_root(), paths, env)
+                report = "\n".join(lines)
+                if problems:
+                    report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
+                await convo.send(report)
+                continue
+
+            await convo.send("Unknown command. Reply 'help'.")
+    finally:
+        heartbeat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat
+        with contextlib.suppress(Exception):
+            await stream.close()
+
+    return 0
+
+
+async def _heartbeat_loop(args: argparse.Namespace) -> None:
+    first_tick = True
+    while True:
+        if first_tick:
+            first_tick = False
+            ensure_daily_log(daily_root(), date.today())
+        interval = max(1.0, float(args.interval))
+        await asyncio.sleep(interval + random.uniform(-0.2 * interval, 0.2 * interval))
+
+
+def _parse_command(text: str) -> tuple[str, str]:
+    value = text.strip()
+    if value.lower().startswith("tako "):
+        value = value[5:].lstrip()
+    if value.startswith("/"):
+        value = value[1:].lstrip()
+    if not value:
+        return "", ""
+    parts = value.split(maxsplit=1)
+    cmd = parts[0].lower()
+    rest = parts[1] if len(parts) > 1 else ""
+    return cmd, rest
+
+
+def _help_text() -> str:
+    return (
+        "tako commands:\n"
+        "- help\n"
+        "- status\n"
+        "- doctor\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

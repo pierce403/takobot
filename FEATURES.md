@@ -118,20 +118,20 @@
   - [x] Loader can discover at least one tool (`tools/memory_append/tool.py`).
 
 ### Multi-instance lock
-- **Stability**: planned
+- **Stability**: in-progress
 - **Description**: Prevent multiple `tako run` processes from using the same `.tako/` directory.
 - **Properties**:
-  - Uses a lock under `.tako/locks/`.
+  - Uses an exclusive lock at `.tako/locks/tako.lock` (platform requires `fcntl`).
 - **Test Criteria**:
   - [ ] Second instance fails fast with a clear error.
 
 ### Operator-only command authorization
-- **Stability**: planned
+- **Stability**: in-progress
 - **Description**: Enforce that only the operator can modify identity/config/tools/routines.
 - **Properties**:
   - Reject non-operator attempts to steer identity/config with a firm boundary.
 - **Test Criteria**:
-  - [ ] Non-operator “controller” commands are refused.
+  - [x] Non-operator “controller” commands are refused (basic boundary response for obvious command attempts).
 
 ### Tasks + calendar storage (markdown)
 - **Stability**: planned
@@ -164,4 +164,3 @@
   - Produces an `IMPORT_REPORT.md`.
 - **Test Criteria**:
   - [ ] Imports a sample layout without losing provenance.
-

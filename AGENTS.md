@@ -1,36 +1,50 @@
-# Agent Notes — tako-bot
+# AGENTS.md — Tako
 
-This repo is a tiny XMTP client that lets a server send a friendly DM (“hi”) to an XMTP address or ENS name.
+Tako is an **XMTP-native, operator-imprinted agent**: it can chat broadly, but only the operator can change its configuration, capabilities, tools, or routines.
 
-## Project Intent
+This file is the repo’s “how to work here” contract for humans and agents. Keep it short, concrete, and up to date.
 
-- Keep the core “send one DM” flow minimal and reliable.
-- Be easy to run on a fresh box (single `./tako.sh …` command).
-- Prefer clear, actionable errors over clever abstractions.
+## Repo Contract
 
-## Do Not Commit
+Root files (must exist):
 
-- `.tako/config.json` (contains a wallet private key + DB encryption key)
-- `.tako/xmtp-db/` and any `*.db3*` files
-- `.venv/`, caches, build outputs
+- `AGENTS.md` (this file)
+- `SOUL.md` (identity + boundaries; not memory)
+- `VISION.md` (1-page invariants)
+- `MEMORY.md` (canonical durable memory; long-lived facts only)
+- `ONBOARDING.md` (first wake checklist)
+- `FEATURES.md` (feature tracker + stability + test criteria)
+- `index.html` (project website)
 
-## Entrypoints
+Root directories (must exist):
 
-- `./tako.sh <xmtp_address_or_ens> [message]` (bootstraps venv + deps)
-- `python3 tako.py --to <xmtp_address_or_ens> [--message "..."]`
+- `tools/` (tool implementations + manifests)
+- `.tako/` (runtime only; never committed)
+- `daily/` (committed daily logs)
 
-## Repo Map
+## Safety Rules (non-negotiable)
 
-- `tako.py`: config management, ENS resolution, XMTP send
-- `tako.sh`: venv/bootstrap + optional install-from-source for `xmtp`
-- `.tako/`: local, ignored runtime state
+- **No secrets in git.** Never commit keys, tokens, or `.tako/**`.
+- **No encryption in the working directory.** Startup must be “secretless” (no external secrets required).
+- **Keys live unencrypted on disk** under `.tako/` with OS file permissions as the protection.
+- **Refuse unsafe states** (e.g., if a key file is tracked by git).
+
+## Operator Imprint (control plane)
+
+- Operator is the sole controller for: identity changes (`SOUL.md`), tool/sensor enablement, permission changes, routines, and configuration.
+- Non-operator chats may converse and suggest tasks, but must not cause risky actions without operator approval.
+- If a non-operator attempts to steer identity/config, respond with a firm “operator-only” boundary.
+
+## Multi-instance Safety
+
+- `tako run` must avoid running twice against the same `.tako/` state (use locks).
+- State that is not meant for git lives under `.tako/state/**` (ignored).
 
 ## Working Agreements
 
-- Commit and push on every meaningful update (keep changes small and easy to review).
-- Keep `index.html` in sync with current behavior, usage, and configuration.
-- Keep `FEATURES.md` in sync with reality (stability + test criteria) whenever features change.
-- When changing CLI flags or env vars, update `README.md`, `index.html`, and `FEATURES.md` together.
+- **Commit and push** on every meaningful repo update (keep commits small and reviewable).
+- Keep `index.html`, `README.md`, and `FEATURES.md` aligned with current behavior and entrypoints.
+- When changing CLI flags or env vars, update docs + website + feature tracker together.
 
 ## Lessons Learned (append-only)
 

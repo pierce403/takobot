@@ -9,12 +9,13 @@ import time
 from datetime import date
 
 from . import __version__
-from .daily import ensure_daily_log
+from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
-from .keys import load_or_create_keys
+from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
-from .operator import imprint_operator, load_operator, set_operator_inbox_id
+from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
+from .pairing import clear_pending, issue_pairing_code, load_pending, verify_pairing_code
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
 
@@ -28,20 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    hi = sub.add_parser("hi", help="Send a one-off DM (backwards compatible with the old script).")
+    hi = sub.add_parser("hi", help="(dev) Send a one-off DM.")
     hi.add_argument("--to", required=True, help="XMTP address or ENS name")
     hi.add_argument("--message", help="Custom message to send")
-    hi.add_argument("--env", help="(dev) XMTP environment")
-    hi.add_argument("--ens-rpc-url", help="(dev) Ethereum RPC URL(s) for ENS resolution (comma-separated)")
 
-    run = sub.add_parser("run", help="Run Tako daemon (heartbeat + operator control plane).")
-    run.add_argument("--operator", help="Operator address or ENS name (required on first run)")
-    run.add_argument("--env", help="(dev) XMTP environment")
-    run.add_argument("--interval", type=float, default=30.0, help="Heartbeat interval seconds (default: 30)")
-    run.add_argument("--once", action="store_true", help="Run a single heartbeat tick and exit")
+    run = sub.add_parser("run", help="Start Tako daemon (pairing + operator channel).")
+    run.add_argument("--interval", type=float, default=30.0, help="(dev) Heartbeat interval seconds")
+    run.add_argument("--once", action="store_true", help="(dev) Run a single tick and exit")
 
-    doctor = sub.add_parser("doctor", help="Check environment, config, and safety preconditions.")
-    doctor.add_argument("--env", help="(dev) XMTP environment")
+    doctor = sub.add_parser("doctor", help="(dev) Check environment, config, and safety preconditions.")
 
     return parser
 
@@ -171,38 +167,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     env = DEFAULT_ENV
 
-    operator_cfg = load_operator(paths.operator_json)
-    operator_input = (args.operator or "").strip()
-    if operator_cfg is None:
-        if not operator_input:
-            print("Operator not imprinted yet. Run: tako run --operator <addr|ens>", file=sys.stderr)
-            return 2
-        ens_rpc_urls = _ens_rpc_urls_from_args(None)
-        try:
-            operator_addr = resolve_recipient(operator_input, ens_rpc_urls)
-        except Exception as exc:  # noqa: BLE001
-            print(f"Error resolving operator: {exc}", file=sys.stderr)
-            return 2
-        operator_cfg = imprint_operator(paths.operator_json, operator_addr)
-        print(f"Imprinted operator: {operator_addr}")
-    else:
-        existing = operator_cfg.get("operator_address")
-        if operator_input and isinstance(existing, str) and operator_input != existing:
-            print(
-                "Operator is already imprinted; refusing to change operator without an explicit re-imprint flow.",
-                file=sys.stderr,
-            )
-            print(f"Existing operator: {existing}", file=sys.stderr)
-            return 2
-
-    operator_addr = operator_cfg.get("operator_address") if isinstance(operator_cfg, dict) else None
-    if not isinstance(operator_addr, str) or not operator_addr:
-        print("Invalid operator config.", file=sys.stderr)
-        return 2
+    address = derive_eth_address(wallet_key)
+    print(f"tako address: {address}")
+    print("status: starting daemon")
+    print("pairing: DM this address on XMTP to pair as operator")
 
     try:
         with instance_lock(paths.locks_dir / "tako.lock"):
-            return asyncio.run(_run_daemon(args, paths, operator_addr, env, wallet_key, db_encryption_key))
+            return asyncio.run(_run_daemon(args, paths, env, wallet_key, db_encryption_key, address))
     except KeyboardInterrupt:
         return 130
     except Exception as exc:  # noqa: BLE001
@@ -213,10 +185,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 async def _run_daemon(
     args: argparse.Namespace,
     paths,
-    operator_addr: str,
     env: str,
     wallet_key: str,
     db_encryption_key: str,
+    address: str,
 ) -> int:
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
@@ -232,33 +204,16 @@ async def _run_daemon(
             print(hint, file=sys.stderr)
         return 1
 
-    operator_inbox_id: str | None = None
-    if isinstance(load_operator(paths.operator_json), dict):
-        value = load_operator(paths.operator_json).get("operator_inbox_id")  # type: ignore[union-attr]
-        operator_inbox_id = value if isinstance(value, str) and value else None
+    operator_cfg = load_operator(paths.operator_json)
+    operator_inbox_id = get_operator_inbox_id(operator_cfg)
 
-    if operator_inbox_id is None:
-        try:
-            from xmtp.identifiers import Identifier, IdentifierKind
+    if operator_inbox_id:
+        clear_pending(paths.state_dir / "pairing.json")
+        print("status: paired")
+    else:
+        print("status: unpaired")
 
-            identifier = Identifier(kind=IdentifierKind.ETHEREUM, value=operator_addr)
-            operator_inbox_id = client.get_inbox_id_by_identifier(identifier)
-            if operator_inbox_id:
-                set_operator_inbox_id(paths.operator_json, operator_inbox_id)
-        except Exception:
-            operator_inbox_id = None
-
-    # Onboarding ping to the operator (safe, non-destructive).
-    try:
-        dm = await client.conversations.new_dm(operator_addr)
-        await dm.send(f"tako online (env={env}). Reply 'help' for commands.\n\n(repo: {repo_root().name})")
-    except Exception as exc:  # noqa: BLE001
-        print(f"XMTP send failed: {exc}", file=sys.stderr)
-        hint = hint_for_xmtp_error(exc)
-        if hint:
-            print(hint, file=sys.stderr)
-        return 1
-
+    print(f"inbox_id: {client.inbox_id}")
     if args.once:
         return 0
 
@@ -266,6 +221,7 @@ async def _run_daemon(
 
     start = time.monotonic()
     heartbeat = asyncio.create_task(_heartbeat_loop(args))
+    pairing_path = paths.state_dir / "pairing.json"
     stream = client.conversations.stream_all_messages()
 
     try:
@@ -274,10 +230,10 @@ async def _run_daemon(
                 print(f"XMTP stream error: {item}", file=sys.stderr)
                 continue
 
-            sender = getattr(item, "sender_inbox_id", None)
-            if not isinstance(sender, str):
+            sender_inbox_id = getattr(item, "sender_inbox_id", None)
+            if not isinstance(sender_inbox_id, str):
                 continue
-            if sender == client.inbox_id:
+            if sender_inbox_id == client.inbox_id:
                 continue
 
             content = getattr(item, "content", None)
@@ -295,11 +251,45 @@ async def _run_daemon(
             if convo is None:
                 continue
 
-            if operator_inbox_id and sender != operator_inbox_id:
-                # Non-operator: only respond to obvious command attempts with a boundary.
-                lowered = text.lower()
-                if lowered.startswith(("help", "tako", "/")):
-                    await convo.send("Operator-only: I can chat, but config/tools/permissions/routines require the operator.")
+            operator_cfg = load_operator(paths.operator_json)
+            operator_inbox_id = get_operator_inbox_id(operator_cfg)
+
+            if operator_inbox_id is None:
+                pending = load_pending(pairing_path)
+                if pending and pending.requested_by_inbox_id != sender_inbox_id:
+                    await convo.send("This Tako instance is currently pairing with someone else. Try again later.")
+                    continue
+
+                cmd, rest = _parse_command(text)
+                if cmd == "pair" and pending and pending.requested_by_inbox_id == sender_inbox_id:
+                    if verify_pairing_code(pairing_path, requested_by_inbox_id=sender_inbox_id, code=rest):
+                        imprint_operator(
+                            paths.operator_json,
+                            operator_inbox_id=sender_inbox_id,
+                            operator_address=None,
+                        )
+                        clear_pending(pairing_path)
+                        append_daily_note(daily_root(), date.today(), "Operator paired via XMTP challenge.")
+                        await convo.send("Paired. You are now the operator.\n\nReply 'help' for commands.")
+                    else:
+                        await convo.send("Pairing code incorrect or expired. Reply with `pair <code>` from my last message.")
+                    continue
+
+                if pending is None:
+                    pending = issue_pairing_code(pairing_path, requested_by_inbox_id=sender_inbox_id)
+                    append_daily_note(daily_root(), date.today(), "Pairing challenge issued (pending).")
+
+                mins = max(1, int((pending.expires_at - pending.requested_at).total_seconds() / 60))
+                await convo.send(
+                    "This Tako instance is unpaired.\n\n"
+                    f"To become the operator, reply: `pair {pending.code}` (expires in ~{mins} min).\n\n"
+                    f"tako address: {address}"
+                )
+                continue
+
+            if sender_inbox_id != operator_inbox_id:
+                if _looks_like_command(text):
+                    await convo.send("Operator-only: config/tools/permissions/routines require the operator.")
                 continue
 
             cmd, rest = _parse_command(text)
@@ -308,14 +298,34 @@ async def _run_daemon(
                 continue
             if cmd == "status":
                 uptime = int(time.monotonic() - start)
-                await convo.send(f"status: ok\nenv: {env}\nuptime_s: {uptime}\nversion: {__version__}")
+                await convo.send(
+                    "status: ok\n"
+                    f"paired: yes\n"
+                    f"env: {env}\n"
+                    f"uptime_s: {uptime}\n"
+                    f"version: {__version__}\n"
+                    f"tako_address: {address}"
+                )
                 continue
             if cmd == "doctor":
+                append_daily_note(daily_root(), date.today(), "Operator ran doctor.")
                 lines, problems = _doctor_report(repo_root(), paths, env)
                 report = "\n".join(lines)
                 if problems:
                     report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
                 await convo.send(report)
+                continue
+            if cmd == "reimprint":
+                if rest.strip().lower() != "confirm":
+                    await convo.send(
+                        "Re-imprint is operator-only and destructive.\n\n"
+                        "Reply: `reimprint CONFIRM` to clear the current operator and reopen pairing."
+                    )
+                    continue
+                clear_operator(paths.operator_json)
+                clear_pending(pairing_path)
+                append_daily_note(daily_root(), date.today(), "Operator cleared imprint (reimprint CONFIRM).")
+                await convo.send("Operator imprint cleared. The next DM will start pairing.")
                 continue
 
             await convo.send("Unknown command. Reply 'help'.")
@@ -359,7 +369,13 @@ def _help_text() -> str:
         "- help\n"
         "- status\n"
         "- doctor\n"
+        "- reimprint (operator-only)\n"
     )
+
+
+def _looks_like_command(text: str) -> bool:
+    value = text.strip().lower()
+    return value.startswith(("help", "status", "doctor", "tako", "/"))
 
 
 def main(argv: list[str] | None = None) -> int:

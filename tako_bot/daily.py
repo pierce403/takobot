@@ -28,3 +28,14 @@ def ensure_daily_log(daily_root: Path, day: date) -> Path:
     path.write_text(content, encoding="utf-8")
     return path
 
+
+def append_daily_note(daily_root: Path, day: date, note: str) -> Path:
+    path = ensure_daily_log(daily_root, day)
+    cleaned = " ".join(note.strip().split())
+    if not cleaned:
+        return path
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("\n- ")
+        handle.write(cleaned)
+        handle.write("\n")
+    return path

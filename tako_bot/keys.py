@@ -15,6 +15,12 @@ def generate_db_key() -> str:
     return "0x" + secrets.token_hex(32)
 
 
+def derive_eth_address(private_key: str) -> str:
+    from eth_account import Account
+
+    return Account.from_key(private_key).address
+
+
 def _chmod_600(path: Path) -> None:
     try:
         os.chmod(path, 0o600)

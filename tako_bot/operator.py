@@ -22,18 +22,33 @@ def save_operator(path: Path, data: dict[str, Any]) -> None:
         handle.write("\n")
 
 
-def imprint_operator(path: Path, operator_address: str) -> dict[str, Any]:
-    operator_address = operator_address.strip()
-    if not operator_address:
-        raise RuntimeError("Operator address is required.")
+def get_operator_inbox_id(data: dict[str, Any] | None) -> str | None:
+    if not data:
+        return None
+    value = data.get("operator_inbox_id")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def imprint_operator(
+    path: Path,
+    *,
+    operator_inbox_id: str,
+    operator_address: str | None = None,
+    pairing_method: str = "first_dm_challenge_v1",
+) -> dict[str, Any]:
+    operator_inbox_id = operator_inbox_id.strip()
+    if not operator_inbox_id:
+        raise RuntimeError("Operator inbox id is required.")
     data: dict[str, Any] = {
         "operator_address": operator_address,
-        "operator_inbox_id": None,
+        "operator_inbox_id": operator_inbox_id,
         "paired_at": utc_now_iso(),
+        "pairing_method": pairing_method,
         "allowlisted_controller_commands": [
             "help",
             "status",
             "doctor",
+            "reimprint",
         ],
     }
     save_operator(path, data)
@@ -49,3 +64,7 @@ def set_operator_inbox_id(path: Path, operator_inbox_id: str) -> None:
         data = {}
     data["operator_inbox_id"] = operator_inbox_id
     save_operator(path, data)
+
+
+def clear_operator(path: Path) -> None:
+    path.unlink(missing_ok=True)

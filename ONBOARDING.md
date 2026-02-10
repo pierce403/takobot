@@ -4,7 +4,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 ## Done When
 
-- [ ] `.tako/` runtime structure exists (`keys/`, `locks/`, `logs/`, `state/`, `xmtp-db/`).
+- [ ] `.tako/` runtime structure exists (`locks/`, `logs/`, `state/`, `xmtp-db/`) and `.tako/keys.json` exists.
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally.
 - [ ] Operator receives an onboarding completion summary over XMTP.
@@ -15,11 +15,11 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 1) **Initialize runtime dirs**
 
-- Create: `.tako/keys/`, `.tako/locks/`, `.tako/logs/`, `.tako/state/`, `.tako/xmtp-db/`.
+- Create: `.tako/locks/`, `.tako/logs/`, `.tako/state/`, `.tako/xmtp-db/`.
 
 2) **Generate/ensure XMTP keys (local, unencrypted)**
 
-- Create a local key file under `.tako/` with `0600` permissions (best-effort).
+- Create `.tako/keys.json` with `0600` permissions (best-effort).
 - Do not write keys anywhere outside `.tako/`.
 
 3) **Imprint the operator**
@@ -53,4 +53,3 @@ This is the “first wake” checklist for bringing up a new Tako instance.
   - enabled capabilities (should start minimal)
   - where state lives
   - how to run `doctor`
-

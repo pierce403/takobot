@@ -4,12 +4,67 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: ./tako.sh <xmtp_address_or_ens> [message]" >&2
+  cat >&2 <<'EOF'
+Usage:
+  ./tako.sh <xmtp_address_or_ens> [message]          # legacy (maps to: tako hi)
+  ./tako.sh hi <xmtp_address_or_ens> [message]       # explicit one-off DM
+  ./tako.sh run --operator <xmtp_address_or_ens>     # daemon / heartbeat
+  ./tako.sh doctor                                  # environment checks
+EOF
   exit 1
 fi
 
-TARGET="$1"
-MESSAGE="${2:-}"
+case "${1:-}" in
+  -h|--help|help)
+    cat <<'EOF'
+Usage:
+  ./tako.sh <xmtp_address_or_ens> [message]          # legacy (maps to: tako hi)
+  ./tako.sh hi <xmtp_address_or_ens> [message]       # explicit one-off DM
+  ./tako.sh run --operator <xmtp_address_or_ens>     # daemon / heartbeat
+  ./tako.sh doctor                                  # environment checks
+EOF
+    exit 0
+    ;;
+esac
+
+SUBCMD=""
+case "${1:-}" in
+  hi|run|doctor)
+    SUBCMD="$1"
+    shift
+    ;;
+esac
+
+TARGET=""
+MESSAGE=""
+ARGS=()
+
+if [[ -z "$SUBCMD" ]]; then
+  TARGET="$1"
+  MESSAGE="${2:-}"
+  ARGS=("hi" "--to" "$TARGET")
+  if [[ -n "$MESSAGE" ]]; then
+    ARGS+=("--message" "$MESSAGE")
+  fi
+else
+  if [[ "$SUBCMD" == "hi" ]]; then
+    if [[ $# -ge 1 && "${1:-}" != --* ]]; then
+      TARGET="$1"
+      shift
+      ARGS=("hi" "--to" "$TARGET")
+      if [[ $# -ge 1 && "${1:-}" != --* ]]; then
+        MESSAGE="$1"
+        shift
+        ARGS+=("--message" "$MESSAGE")
+      fi
+      ARGS+=("$@")
+    else
+      ARGS=("hi" "$@")
+    fi
+  else
+    ARGS=("$SUBCMD" "$@")
+  fi
+fi
 
 PYTHON="${PYTHON:-python3}"
 VENV="$ROOT/.venv"
@@ -98,9 +153,4 @@ then
   fi
 fi
 
-args=("--to" "$TARGET")
-if [[ -n "$MESSAGE" ]]; then
-  args+=("--message" "$MESSAGE")
-fi
-
-exec python "$ROOT/tako.py" "${args[@]}"
+exec python -m tako_bot "${ARGS[@]}"

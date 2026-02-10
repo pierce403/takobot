@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="tako-bot is a tiny XMTP client that lets a server send a friendly DM (“hi”) to an XMTP address or ENS name."
+      content="Tako is an XMTP-native, operator-imprinted agent. This repo includes a one-off DM sender plus a daemon scaffold, with docs-first invariants and safety rules."
     />
-    <title>tako-bot — tiny XMTP hello bot</title>
+    <title>tako-bot — XMTP-native operator-imprinted agent</title>
     <style>
       :root {
         color-scheme: dark;
@@ -504,34 +504,34 @@
           <div class="brand-badge" aria-hidden="true"><span>🐙</span></div>
           <div>
             <div style="font-weight: 800; letter-spacing: -0.01em">tako-bot</div>
-            <div style="color: var(--muted-2); font-size: 13px">tiny XMTP hello bot</div>
+            <div style="color: var(--muted-2); font-size: 13px">operator-imprinted XMTP agent</div>
           </div>
         </div>
-	        <nav class="nav" aria-label="Links">
-	          <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
-	          <a class="btn" href="#quickstart">Quickstart</a>
-	          <a class="btn" href="#features">Features</a>
-	          <a class="btn" href="#config">Config</a>
-	        </nav>
-	      </header>
+        <nav class="nav" aria-label="Links">
+          <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
+          <a class="btn" href="#quickstart">Quickstart</a>
+          <a class="btn" href="#features">Features</a>
+          <a class="btn" href="#config">Config</a>
+        </nav>
+      </header>
 
       <main>
-        <section class="hero">
-          <div class="card hero-copy">
-            <h1>Send a friendly XMTP “hi” from your server.</h1>
-            <p class="subtitle">
-              <b>tako-bot</b> is a tiny XMTP client that DMs an XMTP address (or ENS name) with a
-              simple message — perfect for “it’s alive” pings, backup-server check-ins, or a
-              lightweight notification hook.
-            </p>
-            <div class="chips" aria-label="Project highlights">
-              <span class="chip"><b>1 command</b> bootstrap</span>
-              <span class="chip"><b>ENS</b> supported</span>
-              <span class="chip"><b>Local</b> keys + DB</span>
-              <span class="chip"><b>Minimal</b> Python</span>
+          <section class="hero">
+            <div class="card hero-copy">
+              <h1>An XMTP-native octopus agent, imprinted to you.</h1>
+              <p class="subtitle">
+                <b>tako-bot</b> is building toward a safe, <b>operator-imprinted</b> assistant that uses
+                <b>XMTP as the control plane</b>. It can chat broadly, but only the operator can change
+                identity, tools, permissions, and routines.
+              </p>
+              <div class="chips" aria-label="Project highlights">
+                <span class="chip"><b>Operator</b> imprint</span>
+                <span class="chip"><b>XMTP</b> control plane</span>
+                <span class="chip"><b>Docs</b> first</span>
+                <span class="chip"><b>Tools/Sensors</b> opt-in</span>
+              </div>
+              <div class="tag" role="note">Tako (たこ) = octopus. Thus: a very serious mascot.</div>
             </div>
-            <div class="tag" role="note">Tako (たこ) = octopus. Thus: a very serious mascot.</div>
-          </div>
 
           <figure class="card tank">
             <div class="tank-viewport" aria-label="Animated octopus mascot">
@@ -647,66 +647,66 @@
           </figure>
         </section>
 
-	        <section class="section-grid" id="quickstart">
-	          <div class="card panel">
-	            <h2>Quickstart</h2>
+        <section class="section-grid" id="quickstart">
+          <div class="card panel">
+            <h2>Quickstart</h2>
             <p>
-              The simplest path is the helper script. It creates a local venv, installs deps, and
-              sends a DM:
+              Use the helper script. It creates a local venv, installs deps, and runs the CLI:
             </p>
-            <pre><code>./tako.sh deanpierce.eth
-./tako.sh deanpierce.eth "hi from the backup server"</code></pre>
-            <p>
-              Under the hood, it runs <code>tako.py</code> with <code>--to</code> and an optional
-              <code>--message</code>.
+            <pre><code>./tako.sh hi deanpierce.eth
+./tako.sh hi deanpierce.eth "hi from the backup server"
+
+./tako.sh run --operator deanpierce.eth
+./tako.sh doctor</code></pre>
+            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
+              Legacy form still works: <code>./tako.sh deanpierce.eth "optional message"</code>.
             </p>
           </div>
 
           <div class="card panel">
             <h2>Objectives</h2>
             <ul>
-              <li>DM an XMTP address (or ENS) with a small “hello” message.</li>
-              <li>Make first-run setup frictionless and repeatable.</li>
-              <li>Keep config local and explicit (no hidden cloud state).</li>
-              <li>Provide practical failure hints for common networking/DB issues.</li>
+              <li><b>Operator imprint</b>: only the operator can change identity, tools, permissions, and routines.</li>
+              <li><b>XMTP control plane</b>: commands + status flow through XMTP.</li>
+              <li><b>Multi-instance safety</b>: locks prevent shared-state corruption.</li>
+              <li><b>Git-first docs</b>: SOUL/VISION/MEMORY/FEATURES stay authoritative.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              If you want a full bot framework, this probably isn’t it — this is the minimal,
-              single-purpose “can I message you from a box?” tool.
+              The current build still includes a tiny one-off DM sender — the long-term direction is a safe, extensible agent.
             </p>
-	          </div>
-	        </section>
+          </div>
+        </section>
 
-	        <section class="section-grid" id="features">
-	          <div class="card panel">
-	            <h2>Features</h2>
-	            <ul>
-	              <li><b>One-command bootstrap</b>: <code>./tako.sh …</code> sets up a venv and runs the client.</li>
-	              <li><b>Address + ENS</b>: send to <code>0x…</code> or resolve <code>.eth</code> names.</li>
-	              <li><b>Local keys + DB</b>: config in <code>.tako/config.json</code>, DBs in <code>.tako/xmtp-db/</code>.</li>
-	              <li><b>Ops knobs</b>: endpoint overrides + sync toggles via environment variables.</li>
-	            </ul>
-	            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-	              The canonical spec lives in <code>FEATURES.md</code> (with stability + test criteria).
-	            </p>
-	          </div>
+          <section class="section-grid" id="features">
+            <div class="card panel">
+            <h2>Features</h2>
+            <ul>
+              <li><b>Docs-first</b>: <code>SOUL.md</code>, <code>VISION.md</code>, <code>MEMORY.md</code>, <code>FEATURES.md</code>.</li>
+              <li><b>Operator imprint</b>: controller-only changes to identity, tools, and permissions.</li>
+              <li><b>One-off DM</b>: <code>tako hi</code> sends to <code>0x…</code> or resolves <code>.eth</code>.</li>
+              <li><b>State hygiene</b>: runtime in <code>.tako/</code>; daily logs in <code>daily/</code>.</li>
+            </ul>
+              <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
+                The canonical spec lives in <code>FEATURES.md</code> (with stability + test criteria).
+              </p>
+            </div>
 
-	          <div class="card panel">
-	            <h2>Feature tracker</h2>
-	            <p>
-	              This repo keeps a living <code>FEATURES.md</code> file (inspired by
-	              <a href="https://features.md">features.md</a>) so humans and agents can see what’s stable,
-	              in-progress, or planned.
-	            </p>
-	            <p style="margin-top: 12px">
-	              <a class="btn" href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">Open FEATURES.md on GitHub</a>
-	            </p>
-	          </div>
-	        </section>
+            <div class="card panel">
+              <h2>Feature tracker</h2>
+              <p>
+                This repo keeps a living <code>FEATURES.md</code> file (inspired by
+                <a href="https://features.md">features.md</a>) so humans and agents can see what’s stable,
+                in-progress, or planned.
+              </p>
+              <p style="margin-top: 12px">
+                <a class="btn" href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">Open FEATURES.md on GitHub</a>
+              </p>
+            </div>
+          </section>
 
-	        <section class="section-grid">
-	          <div class="card panel">
-	            <h2>What happens on first run</h2>
+          <section class="section-grid">
+            <div class="card panel">
+              <h2>What happens on first run</h2>
             <ul>
               <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
               <li>Installs dependencies from <code>requirements.txt</code>.</li>
@@ -715,9 +715,10 @@
                 it clones <code>xmtp-py</code> and installs from source.
               </li>
               <li>
-                Generates <code>.tako/config.json</code> with a wallet key and DB encryption key.
+                Generates <code>.tako/keys.json</code> with a wallet key and DB encryption key (unencrypted; file-perms only).
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
+              <li>On first <code>tako run --operator …</code>, stores the operator imprint in <code>.tako/operator.json</code>.</li>
             </ul>
           </div>
 
@@ -786,7 +787,7 @@
               </tbody>
             </table>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              Note: treat <code>.tako/config.json</code> as sensitive. It contains keys.
+              Note: treat <code>.tako/keys.json</code> as sensitive (and never commit anything under <code>.tako/</code>).
             </p>
           </div>
         </section>
@@ -810,24 +811,32 @@
             </ul>
           </div>
 
-	          <div class="card panel">
-	            <h2>Links</h2>
-	            <ul>
-	              <li>
-	                GitHub:
-	                <a href="https://github.com/pierce403/tako-bot">github.com/pierce403/tako-bot</a>
-	              </li>
-	              <li>
-	                Features:
-	                <a href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">FEATURES.md</a>
-	              </li>
-	              <li>
-	                Entrypoint script:
-	                <code>tako.sh</code>
-	              </li>
+          <div class="card panel">
+            <h2>Links</h2>
+            <ul>
               <li>
-                Core client:
-                <code>tako.py</code>
+                GitHub:
+                <a href="https://github.com/pierce403/tako-bot">github.com/pierce403/tako-bot</a>
+              </li>
+              <li>
+                Docs:
+                <a href="https://github.com/pierce403/tako-bot/blob/main/AGENTS.md">AGENTS</a>,
+                <a href="https://github.com/pierce403/tako-bot/blob/main/SOUL.md">SOUL</a>,
+                <a href="https://github.com/pierce403/tako-bot/blob/main/VISION.md">VISION</a>,
+                <a href="https://github.com/pierce403/tako-bot/blob/main/MEMORY.md">MEMORY</a>,
+                <a href="https://github.com/pierce403/tako-bot/blob/main/ONBOARDING.md">ONBOARDING</a>
+              </li>
+              <li>
+                Features:
+                <a href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">FEATURES.md</a>
+              </li>
+              <li>
+                Entrypoint:
+                <code>tako.sh</code> (bootstrap)
+              </li>
+              <li>
+                CLI:
+                <code>./tako</code> or <code>python -m tako_bot</code>
               </li>
             </ul>
             <p style="margin-top: 12px">
@@ -839,8 +848,8 @@
       </main>
 
       <footer>
-        Built to be tiny, friendly, and easy to deploy. If it breaks, add a note in <code>AGENTS.md</code>
-        so future-us suffers less.
+        Built to be safe, operator-imprinted, and git-first. If it breaks, add a note in <code>AGENTS.md</code>
+        (and a short entry in <code>daily/</code>) so future-us suffers less.
       </footer>
     </div>
   </body>

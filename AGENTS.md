@@ -56,8 +56,14 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-10 — Keys live in `.tako/keys.json` (not committed)
+
+- What happened: early versions wrote keys to `.tako/config.json`; the new contract uses `.tako/keys.json`.
+- Fix: migrate legacy `.tako/config.json` → `.tako/keys.json` and add safety checks to refuse tracked `.tako/**`.
+- Prevention: treat `.tako/keys.json` as sensitive and keep `.tako/` ignored by git.
+
 ### 2026-02-10 — Keep local XMTP DBs out of git
 
 - What happened: local `*.db3` files were easy to accidentally leave in the repo root.
 - Fix: ignore `*.db3`, `*.db3-wal`, and `*.db3-shm`.
-- Prevention: treat all local XMTP DB artifacts and `.tako/config.json` as sensitive runtime state.
+- Prevention: treat all local XMTP DB artifacts and `.tako/keys.json` (and legacy `.tako/config.json`) as sensitive runtime state.

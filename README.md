@@ -1,6 +1,10 @@
 # tako-bot
 
-A tiny XMTP client that lets a server say hi to an XMTP address or ENS name.
+Tako is an **XMTP-native, operator-imprinted agent**. Today, this repo includes:
+
+- A one-off “hi” sender (address or ENS)
+- A `run` daemon scaffold (heartbeat + operator control plane)
+- Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs
 
@@ -10,22 +14,59 @@ A tiny XMTP client that lets a server say hi to an XMTP address or ENS name.
 
 ## Quickstart
 
+One-off DM:
+
 ```bash
-./tako.sh deanpierce.eth
+./tako.sh hi deanpierce.eth
 ```
 
 You can optionally pass a custom message as the second argument:
 
 ```bash
-./tako.sh deanpierce.eth "hi from the backup server"
+./tako.sh hi deanpierce.eth "hi from the backup server"
 ```
+
+Daemon scaffold (operator imprint on first run):
+
+```bash
+./tako.sh run --operator deanpierce.eth
+```
+
+Environment checks:
+
+```bash
+./tako.sh doctor
+```
+
+Backwards compatible legacy form (maps to `tako hi`):
+
+```bash
+./tako.sh deanpierce.eth "optional message"
+```
+
+## Architecture (minimal)
+
+Committed (git-tracked):
+
+- `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`
+- `FEATURES.md` (feature tracker)
+- `daily/YYYY-MM-DD.md` (daily logs)
+- `tools/` (tool implementations)
+
+Runtime-only (ignored):
+
+- `.tako/keys.json` (XMTP wallet key + DB encryption key; unencrypted, file perms only)
+- `.tako/operator.json` (operator imprint metadata)
+- `.tako/xmtp-db/` (local XMTP DB)
+- `.tako/state/**` (runtime state: heartbeat/cognition/etc)
+- `.venv/` (virtualenv)
 
 ## What happens on first run
 
 - Creates a local Python virtual environment in `.venv/`.
 - Installs dependencies from `requirements.txt`.
 - Installs the XMTP Python SDK (`xmtp`). If it is not yet on PyPI, it clones `xmtp-py` and installs from source.
-- Generates a local config at `.tako/config.json` with a wallet key and DB encryption key.
+- Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
 
 ## Configuration

@@ -22,8 +22,8 @@ def ensure_daily_log(daily_root: Path, day: date) -> Path:
         "- \n\n"
         "## Decisions\n\n"
         "- \n\n"
-        "## Promote to MEMORY.md (if durable)\n\n"
-        "- [ ] Promote long-lived decisions into `MEMORY.md`.\n"
+        "## Promote to memory/MEMORY.md (if durable)\n\n"
+        "- [ ] Promote long-lived decisions into `memory/MEMORY.md`.\n"
     )
     path.write_text(content, encoding="utf-8")
     return path

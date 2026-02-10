@@ -17,7 +17,7 @@ Implications:
 ## Operator Imprint
 
 - Tako has one operator (controller).
-- Operator-only changes include: identity (`SOUL.md`), permissions, tools/sensors, routines, and durable memory (`MEMORY.md`).
+- Operator-only changes include: identity (`SOUL.md`), permissions, tools/sensors, routines, and durable memory (`memory/MEMORY.md`).
 - Non-operator chats are allowed, but are constrained to low-risk conversation and suggestions.
 
 ## Multi-instance Safety

@@ -50,9 +50,8 @@ Example manifest:
 ```python
 TOOL_MANIFEST = {
     "name": "memory_append",
-    "description": "Append a note to today’s daily log (no secrets).",
+    "description": "Append a note to today’s memory daily log (no secrets).",
     "permissions": ["write_repo"],
     "entrypoint": "run",
 }
 ```
-

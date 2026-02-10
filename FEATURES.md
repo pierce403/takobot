@@ -6,7 +6,8 @@
 - **Stability**: stable
 - **Description**: The repo documents identity, invariants, onboarding, and durable memory as first-class artifacts.
 - **Properties**:
-  - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`.
+  - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `ONBOARDING.md`.
+  - Memory docs live under `memory/` with canonical `memory/MEMORY.md`.
   - Feature state is tracked in `FEATURES.md`.
   - Website copy lives in `index.html`.
 - **Test Criteria**:
@@ -110,14 +111,14 @@
   - [x] `tako run` starts unpaired and waits for inbound DMs to begin pairing.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
 
-### Daily logs (`daily/YYYY-MM-DD.md`)
+### Daily logs (`memory/dailies/YYYY-MM-DD.md`)
 - **Stability**: in-progress
-- **Description**: OpenClaw-style daily logs are committed under `daily/`, while runtime state stays under `.tako/`.
+- **Description**: OpenClaw-style daily logs are committed under `memory/dailies/`, while runtime state stays under `.tako/`.
 - **Properties**:
   - `tako run` ensures today’s daily log exists.
   - Daily log templates warn against secrets.
 - **Test Criteria**:
-  - [x] Running `tako run` creates `daily/YYYY-MM-DD.md` if missing.
+  - [x] Running `tako run` creates `memory/dailies/YYYY-MM-DD.md` if missing.
 
 ### Tool discovery (`tools/*/tool.py`)
 - **Stability**: in-progress
@@ -170,7 +171,7 @@
 
 ### “Eat the crab” importer
 - **Stability**: planned
-- **Description**: Import OpenClaw-style layouts into the new contract (SOUL/MEMORY/daily/tools).
+- **Description**: Import OpenClaw-style layouts into the new contract (SOUL/memory/tools).
 - **Properties**:
   - Produces an `IMPORT_REPORT.md`.
 - **Test Criteria**:

@@ -4,7 +4,7 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 
 - An always-on daemon that pairs an operator in-chat over XMTP
 - A small command router over the operator channel (`help`, `status`, `doctor`, …)
-- Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
+- Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs
 
@@ -31,9 +31,10 @@ Pairing flow (XMTP operator channel is the only control plane):
 
 Committed (git-tracked):
 
-- `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`
+- `SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`
 - `FEATURES.md` (feature tracker)
-- `daily/YYYY-MM-DD.md` (daily logs)
+- `memory/dailies/YYYY-MM-DD.md` (daily logs)
+- `memory/people/`, `memory/places/`, `memory/things/` (world notes)
 - `tools/` (tool implementations)
 
 Runtime-only (ignored):
@@ -57,7 +58,7 @@ Runtime-only (ignored):
 
 There is **no user-facing configuration via environment variables or CLI flags**.
 
-Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
+Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `memory/MEMORY.md`, etc).
 
 ## Developer utilities (optional)
 

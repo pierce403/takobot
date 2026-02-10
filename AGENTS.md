@@ -6,12 +6,12 @@ This file is the repo’s “how to work here” contract for humans and agents.
 
 ## Repo Contract
 
-Root files (must exist):
+Required files (must exist):
 
 - `AGENTS.md` (this file)
 - `SOUL.md` (identity + boundaries; not memory)
 - `VISION.md` (1-page invariants)
-- `MEMORY.md` (canonical durable memory; long-lived facts only)
+- `memory/MEMORY.md` (canonical durable memory; long-lived facts only)
 - `ONBOARDING.md` (first wake checklist)
 - `FEATURES.md` (feature tracker + stability + test criteria)
 - `index.html` (project website)
@@ -19,8 +19,8 @@ Root files (must exist):
 Root directories (must exist):
 
 - `tools/` (tool implementations + manifests)
+- `memory/` (committed memory tree: `MEMORY.md`, `dailies/`, `people/`, `places/`, `things/`)
 - `.tako/` (runtime only; never committed)
-- `daily/` (committed daily logs)
 
 ## Safety Rules (non-negotiable)
 
@@ -56,6 +56,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-10 — Memory tree moved under `memory/`
+
+- What happened: daily logs and canonical memory were spread between root `MEMORY.md` and `daily/`.
+- Fix: moved to `memory/MEMORY.md` + `memory/dailies/` with dedicated `people/`, `places/`, and `things/` note spaces.
+- Prevention: keep memory strategy and directory purpose documented in `memory/README.md` and per-directory README files.
 
 ### 2026-02-10 — Keys live in `.tako/keys.json` (not committed)
 

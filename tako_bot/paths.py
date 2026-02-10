@@ -12,8 +12,12 @@ def runtime_root() -> Path:
     return repo_root() / ".tako"
 
 
+def memory_root() -> Path:
+    return repo_root() / "memory"
+
+
 def daily_root() -> Path:
-    return repo_root() / "daily"
+    return memory_root() / "dailies"
 
 
 @dataclass(frozen=True)
@@ -48,4 +52,3 @@ def ensure_runtime_dirs(paths: RuntimePaths | None = None) -> RuntimePaths:
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     paths.xmtp_db_dir.mkdir(parents=True, exist_ok=True)
     return paths
-

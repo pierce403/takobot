@@ -127,7 +127,7 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
         "tako doctor",
         f"- repo: {root}",
         f"- runtime: {paths.root} (ignored)",
-        f"- daily: {daily_root()} (committed)",
+        f"- memory dailies: {daily_root()} (committed)",
         f"- env: {env}",
         f"- keys: {'present' if paths.keys_json.exists() else 'missing'}",
     ]

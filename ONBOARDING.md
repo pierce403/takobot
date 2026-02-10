@@ -8,8 +8,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally.
 - [ ] Operator receives a pairing completion message over XMTP.
-- [ ] `daily/YYYY-MM-DD.md` exists for today.
-- [ ] `SOUL.md`, `MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
+- [ ] `memory/dailies/YYYY-MM-DD.md` exists for today.
+- [ ] `SOUL.md`, `memory/MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
 
 ## Steps
 
@@ -39,7 +39,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 5) **Initialize today’s daily log**
 
-- Ensure `daily/YYYY-MM-DD.md` exists.
+- Ensure `memory/dailies/YYYY-MM-DD.md` exists.
 - Never log secrets; summarize actions and decisions.
 
 6) **Start heartbeat (safe by default)**

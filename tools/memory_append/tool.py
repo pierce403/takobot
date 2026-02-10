@@ -7,7 +7,7 @@ from tako_bot.paths import daily_root
 
 TOOL_MANIFEST = {
     "name": "memory_append",
-    "description": "Append a note to today’s daily log (no secrets).",
+    "description": "Append a note to today’s memory daily log (no secrets).",
     "permissions": ["write_repo"],
     "entrypoint": "run",
 }
@@ -25,4 +25,3 @@ def run(input: dict, ctx: dict) -> dict:
         handle.write("\n")
 
     return {"ok": True, "daily_log": str(path)}
-

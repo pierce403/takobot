@@ -28,6 +28,7 @@ Root directories (must exist):
 - **No encryption in the working directory.** Startup must be “secretless” (no external secrets required).
 - **Keys live unencrypted on disk** under `.tako/` with OS file permissions as the protection.
 - **Refuse unsafe states** (e.g., if a key file is tracked by git).
+- **XMTP Operator Channel is the ONLY control plane.** No user-facing configuration via CLI flags or environment variables.
 
 ## Operator Imprint (control plane)
 
@@ -37,14 +38,14 @@ Root directories (must exist):
 
 ## Multi-instance Safety
 
-- `tako run` must avoid running twice against the same `.tako/` state (use locks).
+- `tako start` must avoid running twice against the same `.tako/` state (use locks).
 - State that is not meant for git lives under `.tako/state/**` (ignored).
 
 ## Working Agreements
 
 - **Commit and push** on every meaningful repo update (keep commits small and reviewable).
 - Keep `index.html`, `README.md`, and `FEATURES.md` aligned with current behavior and entrypoints.
-- When changing CLI flags or env vars, update docs + website + feature tracker together.
+- When changing behavior, update docs + website + feature tracker together.
 
 ## Lessons Learned (append-only)
 

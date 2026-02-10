@@ -16,13 +16,13 @@ Rules:
 
 ## Stable Decisions
 
-- XMTP is the control plane for operator commands and status.
+- XMTP is the **only** control plane for operator commands and status.
 - Operator imprint: only the operator may change identity, tools, permissions, or routines.
 - No “encrypted vaults” in the working directory; startup must not require external secrets.
+- No user-facing configuration via environment variables or CLI flags (CLI starts the daemon only).
 - Runtime state lives under `.tako/` (ignored); daily logs live under `daily/` (committed).
 
 ## Long-lived Facts
 
 - Project website is served from `index.html` and the repo includes `CNAME` for `tako.bot`.
 - Repository: `pierce403/tako-bot` on GitHub.
-

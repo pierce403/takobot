@@ -4,10 +4,15 @@ These invariants should remain true as the implementation evolves.
 
 ## XMTP Control Plane
 
-- XMTP is the primary control plane for:
+- XMTP is the **only** control plane for:
   - Operator commands
   - Status and health reporting
   - Onboarding / imprint handshake
+
+Implications:
+
+- No user-facing configuration via environment variables.
+- No operator setup via CLI flags (CLI starts the daemon only).
 
 ## Operator Imprint
 
@@ -37,4 +42,3 @@ These invariants should remain true as the implementation evolves.
 - The repo is the source of truth for docs and trackers.
 - Do not store encrypted blobs or secret vaults in the working directory.
 - Keys needed for runtime may exist unencrypted under `.tako/` with OS permissions as protection, and must be ignored by git.
-

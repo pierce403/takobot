@@ -1,6 +1,6 @@
 # AGENTS.md — Tako
 
-Tako is an **XMTP-native, operator-imprinted agent**: it can chat broadly, but only the operator can change its configuration, capabilities, tools, or routines.
+Tako is a **highly autonomous, operator-imprinted agent**: it can chat broadly, but only the operator can change its configuration, capabilities, tools, or routines.
 
 This file is the repo’s “how to work here” contract for humans and agents. Keep it short, concrete, and up to date.
 

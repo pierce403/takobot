@@ -88,6 +88,17 @@
 - **Test Criteria**:
   - [ ] Operator can change XMTP settings over XMTP and the daemon applies them safely.
 
+### Farcaster integration (operator-managed)
+- **Stability**: planned
+- **Description**: Add Farcaster ingress/egress without bypassing operator-imprint safety rules.
+- **Properties**:
+  - Enable/disable and policy changes are operator-only.
+  - Runtime integration state lives under `.tako/state/` and is never committed.
+  - Non-operator traffic cannot mutate identity/config/tools/routines.
+- **Test Criteria**:
+  - [ ] Operator can enable or disable Farcaster integration safely.
+  - [ ] Farcaster messages are handled without bypassing operator authorization boundaries.
+
 ### Operator imprint (`.tako/operator.json`)
 - **Stability**: in-progress
 - **Description**: Tako stores a single operator (controller) imprinted over XMTP and refuses silent reassignment.

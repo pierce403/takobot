@@ -1,6 +1,6 @@
 # tako-bot
 
-Tako is an **XMTP-native, operator-imprinted agent**. Today, this repo includes:
+Tako is a **highly autonomous, operator-imprinted agent** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - An always-on daemon that pairs an operator in-chat over XMTP
 - A small command router over the operator channel (`help`, `status`, `doctor`, …)

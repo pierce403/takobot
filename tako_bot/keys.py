@@ -61,12 +61,3 @@ def load_or_create_keys(keys_path: Path, legacy_config_path: Path | None = None)
     db_key = generate_db_key()
     _write_json(keys_path, {"wallet_key": wallet_key, "db_encryption_key": db_key})
     return {"wallet_key": wallet_key, "db_encryption_key": db_key}
-
-
-def apply_key_env_overrides(keys: dict[str, str]) -> dict[str, str]:
-    wallet_key = os.environ.get("XMTP_WALLET_KEY") or keys["wallet_key"]
-    db_key = os.environ.get("XMTP_DB_ENCRYPTION_KEY") or keys["db_encryption_key"]
-    os.environ.setdefault("XMTP_WALLET_KEY", wallet_key)
-    os.environ.setdefault("XMTP_DB_ENCRYPTION_KEY", db_key)
-    return {"wallet_key": wallet_key, "db_encryption_key": db_key}
-

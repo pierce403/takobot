@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import socket
 from pathlib import Path
-
-from .util import is_truthy, parse_history_sync
 
 
 def default_message() -> str:
@@ -19,61 +16,66 @@ def hint_for_xmtp_error(error: Exception) -> str | None:
         return (
             "Tip: check outbound HTTPS/HTTP2 access to "
             "grpc.production.xmtp.network:443 and "
-            "message-history.production.ephemera.network, "
-            "or override XMTP_API_URL/XMTP_HISTORY_SYNC_URL."
+            "message-history.production.ephemera.network."
         )
     if "file is not a database" in message or "sqlcipher" in message:
         return (
             "Tip: the local XMTP database appears corrupted or was created with a "
             "different encryption key. Remove .tako/xmtp-db or set "
-            "TAKO_RESET_DB=1 to recreate it."
+            "a fresh runtime directory to recreate it."
         )
     return None
 
 
-async def create_client(env: str, db_root: Path) -> object:
+async def create_client(env: str, db_root: Path, wallet_key: str, db_encryption_key: str) -> object:
     from xmtp import Client
     from xmtp.signers import create_signer
     from xmtp.types import ClientOptions
 
-    signer = create_signer(os.environ["XMTP_WALLET_KEY"])
+    signer = create_signer(wallet_key)
 
     def db_path_for(inbox_id: str) -> str:
         return str(db_root / f"xmtp-{env}-{inbox_id}.db3")
 
-    api_url = os.environ.get("XMTP_API_URL")
-    history_sync_url = os.environ.get("XMTP_HISTORY_SYNC_URL")
-    gateway_host = os.environ.get("XMTP_GATEWAY_HOST")
-    disable_history_sync_from_url, normalized_history_sync_url = parse_history_sync(history_sync_url)
-    disable_history_sync = is_truthy(os.environ.get("XMTP_DISABLE_HISTORY_SYNC"))
-    disable_history_sync = disable_history_sync or disable_history_sync_from_url
-    if disable_history_sync:
-        normalized_history_sync_url = None
-
+    # Contract: no user-facing env-var configuration. Defaults are intentionally fixed for now.
+    api_url = None
+    history_sync_url = None
+    gateway_host = None
+    disable_history_sync = False
     disable_device_sync = True
-    if "XMTP_DISABLE_DEVICE_SYNC" in os.environ:
-        disable_device_sync = is_truthy(os.environ.get("XMTP_DISABLE_DEVICE_SYNC"))
-    elif "TAKO_ENABLE_DEVICE_SYNC" in os.environ:
-        disable_device_sync = not is_truthy(os.environ.get("TAKO_ENABLE_DEVICE_SYNC"))
 
     options = ClientOptions(
         env=env,
         api_url=api_url,
-        history_sync_url=normalized_history_sync_url,
+        history_sync_url=history_sync_url,
         gateway_host=gateway_host,
         disable_history_sync=disable_history_sync,
         disable_device_sync=disable_device_sync,
         db_path=db_path_for,
-        db_encryption_key=os.environ.get("XMTP_DB_ENCRYPTION_KEY"),
+        db_encryption_key=db_encryption_key,
     )
     return await Client.create(signer, options)
 
 
-async def send_dm(recipient: str, message: str, env: str, db_root: Path) -> None:
-    client = await create_client(env, db_root)
+async def send_dm(
+    recipient: str,
+    message: str,
+    env: str,
+    db_root: Path,
+    wallet_key: str,
+    db_encryption_key: str,
+) -> None:
+    client = await create_client(env, db_root, wallet_key, db_encryption_key)
     dm = await client.conversations.new_dm(recipient)
     await dm.send(message)
 
 
-def send_dm_sync(recipient: str, message: str, env: str, db_root: Path) -> None:
-    asyncio.run(send_dm(recipient, message, env, db_root))
+def send_dm_sync(
+    recipient: str,
+    message: str,
+    env: str,
+    db_root: Path,
+    wallet_key: str,
+    db_encryption_key: str,
+) -> None:
+    asyncio.run(send_dm(recipient, message, env, db_root, wallet_key, db_encryption_key))

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import argparse
 import contextlib
-import os
 import random
 import sys
 import time
@@ -13,11 +12,10 @@ from . import __version__
 from .daily import ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
-from .keys import apply_key_env_overrides, load_or_create_keys
+from .keys import load_or_create_keys
 from .locks import instance_lock
 from .operator import imprint_operator, load_operator, set_operator_inbox_id
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
-from .util import is_truthy
 from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
 
 
@@ -33,17 +31,17 @@ def build_parser() -> argparse.ArgumentParser:
     hi = sub.add_parser("hi", help="Send a one-off DM (backwards compatible with the old script).")
     hi.add_argument("--to", required=True, help="XMTP address or ENS name")
     hi.add_argument("--message", help="Custom message to send")
-    hi.add_argument("--env", help="XMTP environment (overrides XMTP_ENV)")
-    hi.add_argument("--ens-rpc-url", help="Ethereum RPC URL(s) for ENS resolution (comma-separated)")
+    hi.add_argument("--env", help="(dev) XMTP environment")
+    hi.add_argument("--ens-rpc-url", help="(dev) Ethereum RPC URL(s) for ENS resolution (comma-separated)")
 
     run = sub.add_parser("run", help="Run Tako daemon (heartbeat + operator control plane).")
     run.add_argument("--operator", help="Operator address or ENS name (required on first run)")
-    run.add_argument("--env", help="XMTP environment (overrides XMTP_ENV)")
+    run.add_argument("--env", help="(dev) XMTP environment")
     run.add_argument("--interval", type=float, default=30.0, help="Heartbeat interval seconds (default: 30)")
     run.add_argument("--once", action="store_true", help="Run a single heartbeat tick and exit")
 
     doctor = sub.add_parser("doctor", help="Check environment, config, and safety preconditions.")
-    doctor.add_argument("--env", help="XMTP environment (overrides XMTP_ENV)")
+    doctor.add_argument("--env", help="(dev) XMTP environment")
 
     return parser
 
@@ -63,22 +61,14 @@ def cmd_hi(args: argparse.Namespace) -> int:
     assert_not_tracked(repo_root(), paths.keys_json)
 
     keys = load_or_create_keys(paths.keys_json, legacy_config_path=paths.root / "config.json")
-    apply_key_env_overrides(keys)
+    wallet_key = keys["wallet_key"]
+    db_encryption_key = keys["db_encryption_key"]
 
-    env = args.env or os.environ.get("XMTP_ENV", DEFAULT_ENV)
-    os.environ.setdefault("XMTP_ENV", env)
+    env = DEFAULT_ENV
 
-    ens_rpc_urls = _ens_rpc_urls_from_args(args.ens_rpc_url or os.environ.get("TAKO_ENS_RPC_URLS") or os.environ.get("TAKO_ENS_RPC_URL"))
+    ens_rpc_urls = _ens_rpc_urls_from_args(None)
 
     db_root = paths.xmtp_db_dir
-    if is_truthy(os.environ.get("TAKO_RESET_DB")) and db_root.exists():
-        for item in db_root.iterdir():
-            if item.is_dir():
-                for child in item.iterdir():
-                    child.unlink(missing_ok=True)
-                item.rmdir()
-            else:
-                item.unlink(missing_ok=True)
     db_root.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -90,7 +80,7 @@ def cmd_hi(args: argparse.Namespace) -> int:
     message = args.message or default_message()
 
     try:
-        send_dm_sync(resolved, message, env, db_root)
+        send_dm_sync(resolved, message, env, db_root, wallet_key, db_encryption_key)
     except KeyboardInterrupt:
         return 130
     except Exception as exc:  # noqa: BLE001
@@ -111,7 +101,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     paths = ensure_runtime_dirs(runtime_paths())
     root = repo_root()
 
-    env = args.env or os.environ.get("XMTP_ENV", DEFAULT_ENV)
+    env = DEFAULT_ENV
     lines, problems = _doctor_report(root, paths, env)
     print("\n".join(lines))
     if problems:
@@ -176,10 +166,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     assert_not_tracked(root, paths.keys_json)
 
     keys = load_or_create_keys(paths.keys_json, legacy_config_path=paths.root / "config.json")
-    apply_key_env_overrides(keys)
+    wallet_key = keys["wallet_key"]
+    db_encryption_key = keys["db_encryption_key"]
 
-    env = args.env or os.environ.get("XMTP_ENV", DEFAULT_ENV)
-    os.environ.setdefault("XMTP_ENV", env)
+    env = DEFAULT_ENV
 
     operator_cfg = load_operator(paths.operator_json)
     operator_input = (args.operator or "").strip()
@@ -187,9 +177,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         if not operator_input:
             print("Operator not imprinted yet. Run: tako run --operator <addr|ens>", file=sys.stderr)
             return 2
-        ens_rpc_urls = _ens_rpc_urls_from_args(
-            os.environ.get("TAKO_ENS_RPC_URLS") or os.environ.get("TAKO_ENS_RPC_URL")
-        )
+        ens_rpc_urls = _ens_rpc_urls_from_args(None)
         try:
             operator_addr = resolve_recipient(operator_input, ens_rpc_urls)
         except Exception as exc:  # noqa: BLE001
@@ -214,7 +202,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     try:
         with instance_lock(paths.locks_dir / "tako.lock"):
-            return asyncio.run(_run_daemon(args, paths, operator_addr, env))
+            return asyncio.run(_run_daemon(args, paths, operator_addr, env, wallet_key, db_encryption_key))
     except KeyboardInterrupt:
         return 130
     except Exception as exc:  # noqa: BLE001
@@ -227,12 +215,14 @@ async def _run_daemon(
     paths,
     operator_addr: str,
     env: str,
+    wallet_key: str,
+    db_encryption_key: str,
 ) -> int:
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
 
     try:
-        client = await create_client(env, paths.xmtp_db_dir)
+        client = await create_client(env, paths.xmtp_db_dir, wallet_key, db_encryption_key)
     except KeyboardInterrupt:
         raise
     except Exception as exc:  # noqa: BLE001

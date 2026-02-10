@@ -139,7 +139,7 @@ PY
   python -m pip install -e "$src_dir/sdks/python-sdk"
 }
 
-if ! python - <<'PY' >/dev/null 2>&1
+if [[ "${ARGS[0]}" != "doctor" ]] && ! python - <<'PY' >/dev/null 2>&1
 import importlib.util
 import sys
 

@@ -264,32 +264,24 @@
       .octo-swim {
         position: absolute;
         top: 52%;
-        left: 0;
+        left: 50%;
         width: min(380px, 82%);
-        transform: translate(-120%, -50%);
-        animation: swimAcross 16s linear infinite;
-        pointer-events: none;
-        will-change: transform;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: filter 0.16s ease;
+        will-change: left, top, transform, filter;
+      }
+
+      .octo-swim:focus-visible {
+        outline: 2px solid rgba(34, 211, 238, 0.85);
+        outline-offset: 5px;
       }
 
       .octo-bob {
         animation: bob 2.8s ease-in-out infinite;
         will-change: transform;
-      }
-
-      @keyframes swimAcross {
-        0% {
-          transform: translate(-125%, -50%) rotate(0deg);
-        }
-        45% {
-          transform: translate(8%, -54%) rotate(2deg);
-        }
-        50% {
-          transform: translate(18%, -50%) rotate(0deg);
-        }
-        100% {
-          transform: translate(140%, -52%) rotate(-1deg);
-        }
       }
 
       @keyframes bob {
@@ -300,6 +292,18 @@
         50% {
           transform: translateY(-10px) rotate(-1deg);
         }
+      }
+
+      .tank-viewport.panic .octo-swim {
+        filter: drop-shadow(0 8px 18px rgba(34, 211, 238, 0.45));
+      }
+
+      .tank-viewport.panic .octo-bob {
+        animation-duration: 1.2s;
+      }
+
+      .tank-viewport.panic .tentacle {
+        animation-duration: 0.95s;
       }
 
       .tank-caption {
@@ -491,7 +495,6 @@
 
       @media (prefers-reduced-motion: reduce) {
         .waves,
-        .octo-swim,
         .octo-bob,
         .tentacle,
         .bubble {
@@ -499,8 +502,10 @@
         }
 
         .octo-swim {
+          top: 52%;
           left: 50%;
           transform: translate(-50%, -50%) !important;
+          transition: none;
         }
       }
     </style>
@@ -545,7 +550,7 @@
 
           <figure class="card tank">
             <div class="tank-viewport" aria-label="Animated octopus mascot">
-              <div class="octo-swim" aria-hidden="true">
+              <div class="octo-swim" role="button" tabindex="0" aria-label="Poke Tako to make it swim around">
                 <div class="octo-bob">
                   <svg
                     class="octo-svg"
@@ -652,7 +657,7 @@
               <div class="waves" aria-hidden="true"></div>
             </div>
             <figcaption class="tank-caption">
-              Tako swims by to deliver your message, then vanishes into the abyss (loops forever).
+              Poke Tako and it startles, then swims around the tank.
             </figcaption>
           </figure>
         </section>
@@ -810,5 +815,190 @@
         (and a short entry in <code>memory/dailies/</code>) so future-us suffers less.
       </footer>
     </div>
+    <script>
+      (() => {
+        const viewport = document.querySelector(".tank-viewport");
+        const octo = viewport?.querySelector(".octo-swim");
+        if (!viewport || !octo) return;
+
+        const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+        let reduceMotion = motionQuery.matches;
+        let panicTimer = 0;
+
+        const state = {
+          x: 0,
+          y: 0,
+          vx: 0,
+          vy: 0,
+          targetX: 0,
+          targetY: 0,
+          flip: 1,
+          panicUntil: 0,
+          lastFrame: 0,
+        };
+
+        function clamp(value, min, max) {
+          return Math.min(max, Math.max(min, value));
+        }
+
+        function random(min, max) {
+          return min + Math.random() * (max - min);
+        }
+
+        function limits() {
+          const tank = viewport.getBoundingClientRect();
+          const body = octo.getBoundingClientRect();
+          const padX = Math.min(24, tank.width * 0.05);
+          const padY = Math.min(22, tank.height * 0.06);
+          return {
+            minX: body.width / 2 + padX,
+            maxX: tank.width - body.width / 2 - padX,
+            minY: body.height / 2 + padY,
+            maxY: tank.height - body.height / 2 - padY,
+          };
+        }
+
+        function render(tilt) {
+          octo.style.left = `${state.x}px`;
+          octo.style.top = `${state.y}px`;
+          octo.style.transform = `translate(-50%, -50%) scaleX(${state.flip}) rotate(${tilt.toFixed(2)}deg)`;
+        }
+
+        function pickTarget() {
+          const lim = limits();
+          state.targetX = random(lim.minX, lim.maxX);
+          state.targetY = random(lim.minY, lim.maxY);
+        }
+
+        function panicBurst(clientX, clientY) {
+          if (reduceMotion) return;
+          const tank = viewport.getBoundingClientRect();
+          const px = clientX - tank.left;
+          const py = clientY - tank.top;
+          const dx = state.x - px;
+          const dy = state.y - py;
+          const dist = Math.hypot(dx, dy) || 1;
+          const impulse = 240 + Math.random() * 140;
+          state.vx += (dx / dist) * impulse;
+          state.vy += (dy / dist) * impulse;
+          state.panicUntil = performance.now() + 2200;
+          viewport.classList.add("panic");
+          window.clearTimeout(panicTimer);
+          panicTimer = window.setTimeout(() => viewport.classList.remove("panic"), 2300);
+          pickTarget();
+        }
+
+        octo.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          panicBurst(event.clientX, event.clientY);
+        });
+
+        octo.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          const rect = octo.getBoundingClientRect();
+          panicBurst(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        });
+
+        function tick(now) {
+          if (!state.lastFrame) state.lastFrame = now;
+          const dt = Math.min(0.05, (now - state.lastFrame) / 1000);
+          state.lastFrame = now;
+
+          if (!reduceMotion) {
+            const lim = limits();
+            const panic = now < state.panicUntil;
+            const pull = panic ? 0.92 : 0.5;
+            state.vx += (state.targetX - state.x) * pull * dt;
+            state.vy += (state.targetY - state.y) * pull * dt;
+
+            const drag = panic ? 0.992 : 0.978;
+            const damp = Math.pow(drag, dt * 60);
+            state.vx *= damp;
+            state.vy *= damp;
+
+            const maxSpeed = panic ? 360 : 155;
+            const speed = Math.hypot(state.vx, state.vy);
+            if (speed > maxSpeed) {
+              const ratio = maxSpeed / speed;
+              state.vx *= ratio;
+              state.vy *= ratio;
+            }
+
+            state.x += state.vx * dt;
+            state.y += state.vy * dt;
+
+            if (state.x < lim.minX) {
+              state.x = lim.minX;
+              state.vx = Math.abs(state.vx) * 0.7;
+            } else if (state.x > lim.maxX) {
+              state.x = lim.maxX;
+              state.vx = -Math.abs(state.vx) * 0.7;
+            }
+
+            if (state.y < lim.minY) {
+              state.y = lim.minY;
+              state.vy = Math.abs(state.vy) * 0.7;
+            } else if (state.y > lim.maxY) {
+              state.y = lim.maxY;
+              state.vy = -Math.abs(state.vy) * 0.7;
+            }
+
+            if (Math.abs(state.vx) > 8) {
+              state.flip = state.vx >= 0 ? 1 : -1;
+            }
+
+            const closeToTarget = Math.hypot(state.targetX - state.x, state.targetY - state.y) < 26;
+            if (closeToTarget || Math.random() < (panic ? 0.002 : 0.0008)) {
+              pickTarget();
+            }
+          }
+
+          const tilt = clamp(state.vx * 0.035 + state.vy * 0.02, -10, 10);
+          render(tilt);
+          requestAnimationFrame(tick);
+        }
+
+        function initPosition() {
+          const tank = viewport.getBoundingClientRect();
+          const body = octo.getBoundingClientRect();
+          state.x = body.left - tank.left + body.width / 2;
+          state.y = body.top - tank.top + body.height / 2;
+          const lim = limits();
+          state.x = clamp(state.x, lim.minX, lim.maxX);
+          state.y = clamp(state.y, lim.minY, lim.maxY);
+          pickTarget();
+          render(0);
+        }
+
+        function onResize() {
+          const lim = limits();
+          state.x = clamp(state.x, lim.minX, lim.maxX);
+          state.y = clamp(state.y, lim.minY, lim.maxY);
+          pickTarget();
+          render(0);
+        }
+
+        if (typeof motionQuery.addEventListener === "function") {
+          motionQuery.addEventListener("change", (event) => {
+            reduceMotion = event.matches;
+            if (reduceMotion) {
+              viewport.classList.remove("panic");
+              state.vx = 0;
+              state.vy = 0;
+            } else {
+              pickTarget();
+            }
+          });
+        }
+
+        window.addEventListener("resize", onResize);
+
+        requestAnimationFrame(() => {
+          initPosition();
+          requestAnimationFrame(tick);
+        });
+      })();
+    </script>
   </body>
 </html>

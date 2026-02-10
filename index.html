@@ -651,15 +651,15 @@
           <div class="card panel">
             <h2>Quickstart</h2>
             <p>
-              Use the helper script. It creates a local venv, installs deps, and runs the CLI:
+              Use the helper script. It creates a local venv, installs deps, and starts the daemon:
             </p>
-            <pre><code>./tako.sh hi deanpierce.eth
-./tako.sh hi deanpierce.eth "hi from the backup server"
+            <pre><code>./tako.sh
 
-./tako.sh run --operator deanpierce.eth
-./tako.sh doctor</code></pre>
+# DM the printed "tako address" over XMTP
+# Reply with: pair &lt;code&gt;
+# Then: help / status / doctor</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              Legacy form still works: <code>./tako.sh deanpierce.eth "optional message"</code>.
+              Developer utilities: <code>./tako.sh doctor</code> and <code>./tako.sh hi &lt;to&gt; ["message"]</code>.
             </p>
           </div>
 
@@ -718,74 +718,21 @@
                 Generates <code>.tako/keys.json</code> with a wallet key and DB encryption key (unencrypted; file-perms only).
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
-              <li>On first <code>tako run --operator …</code>, stores the operator imprint in <code>.tako/operator.json</code>.</li>
+              <li>Waits for the first inbound DM to initiate pairing; stores the operator imprint in <code>.tako/operator.json</code>.</li>
             </ul>
           </div>
 
           <div class="card panel" id="config">
-            <h2>Configuration</h2>
+            <h2>Control plane</h2>
             <p>
-              Most configuration is via environment variables. Keys are generated once and stored
-              locally, unless you override them.
+              The operator XMTP channel is the <b>only</b> control plane.
+              There is no user-facing configuration via environment variables or CLI flags.
             </p>
-            <table class="table" aria-label="Environment variables">
-              <thead>
-                <tr>
-                  <th>Variable</th>
-                  <th>Purpose</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>XMTP_ENV</code></td>
-                  <td>XMTP environment (defaults to <code>production</code>).</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_API_URL</code></td>
-                  <td>Override the XMTP API endpoint.</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_HISTORY_SYNC_URL</code></td>
-                  <td>Override the history sync endpoint (set to <code>off</code> to disable).</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_GATEWAY_HOST</code></td>
-                  <td>Override the gateway host.</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_DISABLE_HISTORY_SYNC</code></td>
-                  <td>Set to <code>1</code> to disable history sync.</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_DISABLE_DEVICE_SYNC</code></td>
-                  <td>Set to <code>1</code> to disable the device sync worker.</td>
-                </tr>
-                <tr>
-                  <td><code>TAKO_ENABLE_DEVICE_SYNC</code></td>
-                  <td>Set to <code>1</code> to force-enable device sync (default is disabled).</td>
-                </tr>
-                <tr>
-                  <td><code>TAKO_RESET_DB</code></td>
-                  <td>Set to <code>1</code> to delete the local DB before starting.</td>
-                </tr>
-                <tr>
-                  <td><code>TAKO_ENS_RPC_URL</code></td>
-                  <td>ETH RPC endpoint used for ENS resolution.</td>
-                </tr>
-                <tr>
-                  <td><code>TAKO_ENS_RPC_URLS</code></td>
-                  <td>Comma-separated ETH RPC endpoints to try in order.</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_WALLET_KEY</code></td>
-                  <td>Override the generated wallet private key.</td>
-                </tr>
-                <tr>
-                  <td><code>XMTP_DB_ENCRYPTION_KEY</code></td>
-                  <td>Override the generated DB encryption key.</td>
-                </tr>
-              </tbody>
-            </table>
+            <ul>
+              <li>Pairing is a challenge/response over XMTP: <code>pair &lt;code&gt;</code>.</li>
+              <li>After pairing, operator commands include: <code>help</code>, <code>status</code>, <code>doctor</code>, <code>reimprint</code>.</li>
+              <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
+            </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Note: treat <code>.tako/keys.json</code> as sensitive (and never commit anything under <code>.tako/</code>).
             </p>
@@ -798,11 +745,11 @@
             <ul>
               <li>
                 XMTP requires outbound network access; if messaging fails, double-check your HTTPS /
-                HTTP2 egress and consider overriding endpoints.
+                HTTP2 egress.
               </li>
               <li>
                 If you see DB errors (e.g., “file is not a database”), delete <code>.tako/xmtp-db</code>
-                or set <code>TAKO_RESET_DB=1</code>.
+                (or delete <code>.tako/</code>) to force a clean rebuild.
               </li>
               <li>
                 ENS resolution tries configured RPC endpoints first and may fall back to a public

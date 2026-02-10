@@ -7,7 +7,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] `.tako/` runtime structure exists (`locks/`, `logs/`, `state/`, `xmtp-db/`) and `.tako/keys.json` exists.
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally.
-- [ ] Operator receives an onboarding completion summary over XMTP.
+- [ ] Operator receives a pairing completion message over XMTP.
 - [ ] `daily/YYYY-MM-DD.md` exists for today.
 - [ ] `SOUL.md`, `MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
 
@@ -24,17 +24,18 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 3) **Imprint the operator**
 
-- Start Tako with `tako run --operator <addr|ens>`.
-- Resolve ENS to an address if needed.
-- Store operator metadata in `.tako/operator.json`:
-  - operator address (or inbox id if used later)
-  - paired timestamp
-  - allowlisted controller commands (initially minimal)
+- Start the daemon (no operator flags, no env-var configuration):
+  - `./tako.sh` (recommended)
+  - or `python -m tako_bot run`
+- Tako prints a `tako address` on stdout. DM that address from the account you want as operator.
+- Tako replies with a pairing challenge; reply with `pair <code>` to complete pairing.
+- Store operator metadata in `.tako/operator.json` (runtime-only; ignored by git).
 
 4) **Pairing / handshake**
 
-- Message the operator first over XMTP.
-- Require operator confirmation before enabling any risky capabilities (tools, sensors, networked actions beyond baseline messaging).
+- Pairing happens in-chat over XMTP (challenge/response).
+- The first successful pairing becomes the operator imprint.
+- Re-imprinting requires an explicit operator command over XMTP (never via CLI flags).
 
 5) **Initialize today’s daily log**
 
@@ -48,8 +49,9 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 7) **Emit completion summary**
 
-- Send a short onboarding summary to the operator over XMTP:
-  - operator identity
-  - enabled capabilities (should start minimal)
-  - where state lives
-  - how to run `doctor`
+- After pairing, the operator can request status via XMTP commands:
+  - `help`, `status`, `doctor`
+
+Notes:
+
+- **No env vars, no CLI configuration** in the standard flow. Management is via the operator XMTP channel.

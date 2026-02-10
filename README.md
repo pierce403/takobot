@@ -2,8 +2,8 @@
 
 Tako is an **XMTP-native, operator-imprinted agent**. Today, this repo includes:
 
-- A one-off “hi” sender (address or ENS)
-- A `run` daemon scaffold (heartbeat + operator control plane)
+- An always-on daemon that pairs an operator in-chat over XMTP
+- A small command router over the operator channel (`help`, `status`, `doctor`, …)
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs
@@ -14,37 +14,18 @@ Tako is an **XMTP-native, operator-imprinted agent**. Today, this repo includes:
 
 ## Quickstart
 
-One-off DM:
+Start the daemon (prints a `tako address` you can DM):
 
 ```bash
-./tako.sh hi deanpierce.eth
+./tako.sh
 ```
 
-You can optionally pass a custom message as the second argument:
+Pairing flow (XMTP operator channel is the only control plane):
 
-```bash
-./tako.sh hi deanpierce.eth "hi from the backup server"
-```
-
-Daemon scaffold (operator imprint on first run):
-
-```bash
-./tako.sh run --operator deanpierce.eth
-```
-
-Tako will DM the operator on startup; reply `help` for the current command set.
-
-Environment checks:
-
-```bash
-./tako.sh doctor
-```
-
-Backwards compatible legacy form (maps to `tako hi`):
-
-```bash
-./tako.sh deanpierce.eth "optional message"
-```
+- DM the printed `tako address` from the account you want as operator.
+- Tako replies with a pairing challenge.
+- Reply with `pair <code>` to imprint as the operator.
+- After pairing, reply `help` for commands.
 
 ## Architecture (minimal)
 
@@ -70,20 +51,18 @@ Runtime-only (ignored):
 - Installs the XMTP Python SDK (`xmtp`). If it is not yet on PyPI, it clones `xmtp-py` and installs from source.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
+- Starts listening on XMTP and waits for the first inbound DM to initiate pairing.
 
 ## Configuration
 
-Environment variables:
+There is **no user-facing configuration via environment variables or CLI flags**.
 
-- `XMTP_ENV`: Set the XMTP environment (defaults to `production`).
-- `XMTP_API_URL`, `XMTP_HISTORY_SYNC_URL`, `XMTP_GATEWAY_HOST`: Override XMTP endpoints.
-- `XMTP_DISABLE_HISTORY_SYNC=1`: Disable history sync (uses primary API for identity calls).
-- `XMTP_DISABLE_DEVICE_SYNC=1`: Disable the device sync worker (default is disabled).
-- `TAKO_ENABLE_DEVICE_SYNC=1`: Force-enable device sync if you want it.
-- `TAKO_RESET_DB=1`: Delete the local XMTP database before starting (useful if the DB is corrupted or encrypted with a different key).
-- `TAKO_ENS_RPC_URL`: Ethereum RPC endpoint used for ENS name resolution (defaults to `https://ethereum.publicnode.com`).
-- `TAKO_ENS_RPC_URLS`: Comma-separated list of RPC endpoints to try in order for ENS resolution.
-- `XMTP_WALLET_KEY` and `XMTP_DB_ENCRYPTION_KEY`: Override the generated keys if you manage them externally.
+Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
+
+## Developer utilities (optional)
+
+- Local checks: `./tako.sh doctor`
+- One-off DM send: `./tako.sh hi <xmtp_address_or_ens> ["message"]`
 
 ## Notes
 

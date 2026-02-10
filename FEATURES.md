@@ -14,24 +14,26 @@
 
 ### One-command runner (`tako.sh`)
 - **Stability**: stable
-- **Description**: Bootstraps a local Python environment and runs the Tako CLI.
+- **Description**: Bootstraps a local Python environment and starts the daemon.
 - **Properties**:
   - Creates a virtualenv at `.venv/` if missing.
   - Installs dependencies from `requirements.txt` when needed.
   - Installs `xmtp` from PyPI when available; otherwise clones `xmtp-py` into `.tako/xmtp-py` and installs from source.
-  - Supports legacy usage (`./tako.sh <to> [message]`) and explicit subcommands (`hi`, `run`, `doctor`).
+  - Defaults to `tako run` when invoked with no arguments.
+  - Supports `start` as an alias for `run`.
+  - Exposes developer utilities (`doctor`, `hi`) for debugging/backwards compatibility.
 - **Test Criteria**:
-  - [x] `./tako.sh <to>` maps to `tako hi --to <to>`.
-  - [x] `./tako.sh hi <to> [message]` works.
+  - [x] `./tako.sh` starts the daemon.
+  - [x] `./tako.sh start` starts the daemon.
   - [x] `./tako.sh doctor` runs without requiring a recipient.
 
 ### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)
 - **Stability**: in-progress
-- **Description**: A multi-command CLI that keeps the legacy “send one DM” behavior while adding a daemon scaffold.
+- **Description**: A multi-command CLI where `run` starts the daemon; operator management happens over XMTP.
 - **Properties**:
-  - `tako hi --to <addr|ens> [--message ...]`
-  - `tako run --operator <addr|ens>` (first run) and `tako run` (subsequent runs)
-  - `tako doctor`
+  - `tako run` starts the daemon, prints `tako address`, and listens for pairing DMs.
+  - Pairing and all post-boot management happens over XMTP (not CLI flags).
+  - `tako doctor` and `tako hi` exist as developer utilities.
   - `tako.py` remains as a backwards-compatible wrapper.
 - **Test Criteria**:
   - [x] `python -m tako_bot doctor` runs and reports missing dependencies clearly.
@@ -43,7 +45,7 @@
 - **Properties**:
   - Creates `.tako/keys.json` with `wallet_key` and `db_encryption_key` if missing.
   - Attempts to set file permissions to `0600` (best-effort).
-  - `XMTP_WALLET_KEY` and `XMTP_DB_ENCRYPTION_KEY` override generated values.
+  - No user-facing env-var overrides; keys are loaded from disk at runtime.
   - Migrates legacy `.tako/config.json` → `.tako/keys.json` when present.
   - Refuses to run if `.tako/**` is tracked by git.
 - **Test Criteria**:
@@ -66,7 +68,6 @@
 - **Properties**:
   - Default message includes the machine hostname.
   - `--message` overrides the default message.
-  - `--env` overrides `XMTP_ENV` (default: `production`).
 - **Test Criteria**:
   - [x] Without `--message`, a default “hi from <hostname> (tako)” message is used.
 
@@ -75,29 +76,28 @@
 - **Description**: Stores XMTP state locally and supports a “nuke and rebuild” reset.
 - **Properties**:
   - DB files live under `.tako/xmtp-db/` and are named `xmtp-{env}-{inbox_id}.db3`.
-  - `TAKO_RESET_DB=1` deletes existing DB contents before starting.
 - **Test Criteria**:
   - [x] `.tako/xmtp-db/` is created automatically if missing.
 
-### Endpoint overrides + sync toggles
-- **Stability**: stable
-- **Description**: Supports endpoint overrides and toggling history/device sync behavior.
+### XMTP settings (operator-managed)
+- **Stability**: planned
+- **Description**: Manage XMTP endpoints and sync behavior over the operator XMTP channel (no env vars).
 - **Properties**:
-  - `XMTP_API_URL`, `XMTP_HISTORY_SYNC_URL`, and `XMTP_GATEWAY_HOST` override defaults.
-  - History sync can be disabled via `XMTP_DISABLE_HISTORY_SYNC=1` or `XMTP_HISTORY_SYNC_URL=off`.
-  - Device sync is disabled by default; enable via `TAKO_ENABLE_DEVICE_SYNC=1` (or disable explicitly via `XMTP_DISABLE_DEVICE_SYNC=1`).
+  - Endpoint changes are initiated by the operator over XMTP.
+  - Settings are stored under `.tako/` (runtime-only) and never committed.
 - **Test Criteria**:
-  - [x] History sync can be disabled via `XMTP_DISABLE_HISTORY_SYNC` or `XMTP_HISTORY_SYNC_URL=off`.
+  - [ ] Operator can change XMTP settings over XMTP and the daemon applies them safely.
 
 ### Operator imprint (`.tako/operator.json`)
 - **Stability**: in-progress
-- **Description**: Tako stores a single operator (controller) and refuses silent reassignment.
+- **Description**: Tako stores a single operator (controller) imprinted over XMTP and refuses silent reassignment.
 - **Properties**:
-  - On first `tako run --operator ...`, stores operator metadata under `.tako/operator.json`.
-  - On subsequent runs, refuses operator changes without an explicit re-imprint flow.
+  - On first inbound DM, Tako issues a pairing challenge; first successful `pair <code>` becomes the operator imprint.
+  - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
+  - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`).
 - **Test Criteria**:
-  - [x] First run requires `--operator`.
-  - [x] If operator is already imprinted, mismatched `--operator` fails.
+  - [x] `tako run` starts unpaired and waits for inbound DMs to begin pairing.
+  - [x] Once paired, only the operator inbox can run `status` / `doctor`.
 
 ### Daily logs (`daily/YYYY-MM-DD.md`)
 - **Stability**: in-progress

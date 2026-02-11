@@ -294,7 +294,7 @@ inference_hint_for_failures() {
   if [[ "$report" == *"does not exist or you do not have access"* ]]; then
     case "$tool" in
       codex)
-        echo "Tip: codex is installed, but the configured model/account is unavailable. Check \`codex login\` and model config (for example: \`codex exec --model gpt-5 'ping'\`)."
+        echo "Tip: onboarding does not create a new token; it only runs \`codex exec\`. Your current codex model/account config rejected the request. Try: \`codex exec --model gpt-5 'ping'\`."
         ;;
       *)
         echo "Tip: the CLI appears installed, but model/account access failed. Re-authenticate and verify your default model."
@@ -321,14 +321,6 @@ run_one_shot_inference() {
   case "$tool" in
     codex)
       if try_inference_variant "codex exec <prompt>" codex exec "$prompt"; then
-        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
-        return 0
-      fi
-      if try_inference_variant "codex -p <prompt>" codex -p "$prompt"; then
-        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
-        return 0
-      fi
-      if try_inference_variant "codex <prompt>" codex "$prompt"; then
         INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
         return 0
       fi

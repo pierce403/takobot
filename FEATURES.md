@@ -161,9 +161,11 @@
   - Pairing is terminal-first in app mode: Tako sends an outbound DM challenge and supports both XMTP reply or terminal code paste-back confirmation.
   - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
   - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs a new operator.
+  - Plain-text XMTP messages are handled as chat (inference-backed when available) while command-style messages route to command handlers.
 - **Test Criteria**:
   - [x] `tako` app mode can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
+  - [x] Operator plain-text XMTP messages no longer return `Unknown command`; they receive chat replies.
 
 ### Daily logs (`memory/dailies/YYYY-MM-DD.md`)
 - **Stability**: in-progress

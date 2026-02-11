@@ -15,7 +15,7 @@ from . import __version__
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
-from .inference import discover_inference_runtime, format_runtime_lines
+from .inference import InferenceRuntime, discover_inference_runtime, format_runtime_lines, run_inference_prompt_with_fallback
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, load_operator
@@ -34,6 +34,8 @@ STREAM_POLL_INTERVAL_S = 3.0
 STREAM_POLL_STABLE_CYCLES = 4
 MESSAGE_HISTORY_PER_CONVERSATION = 80
 SEEN_MESSAGE_CACHE_MAX = 4096
+CHAT_INFERENCE_TIMEOUT_S = 75.0
+CHAT_REPLY_MAX_CHARS = 700
 
 
 @dataclass(frozen=True)
@@ -279,6 +281,12 @@ async def _run_daemon(
 
     operator_cfg = load_operator(paths.operator_json)
     operator_inbox_id = get_operator_inbox_id(operator_cfg)
+    inference_runtime = discover_inference_runtime()
+    _emit_runtime_log(
+        f"inference: selected={inference_runtime.selected_provider or 'none'} "
+        f"ready={'yes' if inference_runtime.ready else 'no'}",
+        hooks=hooks,
+    )
 
     if operator_inbox_id:
         clear_pending(paths.state_dir / "pairing.json")
@@ -313,7 +321,16 @@ async def _run_daemon(
                 try:
                     items = await _poll_new_messages(client, seen_message_ids, seen_message_order)
                     for item in items:
-                        await _handle_incoming_message(item, client, paths, address, env, start, hooks=hooks)
+                        await _handle_incoming_message(
+                            item,
+                            client,
+                            paths,
+                            address,
+                            env,
+                            start,
+                            inference_runtime,
+                            hooks=hooks,
+                        )
                     poll_successes += 1
                     reconnect_attempt = 0
                     if poll_successes >= STREAM_POLL_STABLE_CYCLES:
@@ -370,7 +387,16 @@ async def _run_daemon(
                     error_burst_count = 0
                     reconnect_attempt = 0
                     if _mark_message_seen(item, seen_message_ids, seen_message_order):
-                        await _handle_incoming_message(item, client, paths, address, env, start, hooks=hooks)
+                        await _handle_incoming_message(
+                            item,
+                            client,
+                            paths,
+                            address,
+                            env,
+                            start,
+                            inference_runtime,
+                            hooks=hooks,
+                        )
             except asyncio.CancelledError:
                 raise
             except KeyboardInterrupt:
@@ -413,6 +439,7 @@ async def _handle_incoming_message(
     address: str,
     env: str,
     start: float,
+    inference_runtime: InferenceRuntime,
     hooks: RuntimeHooks | None = None,
 ) -> None:
     sender_inbox_id = getattr(item, "sender_inbox_id", None)
@@ -448,11 +475,40 @@ async def _handle_incoming_message(
                 "Pairing is terminal-first now: run `tako` (or `./start.sh`) in the local repo, "
                 "enter your XMTP handle, and confirm the outbound DM code there."
             )
+        else:
+            reply = await _chat_reply(
+                text,
+                inference_runtime,
+                is_operator=False,
+                operator_paired=False,
+                hooks=hooks,
+            )
+            await convo.send(reply)
         return
 
     if sender_inbox_id != operator_inbox_id:
         if _looks_like_command(text):
             await convo.send("Operator-only: config/tools/permissions/routines require the operator.")
+        else:
+            reply = await _chat_reply(
+                text,
+                inference_runtime,
+                is_operator=False,
+                operator_paired=True,
+                hooks=hooks,
+            )
+            await convo.send(reply)
+        return
+
+    if not _looks_like_command(text):
+        reply = await _chat_reply(
+            text,
+            inference_runtime,
+            is_operator=True,
+            operator_paired=True,
+            hooks=hooks,
+        )
+        await convo.send(reply)
         return
 
     cmd, rest = _parse_command(text)
@@ -492,7 +548,7 @@ async def _handle_incoming_message(
         await convo.send("Operator imprint cleared. Run `tako` (or `./start.sh`) in the local terminal to pair a new operator.")
         return
 
-    await convo.send("Unknown command. Reply 'help'.")
+    await convo.send("Unknown command. Reply 'help'. For normal chat, send plain text.")
 
 
 def _maybe_print_xmtp_hint(
@@ -632,12 +688,87 @@ def _help_text() -> str:
         "- status\n"
         "- doctor\n"
         "- reimprint (operator-only)\n"
+        "- plain text chat (inference-backed when available)\n"
     )
 
 
 def _looks_like_command(text: str) -> bool:
-    value = text.strip().lower()
-    return value.startswith(("help", "status", "doctor", "tako", "/"))
+    value = text.strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if lowered.startswith("tako ") or value.startswith("/"):
+        return True
+    cmd, rest = _parse_command(value)
+    tail = rest.strip()
+    if cmd in {"help", "h", "?", "status", "doctor"}:
+        return tail == ""
+    if cmd == "reimprint":
+        return True
+    return False
+
+
+async def _chat_reply(
+    text: str,
+    inference_runtime: InferenceRuntime,
+    *,
+    is_operator: bool,
+    operator_paired: bool,
+    hooks: RuntimeHooks | None,
+) -> str:
+    fallback = _fallback_chat_reply(is_operator=is_operator, operator_paired=operator_paired)
+    if not inference_runtime.ready:
+        return fallback
+
+    prompt = _chat_prompt(text, is_operator=is_operator, operator_paired=operator_paired)
+    try:
+        provider, reply = await asyncio.to_thread(
+            run_inference_prompt_with_fallback,
+            inference_runtime,
+            prompt,
+            timeout_s=CHAT_INFERENCE_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _emit_runtime_log(f"inference chat fallback: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
+        return fallback
+
+    cleaned = _clean_chat_reply(reply)
+    if not cleaned:
+        return fallback
+    _emit_runtime_log(f"inference chat provider: {provider}", hooks=hooks)
+    return cleaned
+
+
+def _chat_prompt(text: str, *, is_operator: bool, operator_paired: bool) -> str:
+    role = "operator" if is_operator else "non-operator"
+    paired = "yes" if operator_paired else "no"
+    return (
+        "You are Tako, a cute but practical octopus assistant.\n"
+        "Reply with plain text only (no markdown), max 4 short lines.\n"
+        "You can chat broadly and help think through tasks.\n"
+        "Hard boundary: only the operator may change identity/config/tools/permissions/routines.\n"
+        "If user asks for restricted changes and they are non-operator, say operator-only clearly.\n"
+        f"sender_role={role}\n"
+        f"operator_paired={paired}\n"
+        f"user_message={text}\n"
+    )
+
+
+def _fallback_chat_reply(*, is_operator: bool, operator_paired: bool) -> str:
+    if is_operator:
+        return "I can chat here. Commands: help, status, doctor, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
+    if operator_paired:
+        return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
+    return "Happy to chat. This instance is not paired yet; run `tako` (or `./start.sh`) locally to set the operator channel."
+
+
+def _clean_chat_reply(text: str) -> str:
+    value = " ".join(text.strip().split())
+    if not value:
+        return ""
+    if len(value) > CHAT_REPLY_MAX_CHARS:
+        return value[: CHAT_REPLY_MAX_CHARS - 3] + "..."
+    return value
 
 
 def _summarize_stream_error(error: Exception) -> str:

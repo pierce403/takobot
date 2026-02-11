@@ -8,7 +8,7 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 - Inference execution gate so first model call starts on the first interactive chat turn
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
-- A small command router over the operator channel (`help`, `status`, `doctor`, `reimprint`)
+- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `reimprint`) plus plain-text chat replies
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs

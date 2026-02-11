@@ -752,6 +752,7 @@
               <li>Before pairing: terminal app is primary onboarding/control loop.</li>
               <li>After pairing: XMTP is primary for identity/config/tools/routines.</li>
               <li>After pairing, operator commands include: <code>help</code>, <code>status</code>, <code>doctor</code>, <code>reimprint</code>.</li>
+              <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/read-only queries/safe mode.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>

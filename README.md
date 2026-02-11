@@ -26,6 +26,8 @@ If you already have this repo cloned:
 ./start.sh
 ```
 
+`setup.sh` creates or switches to a local branch named `local` that tracks `origin/main`, so local changes stay isolated while upstream updates remain pullable.
+
 Pairing flow (XMTP operator channel is the only control plane):
 
 - DM the printed `tako address` from the account you want as operator.

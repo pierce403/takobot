@@ -430,6 +430,8 @@ main() {
       ;;
   esac
 
+  # Ensure all relative operations run from the repo root.
+  cd "$ROOT"
   require_repo_layout
   warn_if_unusual_home
   ensure_uv

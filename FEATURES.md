@@ -33,12 +33,14 @@
 - **Description**: First-wake bootstrap from current directory, then onboarding prompts and daemon start.
 - **Properties**:
   - `setup.sh` clones (or reuses) repo in the caller's current directory, then runs `start.sh`.
+  - `setup.sh` ensures a local working branch (`local`) tracks `origin/main` for local-first changes with upstream sync.
   - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako.sh`.
   - If installed, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL defaults.
   - If `uv` is missing, `start.sh` attempts a user-local install before handing off to `tako.sh`.
   - Site and README expose a `curl -fsSL https://tako.bot/setup.sh | bash` path.
 - **Test Criteria**:
   - [x] `./setup.sh` targets current directory semantics (not hardcoded `$HOME`).
+  - [x] `./setup.sh` creates/switches to a local branch (`local`) that tracks `origin/main`.
   - [x] `./start.sh` exists and launches Tako through `tako.sh`.
 
 ### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)

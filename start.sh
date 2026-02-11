@@ -16,6 +16,7 @@ TRY_INFERENCE_LAST_ERROR=""
 TRY_INFERENCE_LAST_OUTPUT=""
 INFERENCE_FAILURE_REPORT=""
 INFERENCE_OUTPUT=""
+ONBOARDING_INFERENCE_TOOL=""
 
 usage() {
   cat <<'EOF'
@@ -163,26 +164,25 @@ detect_inference_tools() {
   printf "%s\n" "${tools[@]}"
 }
 
-build_soul_inference_prompt() {
-  local default_name="$1"
-  local default_role="$2"
+build_identity_refinement_prompt() {
+  local name="$1"
+  local role="$2"
   cat <<EOF
 You are assisting first-run onboarding for tako-bot.
-Generate suggested identity fields for SOUL.md.
+The user answered these questions conversationally:
 
-Constraints:
-- Name should be short (1-3 words).
-- Role should be one sentence, practical, and operator-imprinted.
-- Keep role under 180 characters.
-- Preserve this direction: highly autonomous agent, Python implementation, docs-first memory, Type 1 / Type 2 thinking, web3-native XMTP/Ethereum/Farcaster path.
+NAME: $name
+ROLE: $role
 
-Current defaults:
-NAME: $default_name
-ROLE: $default_role
+Task:
+- Keep user intent exactly.
+- Tighten wording only if needed.
+- Name should stay short (1-3 words).
+- Role should be one practical sentence under 180 characters.
 
 Return exactly two lines:
-NAME: <suggested name>
-ROLE: <suggested role sentence>
+NAME: <name>
+ROLE: <role sentence>
 EOF
 }
 
@@ -396,22 +396,12 @@ choose_inference_tool() {
   done
 }
 
-maybe_suggest_soul_identity() {
-  local default_name="$1"
-  local default_role="$2"
-  local -n suggested_name_ref="$3"
-  local -n suggested_role_ref="$4"
+maybe_select_inference_tool() {
   local -a tools=()
   local detected=""
-  local tool=""
-  local prompt=""
-  local output=""
-  local inferred_name=""
-  local inferred_role=""
 
+  ONBOARDING_INFERENCE_TOOL=""
   if ! interactive_tty; then
-    suggested_name_ref="$default_name"
-    suggested_role_ref="$default_role"
     return 0
   fi
 
@@ -423,53 +413,61 @@ maybe_suggest_soul_identity() {
   done < <(detect_inference_tools)
 
   if [[ ${#tools[@]} -eq 0 ]]; then
-    suggested_name_ref="$default_name"
-    suggested_role_ref="$default_role"
     return 0
   fi
 
-  if ! prompt_yes_no "Use a local inference CLI (${tools[*]}) to suggest SOUL defaults?" "n"; then
-    suggested_name_ref="$default_name"
-    suggested_role_ref="$default_role"
+  if ! prompt_yes_no "Can I use a local inference CLI (${tools[*]}) during onboarding?" "n"; then
     return 0
   fi
 
-  tool="$(choose_inference_tool "${tools[@]}")"
-  prompt="$(build_soul_inference_prompt "$default_name" "$default_role")"
-  echo "Querying $tool for onboarding suggestion..." > /dev/tty
-  if ! run_one_shot_inference "$tool" "$prompt"; then
-    echo "Could not run one-shot inference with $tool; continuing with manual prompts." > /dev/tty
+  ONBOARDING_INFERENCE_TOOL="$(choose_inference_tool "${tools[@]}")"
+}
+
+maybe_refine_identity_with_inference() {
+  local initial_name="$1"
+  local initial_role="$2"
+  local -n out_name_ref="$3"
+  local -n out_role_ref="$4"
+  local prompt=""
+  local output=""
+  local inferred_name=""
+  local inferred_role=""
+
+  out_name_ref="$initial_name"
+  out_role_ref="$initial_role"
+
+  if [[ -z "$ONBOARDING_INFERENCE_TOOL" ]]; then
+    return 0
+  fi
+
+  prompt="$(build_identity_refinement_prompt "$initial_name" "$initial_role")"
+  echo "Tako: Thanks. I’ll quickly refine that wording with $ONBOARDING_INFERENCE_TOOL." > /dev/tty
+  if ! run_one_shot_inference "$ONBOARDING_INFERENCE_TOOL" "$prompt"; then
+    echo "Tako: I couldn't use $ONBOARDING_INFERENCE_TOOL right now; I'll keep your wording as-is." > /dev/tty
     if [[ -n "$INFERENCE_FAILURE_REPORT" ]]; then
       echo "Inference attempts:" > /dev/tty
       printf "%s\n" "$INFERENCE_FAILURE_REPORT" > /dev/tty
-      inference_hint_for_failures "$tool" "$INFERENCE_FAILURE_REPORT" > /dev/tty || true
+      inference_hint_for_failures "$ONBOARDING_INFERENCE_TOOL" "$INFERENCE_FAILURE_REPORT" > /dev/tty || true
     fi
-    suggested_name_ref="$default_name"
-    suggested_role_ref="$default_role"
     return 0
   fi
   output="$INFERENCE_OUTPUT"
 
   inferred_name="$(extract_soul_field "NAME" "$output")"
   inferred_role="$(extract_soul_field "ROLE" "$output")"
-
   if [[ -z "$inferred_name" ]]; then
-    inferred_name="$default_name"
+    inferred_name="$initial_name"
   fi
   if [[ -z "$inferred_role" ]]; then
-    inferred_role="$default_role"
+    inferred_role="$initial_role"
   fi
 
-  echo "Suggested defaults from $tool:" > /dev/tty
+  echo "Tako: Suggested final identity:" > /dev/tty
   echo "  Name: $inferred_name" > /dev/tty
-  echo "  Role: $inferred_role" > /dev/tty
-
-  if prompt_yes_no "Use these suggestions as prompt defaults?" "y"; then
-    suggested_name_ref="$inferred_name"
-    suggested_role_ref="$inferred_role"
-  else
-    suggested_name_ref="$default_name"
-    suggested_role_ref="$default_role"
+  echo "  Purpose: $inferred_role" > /dev/tty
+  if prompt_yes_no "Use this suggested wording?" "y"; then
+    out_name_ref="$inferred_name"
+    out_role_ref="$inferred_role"
   fi
 }
 
@@ -508,8 +506,10 @@ update_soul_identity() {
 run_soul_onboarding() {
   local default_name
   local default_role
-  local suggested_name
-  local suggested_role
+  local chosen_name
+  local chosen_role
+  local refined_name
+  local refined_role
   local name
   local purpose
   local role
@@ -526,23 +526,30 @@ run_soul_onboarding() {
   echo "This updates the Identity section in SOUL.md before startup." > /dev/tty
   echo > /dev/tty
 
-  # Defensive defaults; maybe_suggest_soul_identity may override them.
-  suggested_name="$default_name"
-  suggested_role="$default_role"
-  maybe_suggest_soul_identity "$default_name" "$default_role" suggested_name suggested_role
+  maybe_select_inference_tool
 
-  echo "What should I be called?" > /dev/tty
-  name="$(prompt_line "Name" "$suggested_name")"
-  echo "What should my purpose be? (one sentence is great)" > /dev/tty
-  purpose="$(prompt_line "Purpose" "$suggested_role")"
+  echo "Tako: Before I fully wake up, I have two questions." > /dev/tty
+  echo "Tako: What should I be called?" > /dev/tty
+  name="$(prompt_line "You" "$default_name")"
+  echo "Tako: And what should my purpose be? (one sentence is great)" > /dev/tty
+  purpose="$(prompt_line "You" "$default_role")"
 
   role="$(sanitize_line "$purpose")"
   if [[ -z "$role" ]]; then
     role="$default_role"
   fi
 
-  update_soul_identity "$name" "$role"
-  echo "Updated SOUL.md identity: Name=\"$name\"." > /dev/tty
+  chosen_name="$(sanitize_line "$name")"
+  if [[ -z "$chosen_name" ]]; then
+    chosen_name="$default_name"
+  fi
+  chosen_role="$role"
+  refined_name="$chosen_name"
+  refined_role="$chosen_role"
+  maybe_refine_identity_with_inference "$chosen_name" "$chosen_role" refined_name refined_role
+
+  update_soul_identity "$refined_name" "$refined_role"
+  echo "Updated SOUL.md identity: Name=\"$refined_name\"." > /dev/tty
   echo > /dev/tty
 }
 

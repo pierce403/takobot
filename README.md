@@ -78,6 +78,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 
 - The bootstrap flow requires `uv` to manage the project virtualenv and Python dependencies.
 - `setup.sh` / `start.sh` will attempt a repo-local `uv` install automatically at `.tako/bin/uv` if `uv` is missing.
+- On first wake, `start.sh` asks conversational name/purpose questions and can optionally use local inference CLIs to refine wording.
 - One-shot inference CLI onboarding waits up to 300 seconds before timing out and falling back.
 - If one-shot inference CLI onboarding fails, `start.sh` now prints attempted command diagnostics before manual fallback.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.

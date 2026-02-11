@@ -25,7 +25,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
   - or (from an existing checkout) `./start.sh`
 - `setup.sh` bootstraps into your current directory and initializes a local working branch (`local`) that tracks `origin/main`.
 - `start.sh` asks conversational first-wake questions for name and purpose, then updates SOUL identity fields.
-- If installed, `start.sh` can optionally use one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL defaults.
+- If installed, `start.sh` can optionally use one-shot local inference CLIs (`codex`, `claude`, `gemini`) to refine wording after those conversational answers.
 - One-shot inference attempts allow up to 5 minutes before timing out.
 - If inference CLI attempts fail, `start.sh` prints command-level diagnostics and falls back to manual prompts.
 - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.

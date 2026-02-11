@@ -21,7 +21,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 2) **Run first-wake identity prompts**
 
 - Preferred bootstrap flow:
-  - `curl -fsSL https://raw.githubusercontent.com/pierce403/tako-bot/main/setup.sh | bash`
+  - `curl -fsSL https://tako.bot/setup.sh | bash`
   - or (from an existing checkout) `./start.sh`
 - `start.sh` updates SOUL identity fields (name + purpose/role) before daemon startup.
 

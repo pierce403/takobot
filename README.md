@@ -17,7 +17,7 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 Bootstrap from your current directory (clone if needed), run first-wake onboarding, and start Tako:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pierce403/tako-bot/main/setup.sh | bash
+curl -fsSL https://tako.bot/setup.sh | bash
 ```
 
 If you already have this repo cloned:

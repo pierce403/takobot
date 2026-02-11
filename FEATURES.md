@@ -34,7 +34,7 @@
 - **Properties**:
   - `setup.sh` clones (or reuses) repo in the caller's current directory, then runs `start.sh`.
   - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako.sh`.
-  - Site and README expose a `curl -fsSL .../setup.sh | bash` path.
+  - Site and README expose a `curl -fsSL https://tako.bot/setup.sh | bash` path.
 - **Test Criteria**:
   - [x] `./setup.sh` targets current directory semantics (not hardcoded `$HOME`).
   - [x] `./start.sh` exists and launches Tako through `tako.sh`.

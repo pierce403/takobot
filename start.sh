@@ -515,7 +515,7 @@ run_soul_onboarding() {
   local role
 
   default_name="$(extract_identity_value "Name" "Tako")"
-  default_role="$(extract_identity_value "Role" "highly autonomous, operator-imprinted agent with operator-only control for risky changes.")"
+  default_role="$(extract_identity_value "Role" "Help the operator think clearly, decide wisely, and act safely.")"
 
   if ! interactive_tty; then
     echo "start.sh: no interactive TTY detected; skipping SOUL prompts." >&2
@@ -531,8 +531,10 @@ run_soul_onboarding() {
   suggested_role="$default_role"
   maybe_suggest_soul_identity "$default_name" "$default_role" suggested_name suggested_role
 
+  echo "What should I be called?" > /dev/tty
   name="$(prompt_line "Name" "$suggested_name")"
-  purpose="$(prompt_line "Purpose (single line)" "$suggested_role")"
+  echo "What should my purpose be? (one sentence is great)" > /dev/tty
+  purpose="$(prompt_line "Purpose" "$suggested_role")"
 
   role="$(sanitize_line "$purpose")"
   if [[ -z "$role" ]]; then

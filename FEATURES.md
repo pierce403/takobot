@@ -75,6 +75,7 @@
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes discovered inference providers with automatic fallback across ready CLIs.
   - Runs XMTP daemon loop as a background task when paired.
+  - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.
   - Filters terminal control-sequence noise from input/transcript rendering.
@@ -90,6 +91,7 @@
   - [x] Runtime can report Codex/Claude/Gemini CLI+auth discovery status via `inference` command.
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
+  - [x] After pairing, non-command text in terminal still receives chat replies.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
   - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).
 
@@ -161,10 +163,12 @@
   - Pairing is terminal-first in app mode: Tako sends an outbound DM challenge and supports both XMTP reply or terminal code paste-back confirmation.
   - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
   - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs a new operator.
+  - Operator can run `update` over XMTP to perform a guarded fast-forward self-update.
   - Plain-text XMTP messages are handled as chat (inference-backed when available) while command-style messages route to command handlers.
 - **Test Criteria**:
   - [x] `tako` app mode can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
+  - [x] Operator can run `update` / `update check` over XMTP and receive result details.
   - [x] Operator plain-text XMTP messages no longer return `Unknown command`; they receive chat replies.
 
 ### Daily logs (`memory/dailies/YYYY-MM-DD.md`)

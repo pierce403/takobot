@@ -8,7 +8,7 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 - Inference execution gate so first model call starts on the first interactive chat turn
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
-- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `reimprint`) plus plain-text chat replies
+- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `reimprint`) plus plain-text chat replies
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs
@@ -40,7 +40,7 @@ Pairing flow:
   - yes: outbound DM pairing challenge (`.eth` or `0x...`) with code confirmation in app
   - no: continue onboarding locally and allow later pairing from terminal
 - Tako then asks name/purpose/routine questions in-chat.
-- After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `reimprint`).
+- After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `reimprint`).
 
 ## Architecture (minimal)
 
@@ -73,7 +73,7 @@ Runtime-only (ignored):
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
 - Type 2 escalation uses discovered inference providers with fallback across ready CLIs after the first interactive chat turn, then falls back to heuristic guidance if inference calls fail.
-- If paired, starts background XMTP runtime and keeps terminal as local cockpit.
+- If paired, starts background XMTP runtime and keeps terminal as local cockpit with plain-text chat still available.
 
 ## Configuration
 

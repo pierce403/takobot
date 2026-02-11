@@ -21,6 +21,7 @@ from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .pairing import clear_pending
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
+from .self_update import run_self_update
 from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
 
 
@@ -534,6 +535,25 @@ async def _handle_incoming_message(
             report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
         await convo.send(report)
         return
+    if cmd == "update":
+        action = rest.strip().lower()
+        if action in {"help", "?"}:
+            await convo.send("Usage: `update` (apply fast-forward) or `update check` (check only).")
+            return
+        apply_update = action not in {"check", "status", "dry-run", "dryrun"}
+        try:
+            result = await asyncio.to_thread(run_self_update, repo_root(), apply=apply_update)
+        except Exception as exc:  # noqa: BLE001
+            await convo.send(f"self-update failed: {_summarize_stream_error(exc)}")
+            return
+        report_lines = [result.summary, *result.details]
+        if result.changed:
+            report_lines.append("Restart Tako to load updated code.")
+            append_daily_note(daily_root(), date.today(), "Operator applied self-update over XMTP.")
+        elif apply_update:
+            append_daily_note(daily_root(), date.today(), f"Operator ran self-update: {result.summary}")
+        await convo.send("\n".join(report_lines))
+        return
     if cmd == "reimprint":
         if rest.strip().lower() != "confirm":
             await convo.send(
@@ -687,6 +707,7 @@ def _help_text() -> str:
         "- help\n"
         "- status\n"
         "- doctor\n"
+        "- update (or `update check`)\n"
         "- reimprint (operator-only)\n"
         "- plain text chat (inference-backed when available)\n"
     )
@@ -701,8 +722,11 @@ def _looks_like_command(text: str) -> bool:
         return True
     cmd, rest = _parse_command(value)
     tail = rest.strip()
+    tail_lower = tail.lower()
     if cmd in {"help", "h", "?", "status", "doctor"}:
         return tail == ""
+    if cmd == "update":
+        return tail_lower in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
     if cmd == "reimprint":
         return True
     return False
@@ -756,7 +780,7 @@ def _chat_prompt(text: str, *, is_operator: bool, operator_paired: bool) -> str:
 
 def _fallback_chat_reply(*, is_operator: bool, operator_paired: bool) -> str:
     if is_operator:
-        return "I can chat here. Commands: help, status, doctor, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
+        return "I can chat here. Commands: help, status, doctor, update, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
     if operator_paired:
         return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
     return "Happy to chat. This instance is not paired yet; run `tako` (or `./start.sh`) locally to set the operator channel."

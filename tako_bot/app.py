@@ -40,6 +40,7 @@ from .locks import instance_lock
 from .operator import get_operator_inbox_id, imprint_operator, load_operator
 from .pairing import clear_pending
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
+from .self_update import run_self_update
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
 from .xmtp import create_client, hint_for_xmtp_error
 
@@ -49,6 +50,8 @@ PAIRING_CODE_LENGTH = 8
 PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 HEARTBEAT_JITTER = 0.2
 EVENT_INGEST_INTERVAL_S = 0.8
+LOCAL_CHAT_TIMEOUT_S = 75.0
+LOCAL_CHAT_MAX_CHARS = 700
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -334,7 +337,7 @@ class TakoTerminalApp(App[None]):
                 self._write_tako("operator imprint found. XMTP is already my control current for config changes.")
                 await self._start_xmtp_runtime()
                 self._set_state(SessionState.RUNNING)
-                self._write_tako("terminal is now your local cockpit (status/logs/read-only queries). type `help`.")
+                self._write_tako("terminal is now your local cockpit. chat works here too. type `help`.")
                 return
 
             self.operator_paired = False
@@ -1116,7 +1119,7 @@ class TakoTerminalApp(App[None]):
             self._record_event("onboarding.completed", "Onboarding completed with operator pairing.", source="onboarding")
             await self._start_xmtp_runtime()
             self._set_state(SessionState.RUNNING)
-            self._write_tako("all tentacles online. terminal remains your local cockpit. type `help`.")
+            self._write_tako("all tentacles online. terminal remains your local cockpit, and chat stays open here. type `help`.")
             return
 
         self._record_event("onboarding.completed", "Onboarding completed in local-only mode.", source="onboarding")
@@ -1265,10 +1268,15 @@ class TakoTerminalApp(App[None]):
             self.mode = "local-only"
 
     async def _handle_running_input(self, text: str) -> None:
+        if not _looks_like_local_command(text):
+            reply = await self._local_chat_reply(text)
+            self._write_tako(reply)
+            return
+
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, inference, doctor, pair, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, inference, doctor, pair, update, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1350,6 +1358,49 @@ class TakoTerminalApp(App[None]):
             self._write_tako("share your XMTP handle to start outbound pairing, or `local-only`.")
             return
 
+        if cmd == "update":
+            action = rest.strip().lower()
+            if action in {"help", "?"}:
+                self._write_tako("usage: `update` (apply fast-forward) or `update check` (check only).")
+                return
+            if self.operator_paired:
+                self._write_tako("paired mode: run `update` over the operator XMTP channel.")
+                return
+
+            apply_update = action not in {"check", "status", "dry-run", "dryrun"}
+            self._record_event(
+                "runtime.self_update.requested",
+                "Local self-update requested from terminal.",
+                source="terminal",
+                metadata={"apply": apply_update},
+            )
+            try:
+                result = await asyncio.to_thread(run_self_update, repo_root(), apply=apply_update)
+            except Exception as exc:  # noqa: BLE001
+                summary = _summarize_error(exc)
+                self._write_tako(f"self-update failed: {summary}")
+                self._record_event(
+                    "runtime.self_update.error",
+                    f"Local self-update failed: {exc}",
+                    severity="warn",
+                    source="terminal",
+                )
+                return
+
+            lines = [result.summary, *result.details]
+            if result.changed:
+                lines.append("restart Tako to load updated code.")
+            self._write_tako("\n".join(lines))
+            append_daily_note(daily_root(), date.today(), f"Local self-update command: {result.summary}")
+            self._record_event(
+                "runtime.self_update.result",
+                result.summary,
+                severity="info" if result.ok else "warn",
+                source="terminal",
+                metadata={"changed": result.changed, "apply": apply_update},
+            )
+            return
+
         if cmd in {"safe", "stop", "resume"}:
             value = rest.strip().lower()
             if cmd == "stop" or (cmd == "safe" and value in {"", "on", "enable", "enabled", "true", "1"}):
@@ -1365,13 +1416,56 @@ class TakoTerminalApp(App[None]):
             await self.action_request_quit()
             return
 
-        if self.operator_paired:
-            self._write_tako(
-                "operator changes are XMTP-only after pairing. terminal stays read-only for status/logs/safe-mode."
-            )
-            return
+        self._write_tako("unknown local command. type `help`. plain text chat always works here.")
 
-        self._write_tako("local mode active. type `pair` to establish XMTP operator channel.")
+    async def _local_chat_reply(self, text: str) -> str:
+        if self.operator_paired:
+            fallback = (
+                "chat current is open here and over XMTP. "
+                "config/tools/permissions/routines changes remain operator-only on XMTP."
+            )
+        else:
+            fallback = "chat current is open. type `pair` when you want to establish XMTP operator control."
+
+        if self.inference_runtime is None or not self.inference_runtime.ready:
+            return fallback
+
+        prompt = _build_terminal_chat_prompt(
+            text=text,
+            mode=self.mode,
+            state=self.state.value,
+            operator_paired=self.operator_paired,
+        )
+
+        try:
+            provider, reply = await asyncio.to_thread(
+                run_inference_prompt_with_fallback,
+                self.inference_runtime,
+                prompt,
+                timeout_s=LOCAL_CHAT_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.inference_last_error = _summarize_error(exc)
+            self._record_event(
+                "inference.chat.error",
+                f"Terminal chat inference failed: {exc}",
+                severity="warn",
+                source="inference",
+            )
+            return fallback
+
+        cleaned = _clean_chat_reply(reply)
+        if not cleaned:
+            return fallback
+        self.inference_last_provider = provider
+        self.inference_last_error = ""
+        self._record_event(
+            "inference.chat.reply",
+            "Terminal chat reply generated.",
+            source="inference",
+            metadata={"provider": provider},
+        )
+        return cleaned
 
     def _on_runtime_log(self, level: str, message: str) -> None:
         lowered = message.lower()
@@ -1596,6 +1690,50 @@ def _parse_command(text: str) -> tuple[str, str]:
     cmd = parts[0].lower()
     rest = parts[1] if len(parts) > 1 else ""
     return cmd, rest
+
+
+def _looks_like_local_command(text: str) -> bool:
+    value = text.strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if lowered.startswith("tako ") or value.startswith("/"):
+        return True
+
+    cmd, rest = _parse_command(value)
+    tail = rest.strip().lower()
+    if cmd in {"help", "h", "?", "status", "health", "doctor", "pair", "stop", "resume", "quit", "exit"}:
+        return tail == ""
+    if cmd == "inference":
+        return tail in {"", "refresh", "rescan", "scan", "reload"}
+    if cmd == "update":
+        return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
+    if cmd == "safe":
+        return tail in {"", "on", "off", "enable", "enabled", "disable", "disabled", "true", "false", "1", "0"}
+    return False
+
+
+def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_paired: bool) -> str:
+    paired = "yes" if operator_paired else "no"
+    return (
+        "You are Tako, a super cute octopus assistant with pragmatic engineering judgment.\n"
+        "Reply with plain text only (no markdown), maximum 4 short lines.\n"
+        "Terminal chat is always available.\n"
+        "Hard boundary: identity/config/tools/permissions/routines remain operator-only over XMTP when paired.\n"
+        f"session_mode={mode}\n"
+        f"session_state={state}\n"
+        f"operator_paired={paired}\n"
+        f"user_message={text}\n"
+    )
+
+
+def _clean_chat_reply(text: str) -> str:
+    value = _sanitize_for_display(" ".join(text.strip().split()))
+    if not value:
+        return ""
+    if len(value) > LOCAL_CHAT_MAX_CHARS:
+        return value[: LOCAL_CHAT_MAX_CHARS - 3] + "..."
+    return value
 
 
 def _inference_setup_hints(runtime: InferenceRuntime) -> list[str]:

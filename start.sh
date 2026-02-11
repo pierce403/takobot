@@ -10,6 +10,7 @@ LOCAL_UV_BIN_DIR="$LOCAL_RUNTIME_DIR/bin"
 LOCAL_UV_CACHE_DIR="$LOCAL_RUNTIME_DIR/uv-cache"
 LOCAL_XDG_CACHE_DIR="$LOCAL_RUNTIME_DIR/xdg-cache"
 LOCAL_XDG_CONFIG_DIR="$LOCAL_RUNTIME_DIR/xdg-config"
+INFERENCE_TIMEOUT_S=300
 TRY_INFERENCE_LAST_EXIT=0
 TRY_INFERENCE_LAST_ERROR=""
 TRY_INFERENCE_LAST_OUTPUT=""
@@ -204,7 +205,7 @@ try_inference_command() {
   output_file="$(mktemp "$LOCAL_TMP_DIR/infer.out.XXXXXX")"
   error_file="$(mktemp "$LOCAL_TMP_DIR/infer.err.XXXXXX")"
 
-  if run_with_timeout 30 "$@" >"$output_file" 2>"$error_file"; then
+  if run_with_timeout "$INFERENCE_TIMEOUT_S" "$@" >"$output_file" 2>"$error_file"; then
     output="$(cat "$output_file" || true)"
     error="$(cat "$error_file" || true)"
     rm -f "$output_file" "$error_file"
@@ -304,7 +305,7 @@ inference_hint_for_failures() {
   fi
 
   if [[ "$report" == *"command failed without stderr output"* || "$report" == *"exit 124"* ]]; then
-    echo "Tip: the command likely timed out or failed silently. Try running it directly once to validate auth/network."
+    echo "Tip: the command likely timed out after ${INFERENCE_TIMEOUT_S}s or failed silently. Try running it directly once to validate auth/network."
     return 0
   fi
 

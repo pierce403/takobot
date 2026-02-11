@@ -644,16 +644,17 @@
           <div class="card panel">
             <h2>Quickstart</h2>
             <p>
-              Bootstrap from your current directory (clone if needed), run first-wake SOUL prompts, then start Tako:
+              Bootstrap from your current directory (clone if needed), run first-wake SOUL prompts, then pair in terminal:
             </p>
             <pre><code>curl -fsSL https://tako.bot/setup.sh | bash
 
 # If you already have the repo:
 ./start.sh
 
-# DM the printed "tako address" over XMTP
-# Reply with: pair &lt;code&gt;
-# Then: help / status / doctor</code></pre>
+# Tako asks for your XMTP handle in terminal
+# Tako sends you a DM with a pairing code
+# Paste the code back into terminal
+# Then manage over XMTP: help / status / doctor</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Setup also initializes a local <code>local</code> branch that tracks <code>origin/main</code> for
               local changes + upstream pulls.
@@ -727,7 +728,10 @@
                 If available, optionally asks to use one-shot local inference CLIs
                 (<code>codex</code>/<code>claude</code>/<code>gemini</code>) to refine conversational identity answers.
               </li>
-              <li>Waits for the first inbound DM to initiate pairing; stores the operator imprint in <code>.tako/operator.json</code>.</li>
+              <li>
+                Asks for operator handle in terminal, sends outbound XMTP pairing DM, confirms via terminal code paste-back,
+                then stores operator imprint in <code>.tako/operator.json</code>.
+              </li>
             </ul>
           </div>
 
@@ -738,7 +742,7 @@
               There is no user-facing configuration via environment variables or CLI flags.
             </p>
             <ul>
-              <li>Pairing is a challenge/response over XMTP: <code>pair &lt;code&gt;</code>.</li>
+              <li>Pairing is terminal-first with outbound XMTP DM challenge confirmation.</li>
               <li>After pairing, operator commands include: <code>help</code>, <code>status</code>, <code>doctor</code>, <code>reimprint</code>.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>
@@ -757,7 +761,7 @@
                 HTTP2 egress.
               </li>
               <li>
-                The daemon retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
+                The daemon retries XMTP stream subscriptions with backoff and falls back to polling when stream errors persist.
               </li>
               <li>
                 Ensure <code>uv</code> is installed locally; bootstrap and dependency management run through it.

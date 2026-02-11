@@ -2,7 +2,7 @@
 
 Tako is a **highly autonomous, operator-imprinted agent** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
-- An always-on daemon that pairs an operator in-chat over XMTP
+- An always-on daemon with terminal-first pairing and XMTP-only management after imprint
 - A small command router over the operator channel (`help`, `status`, `doctor`, …)
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
@@ -30,10 +30,10 @@ If you already have this repo cloned:
 
 Pairing flow (XMTP operator channel is the only control plane):
 
-- DM the printed `tako address` from the account you want as operator.
-- Tako replies with a pairing challenge.
-- Reply with `pair <code>` to imprint as the operator.
-- After pairing, reply `help` for commands.
+- Tako chats with you in the terminal first and asks for your XMTP handle (`.eth` or `0x...`).
+- Tako sends an outbound DM challenge code to that handle.
+- Paste that code back into the terminal to confirm operator ownership.
+- After pairing, management moves to XMTP (`help`, `status`, `doctor`, `reimprint`).
 
 ## Architecture (minimal)
 
@@ -61,7 +61,7 @@ Runtime-only (ignored):
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
 - If available, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL name/role defaults.
-- Starts listening on XMTP and waits for the first inbound DM to initiate pairing.
+- Runs terminal-first outbound pairing (DM challenge + terminal paste-back confirmation), then starts the daemon.
 
 ## Configuration
 
@@ -82,4 +82,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - One-shot inference CLI onboarding waits up to 300 seconds before timing out and falling back.
 - If one-shot inference CLI onboarding fails, `start.sh` now prints attempted command diagnostics before manual fallback.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
+- When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

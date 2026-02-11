@@ -21,12 +21,12 @@ ONBOARDING_INFERENCE_TOOL=""
 usage() {
   cat <<'EOF'
 Usage:
-  ./start.sh [tako_args...]
+  ./start.sh [--interval N] [--once]
 
 Behavior:
   - Verifies this is a valid tako-bot repo checkout.
   - Runs first-wake SOUL prompts (name + purpose) when interactive.
-  - Starts Tako via ./tako.sh (arguments are passed through).
+  - Runs terminal-first bootstrap pairing, then starts the daemon.
 EOF
 }
 
@@ -606,7 +606,7 @@ main() {
   ensure_uv
   run_soul_onboarding
 
-  exec "$ROOT/tako.sh" "$@"
+  exec "$ROOT/tako.sh" bootstrap "$@"
 }
 
 main "$@"

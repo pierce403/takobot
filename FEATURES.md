@@ -30,11 +30,11 @@
 
 ### Setup + start bootstrap (`setup.sh`, `start.sh`)
 - **Stability**: in-progress
-- **Description**: First-wake bootstrap from current directory, then onboarding prompts and daemon start.
+- **Description**: First-wake bootstrap from current directory, terminal onboarding, outbound operator pairing, then daemon start.
 - **Properties**:
   - `setup.sh` bootstraps (or reuses) the repo in the caller's current directory, then runs `start.sh`.
   - `setup.sh` ensures a local working branch (`local`) tracks `origin/main` for local-first changes with upstream sync.
-  - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako.sh`.
+  - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako bootstrap`.
   - If installed, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to refine conversational name/purpose answers.
   - One-shot inference attempts use a 300-second timeout before fallback.
   - If one-shot inference fails, `start.sh` prints attempted command diagnostics (exit + stderr summary) before manual fallback.
@@ -49,9 +49,11 @@
 - **Stability**: in-progress
 - **Description**: A multi-command CLI where `run` starts the daemon; operator management happens over XMTP.
 - **Properties**:
-  - `tako run` starts the daemon, prints `tako address`, and listens for pairing DMs.
+  - `tako run` starts the daemon and prints `tako address`.
   - `tako run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
-  - Pairing and all post-boot management happens over XMTP (not CLI flags).
+  - If stream failures persist, `tako run` falls back to polling message history until stream mode stabilizes.
+  - `tako bootstrap` performs terminal-first outbound pairing before starting the daemon.
+  - Pairing is handled by `tako bootstrap`; all post-pair management happens over XMTP (not CLI flags).
   - `tako doctor` and `tako hi` exist as developer utilities.
   - `tako.py` remains as a backwards-compatible wrapper.
 - **Test Criteria**:
@@ -122,11 +124,11 @@
 - **Stability**: in-progress
 - **Description**: Tako stores a single operator (controller) imprinted over XMTP and refuses silent reassignment.
 - **Properties**:
-  - On first inbound DM, Tako issues a pairing challenge; first successful `pair <code>` becomes the operator imprint.
+  - Pairing is terminal-first: Tako sends an outbound DM challenge and operator confirms by pasting the code back into terminal.
   - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
-  - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`).
+  - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal bootstrap pairs a new operator.
 - **Test Criteria**:
-  - [x] `tako run` starts unpaired and waits for inbound DMs to begin pairing.
+  - [x] `tako bootstrap` can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
 
 ### Daily logs (`memory/dailies/YYYY-MM-DD.md`)

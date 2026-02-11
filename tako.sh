@@ -22,7 +22,8 @@ case "${1:-}" in
   -h|--help|help)
     cat <<'EOF'
 Usage:
-  ./tako.sh [start]                                  # start daemon (XMTP pairing happens in-chat)
+  ./tako.sh [start]                                  # start daemon
+  ./tako.sh bootstrap                                # terminal-first onboarding + outbound pairing + daemon
   ./tako.sh doctor                                   # (dev) environment checks
   ./tako.sh hi <xmtp_address_or_ens> [message]        # (dev) one-off DM
 EOF
@@ -32,7 +33,7 @@ esac
 
 SUBCMD=""
 case "${1:-}" in
-  start|hi|run|doctor)
+  start|bootstrap|hi|run|doctor)
     SUBCMD="$1"
     shift
     ;;

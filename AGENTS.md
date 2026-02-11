@@ -57,6 +57,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-11 — Terminal-first outbound pairing
+
+- What happened: inbound XMTP stream health during bootstrap was unreliable, making first pairing brittle.
+- Fix: moved first pairing to terminal-first flow: ask operator handle, send outbound DM challenge, confirm code in terminal, then switch to XMTP-only management.
+- Prevention: keep bootstrap independent of inbound stream availability; treat stream issues as runtime delivery concerns with polling fallback.
+
 ### 2026-02-10 — Memory tree moved under `memory/`
 
 - What happened: daily logs and canonical memory were spread between root `MEMORY.md` and `daily/`.

@@ -73,6 +73,8 @@
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Runs XMTP daemon loop as a background task when paired.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
+  - Restores text-input focus after terminal resize/blur to keep chat entry stable.
+  - Filters terminal control-sequence noise from input/transcript rendering.
   - Surfaces operational failures as concise in-UI error cards with suggested next actions.
 - **Test Criteria**:
   - [x] Running `tako` opens app mode by default (no required subcommand).
@@ -81,6 +83,7 @@
   - [x] Identity + routine onboarding happens in-chat in the terminal app (not shell prompts).
   - [x] Terminal input can confirm outbound pairing code and continue to running mode.
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
+  - [x] Resize/blur does not leave the app without a usable text-input focus.
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable

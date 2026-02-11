@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import random
+import re
 import secrets
 import shutil
 import socket
@@ -17,6 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input, RichLog, Static
@@ -47,6 +49,10 @@ SEVERITY_ORDER = {
     "error": 2,
     "critical": 3,
 }
+
+ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)")
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
 class SessionState(str, Enum):
@@ -197,10 +203,18 @@ class TakoTerminalApp(App[None]):
         self.tasks_panel = self.query_one("#panel-tasks", Static)
         self.memory_panel = self.query_one("#panel-memory", Static)
         self.sensors_panel = self.query_one("#panel-sensors", Static)
-        self.input_box.focus()
+        self._ensure_input_focus()
         self.set_interval(0.5, self._refresh_status)
         self._refresh_panels()
         self.boot_task = asyncio.create_task(self._boot())
+
+    def on_resize(self, _: events.Resize) -> None:
+        self.call_after_refresh(self._ensure_input_focus)
+
+    def on_input_blurred(self, _: Input.Blurred) -> None:
+        if self.input_box.disabled:
+            return
+        self.call_after_refresh(self._ensure_input_focus)
 
     async def on_unmount(self) -> None:
         await self._shutdown_background_tasks()
@@ -216,9 +230,13 @@ class TakoTerminalApp(App[None]):
         await self._enable_safe_mode()
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
+        raw_value = event.value
         text = _sanitize(event.value)
         event.input.value = ""
         if not text:
+            if raw_value and _contains_terminal_control(raw_value):
+                self._write_system("ignored terminal control-sequence noise; input focus restored.")
+            self._ensure_input_focus()
             return
 
         self._write_user(text)
@@ -228,6 +246,7 @@ class TakoTerminalApp(App[None]):
         finally:
             if self.indicator == "thinking":
                 self._set_indicator("idle")
+            self._ensure_input_focus()
 
     async def _boot(self) -> None:
         self._set_state(SessionState.BOOTING)
@@ -417,13 +436,14 @@ class TakoTerminalApp(App[None]):
         source: str = "system",
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        safe_message = _sanitize_for_display(message)
         event = {
             "id": _new_event_id(),
             "ts": _utc_now_iso(),
             "type": event_type,
             "severity": severity.lower(),
             "source": source,
-            "message": message,
+            "message": safe_message,
             "metadata": metadata or {},
         }
         if self.event_log_path is None:
@@ -1225,6 +1245,13 @@ class TakoTerminalApp(App[None]):
     def _set_indicator(self, indicator: str) -> None:
         self.indicator = indicator
 
+    def _ensure_input_focus(self) -> None:
+        input_box = getattr(self, "input_box", None)
+        if input_box is None or input_box.disabled:
+            return
+        with contextlib.suppress(Exception):
+            input_box.focus()
+
     def _refresh_status(self) -> None:
         uptime_s = int(time.monotonic() - self.started_at)
         safe = "on" if self.safe_mode else "off"
@@ -1277,13 +1304,13 @@ class TakoTerminalApp(App[None]):
         self.sensors_panel.update(sensors)
 
     def _write_tako(self, text: str) -> None:
-        self.transcript.write(f"Tako: {text}")
+        self.transcript.write(f"Tako: {_sanitize_for_display(text)}")
 
     def _write_user(self, text: str) -> None:
-        self.transcript.write(f"You: {text}")
+        self.transcript.write(f"You: {_sanitize_for_display(text)}")
 
     def _write_system(self, text: str) -> None:
-        self.transcript.write(f"System: {text}")
+        self.transcript.write(f"System: {_sanitize_for_display(text)}")
 
     def _error_card(self, summary: str, detail: str, next_steps: list[str]) -> None:
         self._write_system(f"ERROR: {summary}: {_summarize_text(detail)}")
@@ -1328,8 +1355,25 @@ def _new_pairing_code() -> str:
     return f"{raw[:4]}-{raw[4:]}"
 
 
+def _strip_terminal_controls(value: str) -> str:
+    cleaned = ANSI_CSI_RE.sub("", value)
+    cleaned = ANSI_OSC_RE.sub("", cleaned)
+    cleaned = cleaned.replace("\r", "")
+    cleaned = CONTROL_CHARS_RE.sub("", cleaned)
+    return cleaned
+
+
+def _sanitize_for_display(value: str) -> str:
+    return _strip_terminal_controls(value)
+
+
+def _contains_terminal_control(value: str) -> bool:
+    return _strip_terminal_controls(value) != value
+
+
 def _sanitize(value: str) -> str:
-    return " ".join(value.strip().split())
+    cleaned = _strip_terminal_controls(value)
+    return " ".join(cleaned.strip().split())
 
 
 def _parse_yes_no(value: str) -> bool | None:

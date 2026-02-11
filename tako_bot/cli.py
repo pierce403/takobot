@@ -15,6 +15,7 @@ from . import __version__
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
+from .inference import discover_inference_runtime, format_runtime_lines
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, load_operator
@@ -204,6 +205,9 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
         lines.append("- web3: import OK")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"web3 import failed: {exc}")
+
+    inference_runtime = discover_inference_runtime()
+    lines.extend(f"- {line}" for line in format_runtime_lines(inference_runtime))
 
     return lines, problems
 

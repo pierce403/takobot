@@ -34,6 +34,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
   - `ONBOARDING_ROUTINES`
   - `RUNNING`
 - During `BOOTING`, Tako runs a startup health check (instance context, lock state, and resource probes).
+- During `BOOTING`, Tako scans local inference bridges (`codex`, `claude`, `gemini`) and records runtime metadata in `.tako/state/inference.json`.
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
 - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.
 

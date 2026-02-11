@@ -28,6 +28,13 @@ from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
+from .inference import (
+    InferenceRuntime,
+    discover_inference_runtime,
+    format_runtime_lines,
+    persist_inference_runtime,
+    run_inference_prompt_with_fallback,
+)
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import get_operator_inbox_id, imprint_operator, load_operator
@@ -177,6 +184,10 @@ class TakoTerminalApp(App[None]):
         self.type2_last = "none"
         self.event_total_written = 0
         self.event_total_ingested = 0
+        self.inference_runtime: InferenceRuntime | None = None
+        self.inference_state_path: Path | None = None
+        self.inference_last_provider = "none"
+        self.inference_last_error = ""
 
         self.status_bar: Static
         self.transcript: RichLog
@@ -286,6 +297,7 @@ class TakoTerminalApp(App[None]):
                 else "brand-new"
             )
 
+            self._initialize_inference_runtime()
             await self._initialize_reasoning_runtime()
             await self._run_startup_health_check(
                 keys_preexisting=keys_preexisting,
@@ -360,6 +372,45 @@ class TakoTerminalApp(App[None]):
             metadata={"event_log": str(self.event_log_path)},
         )
 
+    def _initialize_inference_runtime(self) -> None:
+        if self.paths is None:
+            return
+
+        try:
+            runtime = discover_inference_runtime()
+            self.inference_runtime = runtime
+            self.inference_last_error = ""
+            self.inference_last_provider = runtime.selected_provider or "none"
+            self.inference_state_path = self.paths.state_dir / "inference.json"
+            persist_inference_runtime(self.inference_state_path, runtime)
+
+            selected = runtime.selected_provider or "none"
+            ready = "yes" if runtime.ready else "no"
+            source = runtime.selected_key_source or "none"
+            self._write_system(f"inference bridge: provider={selected} ready={ready} source={source}")
+            self._record_event(
+                "inference.runtime.detected",
+                f"Inference discovery complete. selected={selected}; ready={ready}; source={source}",
+                source="startup",
+                metadata={
+                    "selected_provider": selected,
+                    "ready": ready,
+                    "key_source": source,
+                    "state_file": str(self.inference_state_path),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.inference_runtime = None
+            self.inference_last_error = _summarize_error(exc)
+            self.inference_last_provider = "none"
+            self._write_system(f"inference discovery warning: {self.inference_last_error}")
+            self._record_event(
+                "inference.runtime.error",
+                f"Inference discovery failed: {exc}",
+                severity="warn",
+                source="startup",
+            )
+
     async def _run_startup_health_check(
         self,
         *,
@@ -394,6 +445,14 @@ class TakoTerminalApp(App[None]):
             "dns_xmtp": _yes_no(dns_xmtp_ok),
             "python": platform.python_version(),
         }
+        if self.inference_runtime is not None:
+            self.health_summary["inference_selected"] = self.inference_runtime.selected_provider or "none"
+            self.health_summary["inference_ready"] = _yes_no(self.inference_runtime.ready)
+            self.health_summary["inference_key_source"] = self.inference_runtime.selected_key_source or "none"
+            for provider, status in sorted(self.inference_runtime.statuses.items()):
+                self.health_summary[f"inference_{provider}_cli"] = _yes_no(status.cli_installed)
+                self.health_summary[f"inference_{provider}_ready"] = _yes_no(status.ready)
+                self.health_summary[f"inference_{provider}_auth"] = status.auth_kind
 
         issues: list[tuple[str, str]] = []
         if not self.lock_acquired:
@@ -406,13 +465,21 @@ class TakoTerminalApp(App[None]):
             issues.append(("warn", "xmtp import unavailable; XMTP runtime/pairing may fail until dependencies are installed."))
         if not dns_xmtp_ok:
             issues.append(("warn", "DNS lookup for XMTP host failed; outbound XMTP connectivity may be unavailable."))
+        if self.inference_runtime is None:
+            issues.append(("warn", "Inference runtime discovery was not initialized."))
+        elif not self.inference_runtime.ready:
+            issues.append(("warn", "No ready inference provider found (Codex/Claude/Gemini)."))
+            for hint in _inference_setup_hints(self.inference_runtime):
+                issues.append(("info", f"inference hint: {hint}"))
 
         health_line = (
             f"health check: {self.instance_kind} instance | "
             f"lock={self.health_summary['lock']} | "
             f"disk_free_mb={disk_free_mb} | "
             f"xmtp_import={self.health_summary['xmtp_import']} | "
-            f"dns_xmtp={self.health_summary['dns_xmtp']}"
+            f"dns_xmtp={self.health_summary['dns_xmtp']} | "
+            f"inference={self.health_summary.get('inference_selected', 'none')}/"
+            f"{self.health_summary.get('inference_ready', 'no')}"
         )
         self._write_system(health_line)
         self._record_event(
@@ -424,6 +491,10 @@ class TakoTerminalApp(App[None]):
         )
 
         for severity, message in issues:
+            if severity == "info":
+                self._write_system(f"health hint: {message}")
+                self._record_event("health.check.hint", message, severity="info", source="health")
+                continue
             self._write_system(f"health issue [{severity}]: {message}")
             self._record_event("health.check.issue", message, severity=severity, source="health")
 
@@ -554,19 +625,61 @@ class TakoTerminalApp(App[None]):
         event_type = str(event.get("type", "unknown"))
         message = str(event.get("message", ""))
         recommendation = _type2_recommendation(event_type, message)
+        model_used = "heuristic"
+        if self.inference_runtime is not None and self.inference_runtime.ready:
+            prompt = _build_type2_prompt(event=event, depth=depth, reason=reason, fallback=recommendation)
+            try:
+                self._record_event(
+                    "inference.request",
+                    "Type2 requested inference from discovery-selected provider set.",
+                    source="inference",
+                    metadata={
+                        "selected_provider": self.inference_runtime.selected_provider or "none",
+                        "depth": depth,
+                        "event_type": event_type,
+                    },
+                )
+                provider, model_output = await asyncio.to_thread(
+                    run_inference_prompt_with_fallback,
+                    self.inference_runtime,
+                    prompt,
+                    timeout_s=_type2_inference_timeout(depth),
+                )
+                cleaned = _sanitize_for_display(model_output).strip()
+                if cleaned:
+                    recommendation = _summarize_text(cleaned)
+                    model_used = provider
+                    self.inference_last_provider = provider
+                    self.inference_last_error = ""
+            except Exception as exc:  # noqa: BLE001
+                self.inference_last_error = _summarize_error(exc)
+                self._write_system(
+                    f"inference warning: {self.inference_last_error}. falling back to heuristics."
+                )
+                self._record_event(
+                    "inference.error",
+                    f"Inference provider chain failed: {exc}",
+                    severity="warn",
+                    source="inference",
+                    metadata={
+                        "selected_provider": self.inference_runtime.selected_provider or "none",
+                        "depth": depth,
+                        "event_type": event_type,
+                    },
+                )
         self.type2_escalations += 1
-        self.type2_last = f"{event_type}:{depth}"
-        self._write_system(f"Type2[{depth}]: {recommendation}")
+        self.type2_last = f"{event_type}:{depth}:{model_used}"
+        self._write_system(f"Type2[{depth}] ({model_used}): {recommendation}")
         append_daily_note(
             daily_root(),
             date.today(),
-            f"Type2 escalation ({depth}) on {event_type}: {reason}. Recommendation: {recommendation}",
+            f"Type2 escalation ({depth}) on {event_type} via {model_used}: {reason}. Recommendation: {recommendation}",
         )
         self._record_event(
             "type2.result",
             recommendation,
             source="type2",
-            metadata={"event_type": event_type, "depth": depth, "reason": reason},
+            metadata={"event_type": event_type, "depth": depth, "reason": reason, "model_used": model_used},
         )
 
     def _assess_event_for_type2(self, event: dict[str, Any]) -> tuple[bool, str, str]:
@@ -1099,7 +1212,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, doctor, pair, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, inference, doctor, pair, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1123,6 +1236,8 @@ class TakoTerminalApp(App[None]):
                 f"last_heartbeat: {heartbeat_age}\n"
                 f"type1_processed: {self.type1_processed}\n"
                 f"type2_escalations: {self.type2_escalations}\n"
+                f"inference_provider: {(self.inference_runtime.selected_provider if self.inference_runtime else 'none')}\n"
+                f"inference_ready: {('yes' if self.inference_runtime and self.inference_runtime.ready else 'no')}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
                 f"tako_address: {self.address}"
@@ -1136,6 +1251,23 @@ class TakoTerminalApp(App[None]):
             lines = ["health summary:"]
             for key in sorted(self.health_summary):
                 lines.append(f"{key}: {self.health_summary[key]}")
+            self._write_tako("\n".join(lines))
+            return
+
+        if cmd == "inference":
+            action = rest.strip().lower()
+            if action in {"refresh", "rescan", "scan", "reload"}:
+                self._initialize_inference_runtime()
+                self._write_tako("inference scan refreshed.")
+            if self.inference_runtime is None:
+                self._write_tako("inference runtime is not initialized.")
+                return
+            lines = ["inference status:"]
+            lines.extend(format_runtime_lines(self.inference_runtime))
+            for hint in _inference_setup_hints(self.inference_runtime):
+                lines.append(f"hint: {hint}")
+            if self.inference_last_error:
+                lines.append(f"last error: {self.inference_last_error}")
             self._write_tako("\n".join(lines))
             return
 
@@ -1292,12 +1424,17 @@ class TakoTerminalApp(App[None]):
         self.memory_panel.update(memory)
 
         operator = self.operator_address or "not paired"
+        inference_provider = self.inference_runtime.selected_provider if self.inference_runtime else "none"
+        inference_ready = "yes" if self.inference_runtime and self.inference_runtime.ready else "no"
+        inference_source = self.inference_runtime.selected_key_source if self.inference_runtime else None
         sensors = (
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"
             f"- type2 last: {self.type2_last}\n"
+            f"- inference: {inference_provider} (ready={inference_ready})\n"
+            f"- inference source: {inference_source or 'none'}\n"
             f"- operator: {operator}\n"
             f"- events written: {self.event_total_written} / ingested: {self.event_total_ingested}"
         )
@@ -1397,6 +1534,65 @@ def _parse_command(text: str) -> tuple[str, str]:
     cmd = parts[0].lower()
     rest = parts[1] if len(parts) > 1 else ""
     return cmd, rest
+
+
+def _inference_setup_hints(runtime: InferenceRuntime) -> list[str]:
+    hints: list[str] = []
+
+    codex = runtime.statuses.get("codex")
+    if codex and not codex.ready:
+        if not codex.cli_installed:
+            hints.append("install Codex CLI (`npm i -g @openai/codex`) or add `codex` to PATH.")
+        else:
+            hints.append("run `codex login` or set `OPENAI_API_KEY`.")
+
+    claude = runtime.statuses.get("claude")
+    if claude and not claude.ready:
+        if not claude.cli_installed:
+            hints.append("install Claude CLI and add `claude` to PATH.")
+        else:
+            hints.append("set `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) for Claude inference.")
+
+    gemini = runtime.statuses.get("gemini")
+    if gemini and not gemini.ready:
+        if not gemini.cli_installed:
+            hints.append("install Gemini CLI and add `gemini` to PATH.")
+        else:
+            hints.append("run `gemini` and complete auth, or set `GEMINI_API_KEY` / `GOOGLE_API_KEY`.")
+
+    return hints
+
+
+def _build_type2_prompt(*, event: dict[str, Any], depth: str, reason: str, fallback: str) -> str:
+    event_type = str(event.get("type", "unknown"))
+    severity = str(event.get("severity", "info"))
+    source = str(event.get("source", "system"))
+    message = str(event.get("message", ""))
+    metadata = event.get("metadata")
+    metadata_json = json.dumps(metadata, ensure_ascii=True, sort_keys=True) if isinstance(metadata, dict) else "{}"
+
+    return (
+        "You are Tako Type2 reasoning.\n"
+        "Given an operational event, produce exactly one concise safe recommendation line.\n"
+        "Priorities: safety, reversibility, operator control boundary, and immediate next action.\n"
+        "No markdown, no bullets, <= 180 characters.\n"
+        f"depth={depth}\n"
+        f"reason={reason}\n"
+        f"event.type={event_type}\n"
+        f"event.severity={severity}\n"
+        f"event.source={source}\n"
+        f"event.message={message}\n"
+        f"event.metadata={metadata_json}\n"
+        f"fallback={fallback}\n"
+    )
+
+
+def _type2_inference_timeout(depth: str) -> float:
+    if depth == "deep":
+        return 120.0
+    if depth == "medium":
+        return 85.0
+    return 60.0
 
 
 def _normalize_pairing_code(value: str) -> str:

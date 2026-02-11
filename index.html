@@ -724,6 +724,9 @@
                 Runs a startup health check to classify environment state (brand-new vs established), verify lock/safety, and probe resources.
               </li>
               <li>
+                Detects local inference bridges (<code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
+              </li>
+              <li>
                 Launches the interactive terminal app and runs onboarding as explicit states.
               </li>
               <li>
@@ -765,6 +768,9 @@
               </li>
               <li>
                 Runtime cognition consumes <code>.tako/state/events.jsonl</code> with Type 1 triage and escalates critical signals to Type 2 depth tasks.
+              </li>
+              <li>
+                Type 2 uses detected inference providers with automatic fallback across ready CLIs; if all fail, Tako falls back to heuristic safety recommendations.
               </li>
               <li>
                 The daemon retries XMTP stream subscriptions with backoff and falls back to polling when stream errors persist.

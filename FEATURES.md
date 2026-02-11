@@ -66,11 +66,13 @@
 - **Properties**:
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
   - Runs startup health checks (instance context, lock state, writable paths, dependency/network probes) before onboarding.
+  - Detects inference providers from local CLI installs (`codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
   - Prompts for XMTP control-channel setup first (ASAP), before identity questions.
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
+  - Type 2 invokes discovered inference providers with automatic fallback across ready CLIs.
   - Runs XMTP daemon loop as a background task when paired.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.
@@ -83,6 +85,8 @@
   - [x] Identity + routine onboarding happens in-chat in the terminal app (not shell prompts).
   - [x] Terminal input can confirm outbound pairing code and continue to running mode.
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
+  - [x] Runtime can report Codex/Claude/Gemini CLI+auth discovery status via `inference` command.
+  - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
 
 ### Local runtime keys (`.tako/keys.json`)

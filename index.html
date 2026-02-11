@@ -727,6 +727,9 @@
                 Detects local inference bridges (<code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
               </li>
               <li>
+                Keeps inference execution gated until the first interactive chat turn, so startup remains deterministic.
+              </li>
+              <li>
                 Launches the interactive terminal app and runs onboarding as explicit states.
               </li>
               <li>
@@ -771,6 +774,9 @@
               </li>
               <li>
                 Type 2 uses detected inference providers with automatic fallback across ready CLIs; if all fail, Tako falls back to heuristic safety recommendations.
+              </li>
+              <li>
+                Before the first interactive turn, Type 2 remains heuristic-only by design.
               </li>
               <li>
                 The daemon retries XMTP stream subscriptions with backoff and falls back to polling when stream errors persist.

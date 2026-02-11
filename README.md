@@ -5,6 +5,7 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 - A first-class interactive terminal app main loop (`tako`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Inference-provider discovery for Codex / Claude / Gemini CLIs with key-source detection
+- Inference execution gate so first model call starts on the first interactive chat turn
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - A small command router over the operator channel (`help`, `status`, `doctor`, `reimprint`)
@@ -71,7 +72,7 @@ Runtime-only (ignored):
 - Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
-- Type 2 escalation uses discovered inference providers with fallback across ready CLIs, then falls back to heuristic guidance if inference calls fail.
+- Type 2 escalation uses discovered inference providers with fallback across ready CLIs after the first interactive chat turn, then falls back to heuristic guidance if inference calls fail.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit.
 
 ## Configuration

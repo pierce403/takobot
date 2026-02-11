@@ -72,6 +72,16 @@ class SessionState(str, Enum):
     RUNNING = "RUNNING"
 
 
+FIRST_INTERACTIVE_INFERENCE_STATES = {
+    SessionState.ASK_XMTP_HANDLE,
+    SessionState.PAIRING_OUTBOUND,
+    SessionState.ONBOARDING_IDENTITY,
+    SessionState.ONBOARDING_ROUTINES,
+    SessionState.PAIRED,
+    SessionState.RUNNING,
+}
+
+
 class TakoTerminalApp(App[None]):
     CSS = """
     Screen {
@@ -188,6 +198,10 @@ class TakoTerminalApp(App[None]):
         self.inference_state_path: Path | None = None
         self.inference_last_provider = "none"
         self.inference_last_error = ""
+        self.inference_gate_open = False
+        self.inference_gate_opened_state = "none"
+        self.inference_gate_opened_at: float | None = None
+        self.inference_gate_block_noted = False
 
         self.status_bar: Static
         self.transcript: RichLog
@@ -411,6 +425,28 @@ class TakoTerminalApp(App[None]):
                 source="startup",
             )
 
+    def _maybe_open_inference_gate_for_turn(self, text: str) -> None:
+        if self.inference_gate_open:
+            return
+        if not text.strip():
+            return
+        if self.state not in FIRST_INTERACTIVE_INFERENCE_STATES:
+            return
+
+        self.inference_gate_open = True
+        self.inference_gate_opened_state = self.state.value
+        self.inference_gate_opened_at = time.monotonic()
+        self.inference_gate_block_noted = False
+        self._write_system(
+            f"inference gate opened on first interactive turn (state={self.inference_gate_opened_state})."
+        )
+        self._record_event(
+            "inference.gate.opened",
+            "Inference gate opened after first interactive user turn.",
+            source="session",
+            metadata={"state": self.inference_gate_opened_state},
+        )
+
     async def _run_startup_health_check(
         self,
         *,
@@ -449,6 +485,8 @@ class TakoTerminalApp(App[None]):
             self.health_summary["inference_selected"] = self.inference_runtime.selected_provider or "none"
             self.health_summary["inference_ready"] = _yes_no(self.inference_runtime.ready)
             self.health_summary["inference_key_source"] = self.inference_runtime.selected_key_source or "none"
+            self.health_summary["inference_gate"] = "open" if self.inference_gate_open else "closed"
+            self.health_summary["inference_start_mode"] = "first_interactive_turn"
             for provider, status in sorted(self.inference_runtime.statuses.items()):
                 self.health_summary[f"inference_{provider}_cli"] = _yes_no(status.cli_installed)
                 self.health_summary[f"inference_{provider}_ready"] = _yes_no(status.ready)
@@ -471,6 +509,8 @@ class TakoTerminalApp(App[None]):
             issues.append(("warn", "No ready inference provider found (Codex/Claude/Gemini)."))
             for hint in _inference_setup_hints(self.inference_runtime):
                 issues.append(("info", f"inference hint: {hint}"))
+        elif not self.inference_gate_open:
+            issues.append(("info", "Inference execution is gated until the first interactive turn."))
 
         health_line = (
             f"health check: {self.instance_kind} instance | "
@@ -479,7 +519,8 @@ class TakoTerminalApp(App[None]):
             f"xmtp_import={self.health_summary['xmtp_import']} | "
             f"dns_xmtp={self.health_summary['dns_xmtp']} | "
             f"inference={self.health_summary.get('inference_selected', 'none')}/"
-            f"{self.health_summary.get('inference_ready', 'no')}"
+            f"{self.health_summary.get('inference_ready', 'no')} | "
+            f"inference_gate={self.health_summary.get('inference_gate', 'closed')}"
         )
         self._write_system(health_line)
         self._record_event(
@@ -626,7 +667,7 @@ class TakoTerminalApp(App[None]):
         message = str(event.get("message", ""))
         recommendation = _type2_recommendation(event_type, message)
         model_used = "heuristic"
-        if self.inference_runtime is not None and self.inference_runtime.ready:
+        if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
             prompt = _build_type2_prompt(event=event, depth=depth, reason=reason, fallback=recommendation)
             try:
                 self._record_event(
@@ -666,6 +707,19 @@ class TakoTerminalApp(App[None]):
                         "depth": depth,
                         "event_type": event_type,
                     },
+                )
+        elif self.inference_runtime is not None and self.inference_runtime.ready and not self.inference_gate_open:
+            model_used = "heuristic:gate-closed"
+            if not self.inference_gate_block_noted:
+                self.inference_gate_block_noted = True
+                self._write_system(
+                    "inference gate is closed until the first interactive turn; Type2 is using heuristics for now."
+                )
+                self._record_event(
+                    "inference.gate.blocked",
+                    "Inference call skipped because gate is closed before first interactive turn.",
+                    source="inference",
+                    metadata={"event_type": event_type, "depth": depth},
                 )
         self.type2_escalations += 1
         self.type2_last = f"{event_type}:{depth}:{model_used}"
@@ -712,6 +766,8 @@ class TakoTerminalApp(App[None]):
         if self.state == SessionState.BOOTING:
             self._write_tako("still booting. give me a moment.")
             return
+
+        self._maybe_open_inference_gate_for_turn(text)
 
         if self.state == SessionState.ONBOARDING_IDENTITY:
             await self._handle_identity_onboarding(text)
@@ -1238,6 +1294,8 @@ class TakoTerminalApp(App[None]):
                 f"type2_escalations: {self.type2_escalations}\n"
                 f"inference_provider: {(self.inference_runtime.selected_provider if self.inference_runtime else 'none')}\n"
                 f"inference_ready: {('yes' if self.inference_runtime and self.inference_runtime.ready else 'no')}\n"
+                f"inference_gate: {('open' if self.inference_gate_open else 'closed')}\n"
+                f"inference_gate_state: {self.inference_gate_opened_state}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
                 f"tako_address: {self.address}"
@@ -1263,6 +1321,8 @@ class TakoTerminalApp(App[None]):
                 self._write_tako("inference runtime is not initialized.")
                 return
             lines = ["inference status:"]
+            lines.append(f"inference gate: {'open' if self.inference_gate_open else 'closed'}")
+            lines.append(f"inference gate opened state: {self.inference_gate_opened_state}")
             lines.extend(format_runtime_lines(self.inference_runtime))
             for hint in _inference_setup_hints(self.inference_runtime):
                 lines.append(f"hint: {hint}")
@@ -1407,6 +1467,7 @@ class TakoTerminalApp(App[None]):
             f"- next: {pair_next}\n"
             f"- runtime: {self.runtime_mode}\n"
             f"- safe mode: {'on' if self.safe_mode else 'off'}\n"
+            f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
             f"- heartbeat ticks: {self.heartbeat_ticks}\n"
             f"- last heartbeat: {heartbeat_age}"
         )
@@ -1434,6 +1495,7 @@ class TakoTerminalApp(App[None]):
             f"- type2 escalations: {self.type2_escalations}\n"
             f"- type2 last: {self.type2_last}\n"
             f"- inference: {inference_provider} (ready={inference_ready})\n"
+            f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
             f"- inference source: {inference_source or 'none'}\n"
             f"- operator: {operator}\n"
             f"- events written: {self.event_total_written} / ingested: {self.event_total_ingested}"

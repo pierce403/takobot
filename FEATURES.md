@@ -15,29 +15,27 @@
 
 ### One-command runner (`tako.sh`)
 - **Stability**: stable
-- **Description**: Bootstraps a local Python environment and starts the daemon.
+- **Description**: Bootstraps a local Python environment and starts the interactive terminal app.
 - **Properties**:
   - Uses `uv` to create/manage a virtualenv at `.venv/`.
   - Installs dependencies from `requirements.txt` via `uv pip` when needed.
+  - Ensures terminal UI dependency (`textual`) is installed before launching app mode.
   - Installs `xmtp` via `uv pip` from PyPI when available; otherwise clones `xmtp-py` into `.tako/xmtp-py` and installs from source.
-  - Defaults to `tako run` when invoked with no arguments.
-  - Supports `start` as an alias for `run`.
+  - Defaults to `tako app` when invoked with no arguments.
+  - Supports `start` as an alias for `app`.
   - Exposes developer utilities (`doctor`, `hi`) for debugging/backwards compatibility.
 - **Test Criteria**:
-  - [x] `./tako.sh` starts the daemon.
-  - [x] `./tako.sh start` starts the daemon.
+  - [x] `./tako.sh` starts the interactive app.
+  - [x] `./tako.sh start` starts the interactive app.
   - [x] `./tako.sh doctor` runs without requiring a recipient.
 
 ### Setup + start bootstrap (`setup.sh`, `start.sh`)
 - **Stability**: in-progress
-- **Description**: First-wake bootstrap from current directory, terminal onboarding, outbound operator pairing, then daemon start.
+- **Description**: First-wake bootstrap from current directory, then launch interactive terminal app onboarding.
 - **Properties**:
   - `setup.sh` bootstraps (or reuses) the repo in the caller's current directory, then runs `start.sh`.
   - `setup.sh` ensures a local working branch (`local`) tracks `origin/main` for local-first changes with upstream sync.
-  - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako bootstrap`.
-  - If installed, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to refine conversational name/purpose answers.
-  - One-shot inference attempts use a 300-second timeout before fallback.
-  - If one-shot inference fails, `start.sh` prints attempted command diagnostics (exit + stderr summary) before manual fallback.
+  - `start.sh` checks repo layout/home sanity, ensures local `uv`, then runs `tako` (interactive app default path).
   - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` before handing off to `tako.sh`.
   - Site and README expose a `curl -fsSL https://tako.bot/setup.sh | bash` path.
 - **Test Criteria**:
@@ -47,18 +45,34 @@
 
 ### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)
 - **Stability**: in-progress
-- **Description**: A multi-command CLI where `run` starts the daemon; operator management happens over XMTP.
+- **Description**: `tako` defaults to interactive app mode; subcommands remain for dev/automation paths.
 - **Properties**:
-  - `tako run` starts the daemon and prints `tako address`.
+  - `tako` / `python -m tako_bot` launch `app` mode by default (interactive terminal main loop).
+  - `tako app` starts the TUI explicitly.
+  - `tako run` remains available for direct daemon loop (dev path).
   - `tako run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
   - If stream failures persist, `tako run` falls back to polling message history until stream mode stabilizes.
-  - `tako bootstrap` performs terminal-first outbound pairing before starting the daemon.
-  - Pairing is handled by `tako bootstrap`; all post-pair management happens over XMTP (not CLI flags).
+  - App onboarding performs terminal-first outbound pairing and then starts runtime tasks.
+  - `tako bootstrap` remains as a legacy/bootstrap utility path.
   - `tako doctor` and `tako hi` exist as developer utilities.
   - `tako.py` remains as a backwards-compatible wrapper.
 - **Test Criteria**:
   - [x] `python -m tako_bot doctor` runs and reports missing dependencies clearly.
   - [x] `python tako.py --to <addr>` invokes the `hi` command path.
+
+### Interactive terminal app main loop (`tako app`)
+- **Stability**: in-progress
+- **Description**: A persistent full-screen terminal UI acts as the primary operator-facing runtime loop.
+- **Properties**:
+  - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
+  - Runs onboarding as explicit states: `BOOTING`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `RUNNING`.
+  - Runs background runtime tasks (heartbeat + XMTP daemon loop) under UI orchestration.
+  - Supports local-only mode before pairing and safe-mode pause/resume controls.
+  - Surfaces operational failures as concise in-UI error cards with suggested next actions.
+- **Test Criteria**:
+  - [x] Running `tako` opens app mode by default (no required subcommand).
+  - [x] Identity + routine onboarding happens in-chat in the terminal app (not shell prompts).
+  - [x] Terminal input can confirm outbound pairing code and continue to running mode.
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable
@@ -125,21 +139,21 @@
 - **Stability**: in-progress
 - **Description**: Tako stores a single operator (controller) imprinted over XMTP and refuses silent reassignment.
 - **Properties**:
-  - Pairing is terminal-first: Tako sends an outbound DM challenge and operator confirms by pasting the code back into terminal.
+  - Pairing is terminal-first in app mode: Tako sends an outbound DM challenge and supports both XMTP reply or terminal code paste-back confirmation.
   - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
-  - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal bootstrap pairs a new operator.
+  - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs a new operator.
 - **Test Criteria**:
-  - [x] `tako bootstrap` can complete first pairing without requiring inbound XMTP stream health.
+  - [x] `tako` app mode can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
 
 ### Daily logs (`memory/dailies/YYYY-MM-DD.md`)
 - **Stability**: in-progress
 - **Description**: OpenClaw-style daily logs are committed under `memory/dailies/`, while runtime state stays under `.tako/`.
 - **Properties**:
-  - `tako run` ensures today’s daily log exists.
+  - `tako` app mode and `tako run` ensure today’s daily log exists.
   - Daily log templates warn against secrets.
 - **Test Criteria**:
-  - [x] Running `tako run` creates `memory/dailies/YYYY-MM-DD.md` if missing.
+  - [x] Running `tako` or `tako run` creates `memory/dailies/YYYY-MM-DD.md` if missing.
 
 ### Tool discovery (`tools/*/tool.py`)
 - **Stability**: in-progress
@@ -152,7 +166,7 @@
 
 ### Multi-instance lock
 - **Stability**: in-progress
-- **Description**: Prevent multiple `tako run` processes from using the same `.tako/` directory.
+- **Description**: Prevent multiple Tako processes from using the same `.tako/` directory.
 - **Properties**:
   - Uses an exclusive lock at `.tako/locks/tako.lock` (platform requires `fcntl`).
 - **Test Criteria**:

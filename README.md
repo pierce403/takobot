@@ -2,8 +2,9 @@
 
 Tako is a **highly autonomous, operator-imprinted agent** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
-- An always-on daemon with terminal-first pairing and XMTP-only management after imprint
-- A small command router over the operator channel (`help`, `status`, `doctor`, …)
+- A first-class interactive terminal app main loop (`tako`) with transcript, status bar, panels, and input box
+- A background XMTP runtime with stream retries + polling fallback
+- A small command router over the operator channel (`help`, `status`, `doctor`, `reimprint`)
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs
@@ -28,12 +29,14 @@ If you already have this repo cloned:
 
 `setup.sh` creates or switches to a local branch named `local` that tracks `origin/main`, so local changes stay isolated while upstream updates remain pullable.
 
-Pairing flow (XMTP operator channel is the only control plane):
+Pairing flow:
 
-- Tako chats with you in the terminal first and asks for your XMTP handle (`.eth` or `0x...`).
-- Tako sends an outbound DM challenge code to that handle.
-- Paste that code back into the terminal to confirm operator ownership.
-- After pairing, management moves to XMTP (`help`, `status`, `doctor`, `reimprint`).
+- `tako` always starts the interactive terminal app first.
+- During onboarding, Tako asks name/purpose/routine questions in-chat.
+- Tako asks whether you have an XMTP handle:
+  - yes: outbound DM pairing challenge (`.eth` or `0x...`) with code confirmation in app
+  - no: continue in terminal-managed local mode
+- After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `reimprint`).
 
 ## Architecture (minimal)
 
@@ -60,8 +63,9 @@ Runtime-only (ignored):
 - Installs the XMTP Python SDK (`xmtp`) via `uv pip`. If it is not yet on PyPI, it clones `xmtp-py` and installs from source.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
-- If available, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL name/role defaults.
-- Runs terminal-first outbound pairing (DM challenge + terminal paste-back confirmation), then starts the daemon.
+- Launches the interactive terminal app main loop (`tako app`, default `tako`).
+- Runs onboarding as an explicit state machine inside the app.
+- If paired, starts background XMTP runtime and keeps terminal as local cockpit.
 
 ## Configuration
 
@@ -73,14 +77,13 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 
 - Local checks: `./tako.sh doctor`
 - One-off DM send: `./tako.sh hi <xmtp_address_or_ens> ["message"]`
+- Direct daemon (dev): `./tako.sh run`
 
 ## Notes
 
-- The bootstrap flow requires `uv` to manage the project virtualenv and Python dependencies.
+- The terminal app flow requires `uv` to manage the project virtualenv and Python dependencies.
 - `setup.sh` / `start.sh` will attempt a repo-local `uv` install automatically at `.tako/bin/uv` if `uv` is missing.
-- On first wake, `start.sh` asks conversational name/purpose questions and can optionally use local inference CLIs to refine wording.
-- One-shot inference CLI onboarding waits up to 300 seconds before timing out and falling back.
-- If one-shot inference CLI onboarding fails, `start.sh` now prints attempted command diagnostics before manual fallback.
+- `start.sh` now delegates onboarding to the in-app terminal UX; it no longer runs shell prompts for identity setup.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
 - XMTP client initialization disables history sync by default for compatibility.

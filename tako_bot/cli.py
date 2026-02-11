@@ -4,10 +4,12 @@ import asyncio
 import argparse
 import contextlib
 from collections import deque
+from dataclasses import dataclass
 import random
 import sys
 import time
 from datetime import date, datetime, timezone
+from typing import Callable
 
 from . import __version__
 from .daily import append_daily_note, ensure_daily_log
@@ -33,11 +35,34 @@ MESSAGE_HISTORY_PER_CONVERSATION = 80
 SEEN_MESSAGE_CACHE_MAX = 4096
 
 
+@dataclass(frozen=True)
+class RuntimeHooks:
+    log: Callable[[str, str], None] | None = None
+    inbound_message: Callable[[str, str], None] | None = None
+    emit_console: bool = True
+
+
+def _emit_runtime_log(
+    message: str,
+    *,
+    level: str = "info",
+    stderr: bool = False,
+    hooks: RuntimeHooks | None = None,
+) -> None:
+    if hooks and hooks.log:
+        hooks.log(level, message)
+    if hooks is None or hooks.emit_console:
+        print(message, file=sys.stderr if stderr else sys.stdout)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tako", description="Tako — highly autonomous operator-imprinted agent")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd", required=False)
+
+    app = sub.add_parser("app", help="Start the interactive terminal app.")
+    app.add_argument("--interval", type=float, default=30.0, help="(dev) Heartbeat interval seconds")
 
     hi = sub.add_parser("hi", help="(dev) Send a one-off DM.")
     hi.add_argument("--to", required=True, help="XMTP address or ENS name")
@@ -61,6 +86,21 @@ def _ens_rpc_urls_from_args(value: str | None) -> list[str]:
         return list(DEFAULT_ENS_RPC_URLS)
     urls = [item.strip() for item in value.split(",") if item.strip()]
     return urls or list(DEFAULT_ENS_RPC_URLS)
+
+
+def cmd_app(args: argparse.Namespace) -> int:
+    try:
+        from .app import run_terminal_app
+    except ModuleNotFoundError as exc:
+        if exc.name == "textual":
+            print(
+                "Interactive app requires `textual`. Run `./tako.sh` so dependencies install via uv.",
+                file=sys.stderr,
+            )
+            return 1
+        raise
+
+    return run_terminal_app(interval=max(1.0, float(args.interval)))
 
 
 def cmd_hi(args: argparse.Namespace) -> int:
@@ -191,12 +231,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     operator_cfg = load_operator(paths.operator_json)
     operator_inbox_id = get_operator_inbox_id(operator_cfg)
 
-    print(f"tako address: {address}")
-    print("status: starting daemon")
+    _emit_runtime_log(f"tako address: {address}")
+    _emit_runtime_log("status: starting daemon")
     if operator_inbox_id:
-        print("pairing: operator already imprinted")
+        _emit_runtime_log("pairing: operator already imprinted")
     else:
-        print("pairing: unpaired (run ./start.sh for terminal-first outbound pairing)")
+        _emit_runtime_log("pairing: unpaired (launch `tako` for terminal onboarding)")
 
     try:
         with instance_lock(paths.locks_dir / "tako.lock"):
@@ -215,19 +255,22 @@ async def _run_daemon(
     wallet_key: str,
     db_encryption_key: str,
     address: str,
+    hooks: RuntimeHooks | None = None,
 ) -> int:
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
 
     try:
         client = await create_client(env, paths.xmtp_db_dir, wallet_key, db_encryption_key)
+    except asyncio.CancelledError:
+        raise
     except KeyboardInterrupt:
         raise
     except Exception as exc:  # noqa: BLE001
-        print(f"XMTP client init failed: {exc}", file=sys.stderr)
+        _emit_runtime_log(f"XMTP client init failed: {exc}", level="error", stderr=True, hooks=hooks)
         hint = hint_for_xmtp_error(exc)
         if hint:
-            print(hint, file=sys.stderr)
+            _emit_runtime_log(hint, level="error", stderr=True, hooks=hooks)
         return 1
 
     operator_cfg = load_operator(paths.operator_json)
@@ -235,16 +278,16 @@ async def _run_daemon(
 
     if operator_inbox_id:
         clear_pending(paths.state_dir / "pairing.json")
-        print("status: paired")
+        _emit_runtime_log("status: paired", hooks=hooks)
     else:
-        print("status: unpaired")
-        print("pairing: run ./start.sh in this repo to complete terminal-first pairing")
+        _emit_runtime_log("status: unpaired", hooks=hooks)
+        _emit_runtime_log("pairing: launch `tako` for terminal-first pairing", hooks=hooks)
 
-    print(f"inbox_id: {client.inbox_id}")
+    _emit_runtime_log(f"inbox_id: {client.inbox_id}", hooks=hooks)
     if args.once:
         return 0
 
-    print("Daemon started. Press Ctrl+C to stop.")
+    _emit_runtime_log("Daemon started. Press Ctrl+C to stop.", hooks=hooks)
 
     start = time.monotonic()
     heartbeat = asyncio.create_task(_heartbeat_loop(args))
@@ -266,21 +309,28 @@ async def _run_daemon(
                 try:
                     items = await _poll_new_messages(client, seen_message_ids, seen_message_order)
                     for item in items:
-                        await _handle_incoming_message(item, client, paths, address, env, start)
+                        await _handle_incoming_message(item, client, paths, address, env, start, hooks=hooks)
                     poll_successes += 1
                     reconnect_attempt = 0
                     if poll_successes >= STREAM_POLL_STABLE_CYCLES:
-                        print("XMTP polling is stable; retrying stream mode.", file=sys.stderr)
+                        _emit_runtime_log(
+                            "XMTP polling is stable; retrying stream mode.",
+                            level="warn",
+                            stderr=True,
+                            hooks=hooks,
+                        )
                         mode = "stream"
                         error_burst_count = 0
                         continue
+                except asyncio.CancelledError:
+                    raise
                 except KeyboardInterrupt:
                     raise
                 except Exception as exc:  # noqa: BLE001
                     now = time.monotonic()
                     summary = _summarize_stream_error(exc)
-                    print(f"XMTP polling error: {summary}", file=sys.stderr)
-                    _maybe_print_xmtp_hint(exc, hint_last_printed, now)
+                    _emit_runtime_log(f"XMTP polling error: {summary}", level="error", stderr=True, hooks=hooks)
+                    _maybe_print_xmtp_hint(exc, hint_last_printed, now, hooks=hooks)
                     poll_successes = 0
 
                 await asyncio.sleep(STREAM_POLL_INTERVAL_S)
@@ -297,12 +347,17 @@ async def _run_daemon(
                         last_error_at = now
 
                         summary = _summarize_stream_error(item)
-                        print(f"XMTP stream warning: {summary}", file=sys.stderr)
+                        _emit_runtime_log(f"XMTP stream warning: {summary}", level="warn", stderr=True, hooks=hooks)
 
-                        _maybe_print_xmtp_hint(item, hint_last_printed, now)
+                        _maybe_print_xmtp_hint(item, hint_last_printed, now, hooks=hooks)
 
                         if error_burst_count >= STREAM_ERROR_BURST_THRESHOLD:
-                            print("XMTP stream unstable; switching to polling fallback.", file=sys.stderr)
+                            _emit_runtime_log(
+                                "XMTP stream unstable; switching to polling fallback.",
+                                level="warn",
+                                stderr=True,
+                                hooks=hooks,
+                            )
                             mode = "poll"
                             poll_successes = 0
                             break
@@ -311,14 +366,16 @@ async def _run_daemon(
                     error_burst_count = 0
                     reconnect_attempt = 0
                     if _mark_message_seen(item, seen_message_ids, seen_message_order):
-                        await _handle_incoming_message(item, client, paths, address, env, start)
+                        await _handle_incoming_message(item, client, paths, address, env, start, hooks=hooks)
+            except asyncio.CancelledError:
+                raise
             except KeyboardInterrupt:
                 raise
             except Exception as exc:  # noqa: BLE001
                 now = time.monotonic()
                 summary = _summarize_stream_error(exc)
-                print(f"XMTP stream crashed: {summary}", file=sys.stderr)
-                _maybe_print_xmtp_hint(exc, hint_last_printed, now)
+                _emit_runtime_log(f"XMTP stream crashed: {summary}", level="error", stderr=True, hooks=hooks)
+                _maybe_print_xmtp_hint(exc, hint_last_printed, now, hooks=hooks)
                 mode = "poll"
                 poll_successes = 0
             finally:
@@ -330,7 +387,12 @@ async def _run_daemon(
 
             reconnect_delay = _stream_reconnect_delay(reconnect_attempt)
             reconnect_attempt += 1
-            print(f"XMTP stream reconnecting in {reconnect_delay:.1f}s...", file=sys.stderr)
+            _emit_runtime_log(
+                f"XMTP stream reconnecting in {reconnect_delay:.1f}s...",
+                level="warn",
+                stderr=True,
+                hooks=hooks,
+            )
             await asyncio.sleep(reconnect_delay)
     finally:
         heartbeat.cancel()
@@ -340,7 +402,15 @@ async def _run_daemon(
     return 0
 
 
-async def _handle_incoming_message(item, client, paths, address: str, env: str, start: float) -> None:
+async def _handle_incoming_message(
+    item,
+    client,
+    paths,
+    address: str,
+    env: str,
+    start: float,
+    hooks: RuntimeHooks | None = None,
+) -> None:
     sender_inbox_id = getattr(item, "sender_inbox_id", None)
     if not isinstance(sender_inbox_id, str):
         return
@@ -353,6 +423,8 @@ async def _handle_incoming_message(item, client, paths, address: str, env: str, 
     text = content.strip()
     if not text:
         return
+    if hooks and hooks.inbound_message:
+        hooks.inbound_message(sender_inbox_id, text)
 
     convo_id = getattr(item, "conversation_id", None)
     if not isinstance(convo_id, (bytes, bytearray)):
@@ -369,7 +441,7 @@ async def _handle_incoming_message(item, client, paths, address: str, env: str, 
         if _looks_like_command(text):
             await convo.send(
                 "This Tako instance is not paired yet.\n\n"
-                "Pairing is terminal-first now: run `./start.sh` in the local repo, "
+                "Pairing is terminal-first now: run `tako` (or `./start.sh`) in the local repo, "
                 "enter your XMTP handle, and confirm the outbound DM code there."
             )
         return
@@ -407,26 +479,31 @@ async def _handle_incoming_message(item, client, paths, address: str, env: str, 
             await convo.send(
                 "Re-imprint is operator-only and destructive.\n\n"
                 "Reply: `reimprint CONFIRM` to clear the current operator. "
-                "Then re-run terminal bootstrap (`./start.sh`) to pair again."
+                "Then re-run terminal onboarding (`tako` or `./start.sh`) to pair again."
             )
             return
         clear_operator(paths.operator_json)
         clear_pending(paths.state_dir / "pairing.json")
         append_daily_note(daily_root(), date.today(), "Operator cleared imprint (reimprint CONFIRM).")
-        await convo.send("Operator imprint cleared. Run `./start.sh` in the local terminal to pair a new operator.")
+        await convo.send("Operator imprint cleared. Run `tako` (or `./start.sh`) in the local terminal to pair a new operator.")
         return
 
     await convo.send("Unknown command. Reply 'help'.")
 
 
-def _maybe_print_xmtp_hint(error: Exception, hint_last_printed: dict[str, float], now: float) -> None:
+def _maybe_print_xmtp_hint(
+    error: Exception,
+    hint_last_printed: dict[str, float],
+    now: float,
+    hooks: RuntimeHooks | None = None,
+) -> None:
     hint = hint_for_xmtp_error(error)
     if not hint:
         return
     last_hint_time = hint_last_printed.get(hint, 0.0)
     if now - last_hint_time > STREAM_HINT_COOLDOWN_S:
         hint_last_printed[hint] = now
-        print(hint, file=sys.stderr)
+        _emit_runtime_log(hint, level="warn", stderr=True, hooks=hooks)
 
 
 def _message_id(item) -> bytes | None:
@@ -579,8 +656,13 @@ def _stream_reconnect_delay(attempt: int) -> float:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+    argv = list(argv) if argv is not None else list(sys.argv[1:])
+    if not argv:
+        argv = ["app"]
     args = parser.parse_args(argv)
 
+    if args.cmd == "app":
+        return cmd_app(args)
     if args.cmd == "hi":
         return cmd_hi(args)
     if args.cmd == "run":

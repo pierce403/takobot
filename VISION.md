@@ -2,17 +2,17 @@
 
 These invariants should remain true as the implementation evolves.
 
-## XMTP Control Plane
+## Terminal Main Loop + XMTP Control Plane
 
-- XMTP is the **only** control plane for:
-  - Operator commands
-  - Status and health reporting
-  - Onboarding / imprint handshake
+- Running `tako` starts an interactive terminal app that is the primary runtime loop.
+- Before pairing, terminal app onboarding is the control path.
+- After pairing, XMTP is the **only** control plane for identity/config/tools/routines changes.
+- Terminal remains a local cockpit for status, logs, read-only queries, and safe-mode controls.
 
 Implications:
 
 - No user-facing configuration via environment variables.
-- No operator setup via CLI flags (CLI starts the daemon only).
+- No required subcommands for normal operation (`tako` launches app mode directly).
 
 ## Operator Imprint
 

@@ -644,24 +644,19 @@
           <div class="card panel">
             <h2>Quickstart</h2>
             <p>
-              Bootstrap from your current directory (clone if needed), run first-wake SOUL prompts, then pair in terminal:
+              Bootstrap from your current directory (clone if needed), then launch Tako's interactive terminal app:
             </p>
             <pre><code>curl -fsSL https://tako.bot/setup.sh | bash
 
 # If you already have the repo:
 ./start.sh
 
-# Tako asks for your XMTP handle in terminal
-# Tako sends you a DM with a pairing code
-# Paste the code back into terminal
-# Then manage over XMTP: help / status / doctor</code></pre>
+# In app: onboarding questions (name/purpose/routines)
+# Then: pair over XMTP (or continue local-only mode)
+# After pairing: XMTP controls identity/config/tools/routines</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Setup also initializes a local <code>local</code> branch that tracks <code>origin/main</code> for
               local changes + upstream pulls.
-            </p>
-            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              If installed, <code>start.sh</code> can optionally use one-shot local inference CLIs
-              (<code>codex</code>/<code>claude</code>/<code>gemini</code>) to refine conversational name/purpose answers.
             </p>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Developer utilities: <code>./tako.sh doctor</code> and <code>./tako.sh hi &lt;to&gt; ["message"]</code>.
@@ -725,12 +720,11 @@
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
               <li>
-                If available, optionally asks to use one-shot local inference CLIs
-                (<code>codex</code>/<code>claude</code>/<code>gemini</code>) to refine conversational identity answers.
+                Launches the interactive terminal app and runs onboarding as explicit states.
               </li>
               <li>
-                Asks for operator handle in terminal, sends outbound XMTP pairing DM, confirms via terminal code paste-back,
-                then stores operator imprint in <code>.tako/operator.json</code>.
+                Asks for operator handle in-app, sends outbound XMTP pairing DM, supports XMTP reply or terminal code confirmation,
+                then stores operator imprint in <code>.tako/operator.json</code> when paired.
               </li>
             </ul>
           </div>
@@ -742,8 +736,10 @@
               There is no user-facing configuration via environment variables or CLI flags.
             </p>
             <ul>
-              <li>Pairing is terminal-first with outbound XMTP DM challenge confirmation.</li>
+              <li>Before pairing: terminal app is primary onboarding/control loop.</li>
+              <li>After pairing: XMTP is primary for identity/config/tools/routines.</li>
               <li>After pairing, operator commands include: <code>help</code>, <code>status</code>, <code>doctor</code>, <code>reimprint</code>.</li>
+              <li>Terminal remains a local cockpit for status/logs/read-only queries/safe mode.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
@@ -771,12 +767,6 @@
               </li>
               <li>
                 If <code>uv</code> is missing, <code>start.sh</code> installs a repo-local copy at <code>.tako/bin/uv</code>.
-              </li>
-              <li>
-                If one-shot inference CLI setup fails, onboarding prints command-level diagnostics and falls back to manual prompts.
-              </li>
-              <li>
-                One-shot inference onboarding waits up to 300 seconds before timeout fallback.
               </li>
               <li>
                 If you see DB errors (e.g., “file is not a database”), delete <code>.tako/xmtp-db</code>

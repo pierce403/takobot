@@ -19,12 +19,13 @@ from tako_bot.cli import main
 def _argv() -> list[str]:
     args = sys.argv[1:]
     if not args:
-        return ["doctor"]
-    if args[0] in {"hi", "run", "doctor"}:
+        return []
+    if args[0] in {"-h", "--help", "help", "--version"}:
+        return args
+    if args[0] in {"app", "hi", "run", "doctor", "bootstrap"}:
         return args
     return ["hi", *args]
 
 
 if __name__ == "__main__":
     raise SystemExit(main(_argv()))
-

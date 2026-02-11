@@ -38,7 +38,7 @@ Root directories (must exist):
 
 ## Multi-instance Safety
 
-- `tako start` must avoid running twice against the same `.tako/` state (use locks).
+- `tako` must avoid running twice against the same `.tako/` state (use locks).
 - State that is not meant for git lives under `.tako/state/**` (ignored).
 
 ## Working Agreements
@@ -56,6 +56,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-11 — Terminal app became the primary runtime loop
+
+- What happened: startup UX was still designed around shell prompts + daemon subcommands, which made first-run flow brittle and fragmented.
+- Fix: switched default entrypoint to interactive app mode (`tako`), moved onboarding into an explicit in-app state machine, and made daemon tasks background coroutines under UI orchestration.
+- Prevention: treat subcommands as dev/automation paths only; keep operator-facing flow in the persistent terminal UI.
 
 ### 2026-02-11 — Terminal-first outbound pairing
 

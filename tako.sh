@@ -22,8 +22,10 @@ case "${1:-}" in
   -h|--help|help)
     cat <<'EOF'
 Usage:
-  ./tako.sh [start]                                  # start daemon
-  ./tako.sh bootstrap                                # terminal-first onboarding + outbound pairing + daemon
+  ./tako.sh [start]                                  # start interactive terminal app (default)
+  ./tako.sh app                                      # same as default; interactive main loop
+  ./tako.sh run                                      # (dev) start daemon loop directly
+  ./tako.sh bootstrap                                # (dev) legacy terminal bootstrap + daemon
   ./tako.sh doctor                                   # (dev) environment checks
   ./tako.sh hi <xmtp_address_or_ens> [message]        # (dev) one-off DM
 EOF
@@ -33,7 +35,7 @@ esac
 
 SUBCMD=""
 case "${1:-}" in
-  start|bootstrap|hi|run|doctor)
+  start|app|bootstrap|hi|run|doctor)
     SUBCMD="$1"
     shift
     ;;
@@ -45,7 +47,7 @@ ARGS=()
 
 if [[ -z "$SUBCMD" ]]; then
   if [[ $# -eq 0 ]]; then
-    ARGS=("run")
+    ARGS=("app")
   else
     TARGET="$1"
     MESSAGE="${2:-}"
@@ -56,7 +58,7 @@ if [[ -z "$SUBCMD" ]]; then
   fi
 else
   if [[ "$SUBCMD" == "start" ]]; then
-    SUBCMD="run"
+    SUBCMD="app"
   fi
   if [[ "$SUBCMD" == "hi" ]]; then
     if [[ $# -ge 1 && "${1:-}" != --* ]]; then
@@ -103,6 +105,8 @@ import importlib.util
 import sys
 
 if importlib.util.find_spec("web3") is None:
+    sys.exit(1)
+if importlib.util.find_spec("textual") is None:
     sys.exit(1)
 PY
 then

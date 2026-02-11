@@ -5,6 +5,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 ## Done When
 
 - [ ] `.tako/` runtime structure exists (`locks/`, `logs/`, `state/`, `xmtp-db/`) and `.tako/keys.json` exists.
+- [ ] `uv` is installed for virtualenv + dependency management.
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally.
 - [ ] Operator receives a pairing completion message over XMTP.

@@ -62,18 +62,21 @@ else
 fi
 
 PYTHON="${PYTHON:-python3}"
+UV="${UV:-uv}"
 VENV="$ROOT/.venv"
+VENV_PY="$VENV/bin/python"
 
-if [[ ! -x "$VENV/bin/python" ]]; then
-  "$PYTHON" -m venv "$VENV"
+if ! command -v "$UV" >/dev/null 2>&1; then
+  echo "Error: uv is required to manage Tako Python dependencies." >&2
+  echo "Install uv: https://docs.astral.sh/uv/getting-started/installation/" >&2
+  exit 1
 fi
 
-# shellcheck disable=SC1091
-source "$VENV/bin/activate"
+if [[ ! -x "$VENV_PY" ]]; then
+  "$UV" venv --python "$PYTHON" "$VENV"
+fi
 
-python -m pip install -U pip >/dev/null
-
-if ! python - <<'PY' >/dev/null 2>&1
+if ! "$VENV_PY" - <<'PY' >/dev/null 2>&1
 import importlib.util
 import sys
 
@@ -81,7 +84,7 @@ if importlib.util.find_spec("web3") is None:
     sys.exit(1)
 PY
 then
-  python -m pip install -r "$ROOT/requirements.txt"
+  "$UV" pip install --python "$VENV_PY" -r "$ROOT/requirements.txt"
 fi
 
 install_xmtp_from_source() {
@@ -98,7 +101,7 @@ install_xmtp_from_source() {
   fi
 
   # Patch setuptools cmdclass entries for newer setuptools validators.
-  XMTP_SRC_DIR="$src_dir" python - <<'PY'
+  XMTP_SRC_DIR="$src_dir" "$VENV_PY" - <<'PY'
 from pathlib import Path
 import os
 
@@ -118,8 +121,8 @@ if build_py.exists():
         build_py.write_text(updated, encoding="utf-8")
 PY
 
-  python -m pip install -e "$src_dir/bindings/python"
-  python -m pip install -e "$src_dir/content-types/content-type-primitives"
+  "$UV" pip install --python "$VENV_PY" -e "$src_dir/bindings/python"
+  "$UV" pip install --python "$VENV_PY" -e "$src_dir/content-types/content-type-primitives"
 
   for pkg in "$src_dir"/content-types/*; do
     [[ -d "$pkg" ]] || continue
@@ -127,14 +130,14 @@ PY
       continue
     fi
     if [[ -f "$pkg/pyproject.toml" || -f "$pkg/setup.py" ]]; then
-      python -m pip install -e "$pkg"
+      "$UV" pip install --python "$VENV_PY" -e "$pkg"
     fi
   done
 
-  python -m pip install -e "$src_dir/sdks/python-sdk"
+  "$UV" pip install --python "$VENV_PY" -e "$src_dir/sdks/python-sdk"
 }
 
-if [[ "${ARGS[0]}" != "doctor" ]] && ! python - <<'PY' >/dev/null 2>&1
+if [[ "${ARGS[0]}" != "doctor" ]] && ! "$VENV_PY" - <<'PY' >/dev/null 2>&1
 import importlib.util
 import sys
 
@@ -142,10 +145,10 @@ if importlib.util.find_spec("xmtp") is None:
     sys.exit(1)
 PY
 then
-  if ! python -m pip install xmtp >/dev/null 2>&1; then
+  if ! "$UV" pip install --python "$VENV_PY" xmtp >/dev/null 2>&1; then
     echo "xmtp not available on PyPI; installing from source..." >&2
     install_xmtp_from_source
   fi
 fi
 
-exec python -m tako_bot "${ARGS[@]}"
+exec "$VENV_PY" -m tako_bot "${ARGS[@]}"

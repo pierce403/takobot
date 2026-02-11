@@ -672,10 +672,10 @@
             <div class="card panel">
               <h2>What happens on first run</h2>
             <ul>
-              <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
-              <li>Installs dependencies from <code>requirements.txt</code>.</li>
+              <li>Creates a Python virtual environment in <code>.venv/</code> via <code>uv</code>.</li>
+              <li>Installs dependencies from <code>requirements.txt</code> via <code>uv pip</code>.</li>
               <li>
-                Installs the XMTP Python SDK (<code>xmtp</code>) — if it’s not available on PyPI,
+                Installs the XMTP Python SDK (<code>xmtp</code>) via <code>uv pip</code> — if it’s not available on PyPI,
                 it clones <code>xmtp-py</code> and installs from source.
               </li>
               <li>
@@ -710,6 +710,9 @@
               <li>
                 XMTP requires outbound network access; if messaging fails, double-check your HTTPS /
                 HTTP2 egress.
+              </li>
+              <li>
+                Ensure <code>uv</code> is installed locally; bootstrap and dependency management run through it.
               </li>
               <li>
                 If you see DB errors (e.g., “file is not a database”), delete <code>.tako/xmtp-db</code>

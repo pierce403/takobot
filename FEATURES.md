@@ -17,9 +17,9 @@
 - **Stability**: stable
 - **Description**: Bootstraps a local Python environment and starts the daemon.
 - **Properties**:
-  - Creates a virtualenv at `.venv/` if missing.
-  - Installs dependencies from `requirements.txt` when needed.
-  - Installs `xmtp` from PyPI when available; otherwise clones `xmtp-py` into `.tako/xmtp-py` and installs from source.
+  - Uses `uv` to create/manage a virtualenv at `.venv/`.
+  - Installs dependencies from `requirements.txt` via `uv pip` when needed.
+  - Installs `xmtp` via `uv pip` from PyPI when available; otherwise clones `xmtp-py` into `.tako/xmtp-py` and installs from source.
   - Defaults to `tako run` when invoked with no arguments.
   - Supports `start` as an alias for `run`.
   - Exposes developer utilities (`doctor`, `hi`) for debugging/backwards compatibility.

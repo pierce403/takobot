@@ -302,10 +302,6 @@
         animation-duration: 1.2s;
       }
 
-      .tank-viewport.panic .tentacle {
-        animation-duration: 0.95s;
-      }
-
       .tank-caption {
         margin: 10px 2px 0;
         color: var(--muted-2);
@@ -410,7 +406,7 @@
         border-top: 1px solid rgba(255, 255, 255, 0.1);
       }
 
-      /* SVG styling + tentacle wiggles */
+      /* SVG styling */
       .octo-svg {
         width: 100%;
         height: auto;
@@ -419,41 +415,7 @@
       }
 
       .tentacle {
-        transform-box: fill-box;
-        transform-origin: top center;
-        animation: wiggle 1.7s ease-in-out infinite;
-      }
-
-      .tentacle.t2 {
-        animation-delay: -0.2s;
-      }
-      .tentacle.t3 {
-        animation-delay: -0.35s;
-      }
-      .tentacle.t4 {
-        animation-delay: -0.5s;
-      }
-      .tentacle.t5 {
-        animation-delay: -0.12s;
-      }
-      .tentacle.t6 {
-        animation-delay: -0.28s;
-      }
-      .tentacle.t7 {
-        animation-delay: -0.42s;
-      }
-      .tentacle.t8 {
-        animation-delay: -0.62s;
-      }
-
-      @keyframes wiggle {
-        0%,
-        100% {
-          transform: rotate(2.6deg);
-        }
-        50% {
-          transform: rotate(-2.6deg);
-        }
+        transition: stroke-opacity 0.2s ease;
       }
 
       .bubble {
@@ -825,6 +787,53 @@
         let reduceMotion = motionQuery.matches;
         let panicTimer = 0;
 
+        const TENTACLE_MODEL = [
+          { id: "t1", anchor: [125, 150], mid: [120, 214], tip: [116, 246], side: -1, amp: 8.8, phase: 0.14, freq: 3.1, turn: 3.2 },
+          { id: "t2", anchor: [145, 154], mid: [156, 220], tip: [160, 252], side: -1, amp: 7.8, phase: 0.66, freq: 2.8, turn: 2.2 },
+          { id: "t3", anchor: [165, 156], mid: [194, 220], tip: [204, 252], side: -1, amp: 7.2, phase: 1.05, freq: 2.55, turn: 1.2 },
+          { id: "t4", anchor: [188, 156], mid: [242, 214], tip: [256, 250], side: 1, amp: 8.4, phase: 1.46, freq: 2.5, turn: -1.5 },
+          { id: "t5", anchor: [115, 142], mid: [78, 196], tip: [46, 226], side: -1, amp: 11.2, phase: 0.38, freq: 3.3, turn: 4.3 },
+          { id: "t6", anchor: [205, 146], mid: [252, 200], tip: [292, 232], side: 1, amp: 11.0, phase: 1.86, freq: 3.26, turn: -4.1 },
+          { id: "t7", anchor: [135, 144], mid: [110, 194], tip: [90, 218], side: -1, amp: 8.4, phase: 0.92, freq: 2.98, turn: 2.8 },
+          { id: "t8", anchor: [210, 148], mid: [238, 202], tip: [258, 224], side: 1, amp: 8.3, phase: 2.2, freq: 2.95, turn: -2.7 },
+        ];
+
+        const tentacles = TENTACLE_MODEL.map((model) => {
+          const path = viewport.querySelector(`.tentacle.${model.id}`);
+          if (!path) return null;
+          const [ax, ay] = model.anchor;
+          const [mx, my] = model.mid;
+          const [tx, ty] = model.tip;
+          const dx = tx - ax;
+          const dy = ty - ay;
+          const len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const nx = -uy * model.side;
+          const ny = ux * model.side;
+          return {
+            path,
+            baseD: path.getAttribute("d") || "",
+            ax,
+            ay,
+            mx,
+            my,
+            tx,
+            ty,
+            len,
+            ux,
+            uy,
+            nx,
+            ny,
+            amp: model.amp,
+            phase: model.phase,
+            freq: model.freq,
+            turn: model.turn,
+          };
+        }).filter(Boolean);
+
+        if (!tentacles.length) return;
+
         const state = {
           x: 0,
           y: 0,
@@ -843,6 +852,57 @@
 
         function random(min, max) {
           return min + Math.random() * (max - min);
+        }
+
+        function num(value) {
+          return Number(value.toFixed(2));
+        }
+
+        function resetTentacles() {
+          for (const tentacle of tentacles) {
+            tentacle.path.setAttribute("d", tentacle.baseD);
+          }
+        }
+
+        function updateTentacles(now, speed, panic) {
+          if (reduceMotion) return;
+
+          const time = now * 0.001;
+          const speedFactor = clamp(speed / 190, 0, 1);
+          const panicFactor = panic ? 1.35 : 1;
+          const drift = clamp(state.vx / 170, -1, 1);
+
+          for (const tentacle of tentacles) {
+            const phase = time * tentacle.freq + tentacle.phase;
+            const oscillation = Math.sin(phase) + Math.sin(phase * 1.9 + tentacle.phase * 1.7) * 0.33;
+            const amp = tentacle.amp * (0.78 + speedFactor * 0.88) * panicFactor;
+            const bend = oscillation * amp + drift * tentacle.turn;
+            const tipCurl = bend * 1.24 + Math.sin(phase - 0.82) * amp * 0.42;
+
+            const p0x = tentacle.ax;
+            const p0y = tentacle.ay;
+            const p1x = tentacle.ax + (tentacle.mx - tentacle.ax) * 0.4 + tentacle.nx * bend * 0.34;
+            const p1y = tentacle.ay + (tentacle.my - tentacle.ay) * 0.4 + tentacle.ny * bend * 0.34;
+            const p2x = tentacle.mx + tentacle.nx * bend;
+            const p2y = tentacle.my + tentacle.ny * bend;
+            const tipPush = 1.5 + speedFactor * 2.8 + (panic ? 2.4 : 0);
+            const p3x = tentacle.tx + tentacle.nx * tipCurl + tentacle.ux * tipPush;
+            const p3y = tentacle.ty + tentacle.ny * tipCurl + tentacle.uy * tipPush;
+
+            const c1x = p0x + tentacle.ux * (tentacle.len * 0.22) + tentacle.nx * bend * 0.18;
+            const c1y = p0y + tentacle.uy * (tentacle.len * 0.22) + tentacle.ny * bend * 0.18;
+            const c2x = p1x + tentacle.ux * (tentacle.len * 0.2) + tentacle.nx * bend * 0.52;
+            const c2y = p1y + tentacle.uy * (tentacle.len * 0.2) + tentacle.ny * bend * 0.52;
+            const c3x = p2x + tentacle.ux * (tentacle.len * 0.18) + tentacle.nx * bend * 0.64;
+            const c3y = p2y + tentacle.uy * (tentacle.len * 0.18) + tentacle.ny * bend * 0.64;
+            const c4x = p3x - tentacle.ux * (tentacle.len * 0.2) + tentacle.nx * bend * 0.2;
+            const c4y = p3y - tentacle.uy * (tentacle.len * 0.2) + tentacle.ny * bend * 0.2;
+
+            tentacle.path.setAttribute(
+              "d",
+              `M${num(p0x)} ${num(p0y)} C${num(c1x)} ${num(c1y)}, ${num(c2x)} ${num(c2y)}, ${num(p2x)} ${num(p2y)} C${num(c3x)} ${num(c3y)}, ${num(c4x)} ${num(c4y)}, ${num(p3x)} ${num(p3y)}`
+            );
+          }
         }
 
         function limits() {
@@ -904,10 +964,11 @@
           if (!state.lastFrame) state.lastFrame = now;
           const dt = Math.min(0.05, (now - state.lastFrame) / 1000);
           state.lastFrame = now;
+          let panic = now < state.panicUntil;
+          let speed = Math.hypot(state.vx, state.vy);
 
           if (!reduceMotion) {
             const lim = limits();
-            const panic = now < state.panicUntil;
             const pull = panic ? 0.92 : 0.5;
             state.vx += (state.targetX - state.x) * pull * dt;
             state.vy += (state.targetY - state.y) * pull * dt;
@@ -918,11 +979,12 @@
             state.vy *= damp;
 
             const maxSpeed = panic ? 360 : 155;
-            const speed = Math.hypot(state.vx, state.vy);
+            speed = Math.hypot(state.vx, state.vy);
             if (speed > maxSpeed) {
               const ratio = maxSpeed / speed;
               state.vx *= ratio;
               state.vy *= ratio;
+              speed = maxSpeed;
             }
 
             state.x += state.vx * dt;
@@ -952,9 +1014,13 @@
             if (closeToTarget || Math.random() < (panic ? 0.002 : 0.0008)) {
               pickTarget();
             }
+          } else {
+            panic = false;
+            speed = 0;
           }
 
           const tilt = clamp(state.vx * 0.035 + state.vy * 0.02, -10, 10);
+          updateTentacles(now, speed, panic);
           render(tilt);
           requestAnimationFrame(tick);
         }
@@ -968,6 +1034,11 @@
           state.x = clamp(state.x, lim.minX, lim.maxX);
           state.y = clamp(state.y, lim.minY, lim.maxY);
           pickTarget();
+          if (reduceMotion) {
+            resetTentacles();
+          } else {
+            updateTentacles(performance.now(), 0, false);
+          }
           render(0);
         }
 
@@ -976,6 +1047,9 @@
           state.x = clamp(state.x, lim.minX, lim.maxX);
           state.y = clamp(state.y, lim.minY, lim.maxY);
           pickTarget();
+          if (reduceMotion) {
+            resetTentacles();
+          }
           render(0);
         }
 
@@ -986,6 +1060,7 @@
               viewport.classList.remove("panic");
               state.vx = 0;
               state.vy = 0;
+              resetTentacles();
             } else {
               pickTarget();
             }

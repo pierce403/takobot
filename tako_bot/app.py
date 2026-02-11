@@ -198,7 +198,7 @@ class TakoTerminalApp(App[None]):
         self.mode = "boot"
         self.runtime_mode = "offline"
         self._set_indicator("acting")
-        self._write_tako("waking up...")
+        self._write_tako("waking up... tiny octopus stretch complete.")
 
         try:
             self.paths = ensure_runtime_dirs(runtime_paths())
@@ -221,7 +221,7 @@ class TakoTerminalApp(App[None]):
 
             self.identity_name, self.identity_role = read_identity()
 
-            self._write_tako(f"runtime ready. my XMTP address is {self.address}.")
+            self._write_tako(f"all set! my XMTP address is {self.address}.")
 
             operator_cfg = load_operator(self.paths.operator_json)
             self.operator_inbox_id = get_operator_inbox_id(operator_cfg)
@@ -232,17 +232,20 @@ class TakoTerminalApp(App[None]):
                 self.operator_paired = True
                 self.mode = "paired"
                 self._set_state(SessionState.PAIRED)
-                self._write_tako("operator imprint found. XMTP is primary control plane for config changes.")
+                self._write_tako("operator imprint found. XMTP is already my control current for config changes.")
                 await self._start_xmtp_runtime()
                 self._set_state(SessionState.RUNNING)
-                self._write_tako("terminal is local cockpit (status/logs/read-only queries). type `help`.")
+                self._write_tako("terminal is now your local cockpit (status/logs/read-only queries). type `help`.")
                 return
 
             self.operator_paired = False
             self.mode = "onboarding"
-            self._set_state(SessionState.ONBOARDING_IDENTITY)
-            self.identity_step = 0
-            self._write_tako("before I fully wake up: what should I be called?")
+            self._set_state(SessionState.ASK_XMTP_HANDLE)
+            self.awaiting_xmtp_handle = False
+            self._write_tako(
+                "first tentacle task, ASAP: let's set up your XMTP control channel. "
+                "do you have an XMTP handle? (yes/no)"
+            )
         except Exception as exc:  # noqa: BLE001
             self._error_card(
                 "startup blocked",
@@ -283,7 +286,7 @@ class TakoTerminalApp(App[None]):
         if self.identity_step == 0:
             self.identity_name = text or self.identity_name
             self.identity_step = 1
-            self._write_tako("and what should my purpose be? one sentence is enough.")
+            self._write_tako("cute. and what should my purpose be? one sentence is perfect.")
             return
 
         self.identity_role = text or self.identity_role
@@ -293,9 +296,9 @@ class TakoTerminalApp(App[None]):
             date.today(),
             f"Identity set in terminal app: name={self.identity_name}; role={self.identity_role}",
         )
-        self._write_tako(f"identity saved: {self.identity_name} — {self.identity_role}")
+        self._write_tako(f"identity tucked away in my little shell: {self.identity_name} — {self.identity_role}")
         self._set_state(SessionState.ONBOARDING_ROUTINES)
-        self._write_tako("what should I watch or do daily? free-form note.")
+        self._write_tako("last onboarding nibble: what should I watch or do daily? free-form note.")
 
     async def _handle_routines_onboarding(self, text: str) -> None:
         self.routines = text or "No explicit routines yet."
@@ -303,14 +306,15 @@ class TakoTerminalApp(App[None]):
             routines_path = self.paths.state_dir / "routines.txt"
             routines_path.write_text(self.routines + "\n", encoding="utf-8")
         append_daily_note(daily_root(), date.today(), f"Routine note captured: {self.routines}")
-
-        self._set_state(SessionState.ASK_XMTP_HANDLE)
-        self.awaiting_xmtp_handle = False
-        self._write_tako("do you have an XMTP handle now? (yes/no)")
+        await self._finalize_onboarding()
 
     async def _handle_xmtp_handle_prompt(self, text: str) -> None:
         lowered = text.strip().lower()
         if lowered in {"local", "local-only", "skip"}:
+            if self.mode == "onboarding":
+                self._write_tako("no worries, captain. we'll keep paddling locally for now.")
+                self._begin_identity_onboarding()
+                return
             await self._enter_local_only_mode()
             return
 
@@ -320,19 +324,24 @@ class TakoTerminalApp(App[None]):
 
         yes_no = _parse_yes_no(text)
         if yes_no is None:
-            self._write_tako("please answer yes or no.")
+            self._write_tako("boop. please answer yes or no.")
             return
 
         if yes_no:
             self.awaiting_xmtp_handle = True
-            self._write_tako("share the handle (.eth or 0x...).")
+            self._write_tako("splash it over: share the handle (.eth or 0x...).")
+            return
+
+        if self.mode == "onboarding":
+            self._write_tako("got it. we'll continue in local mode first, and you can pair later with `pair`.")
+            self._begin_identity_onboarding()
             return
 
         await self._enter_local_only_mode()
 
     async def _start_pairing(self, handle: str) -> None:
         if self.paths is None:
-            self._write_tako("runtime paths are unavailable; restart required.")
+            self._write_tako("uh-oh, my tide map is missing runtime paths. restart required.")
             return
 
         self.awaiting_xmtp_handle = False
@@ -359,8 +368,8 @@ class TakoTerminalApp(App[None]):
         pairing_code = _new_pairing_code()
         host = socket.gethostname()
         outbound_message = (
-            f"Hello, I'm Tako on {host}.\n\n"
-            "Terminal pairing is in progress.\n"
+            f"Hi from Tako on {host}!\n\n"
+            "Tiny octopus pairing is in progress.\n"
             "Reply with this code on XMTP, or paste it back into terminal:\n\n"
             f"{pairing_code}"
         )
@@ -396,7 +405,7 @@ class TakoTerminalApp(App[None]):
 
         self._write_tako(f"outbound pairing DM sent to {handle} ({resolved}).")
         self._write_tako(
-            "confirm by replying with the code on XMTP, or paste the code here. "
+            "confirm by replying with the code on XMTP, or paste the code here with your human hands. "
             "commands: `retry`, `change`, `local-only`"
         )
 
@@ -422,7 +431,7 @@ class TakoTerminalApp(App[None]):
                 if not isinstance(content, str):
                     continue
                 if _normalize_pairing_code(content) == expected:
-                    self._write_tako("received matching pairing code over XMTP.")
+                    self._write_tako("yay! received matching pairing code over XMTP.")
                     await self._complete_pairing("xmtp_reply_v1")
                     break
         except asyncio.CancelledError:
@@ -445,11 +454,15 @@ class TakoTerminalApp(App[None]):
             await self._cleanup_pairing_resources()
             self._set_state(SessionState.ASK_XMTP_HANDLE)
             self.awaiting_xmtp_handle = True
-            self._write_tako("share another XMTP handle.")
+            self._write_tako("okay, new tide. share another XMTP handle.")
             return
 
         if lowered in {"local", "local-only", "skip"}:
             await self._cleanup_pairing_resources()
+            if self.mode == "onboarding":
+                self._write_tako("roger that. we'll keep things local and continue onboarding.")
+                self._begin_identity_onboarding()
+                return
             await self._enter_local_only_mode()
             return
 
@@ -466,7 +479,7 @@ class TakoTerminalApp(App[None]):
         self.pairing_code_attempts += 1
         remaining = PAIRING_CODE_ATTEMPTS - self.pairing_code_attempts
         if remaining > 0:
-            self._write_tako(f"code mismatch. try again ({remaining} attempts left), or type `local-only`.")
+            self._write_tako(f"oops, code mismatch. try again ({remaining} attempts left), or type `local-only`.")
             return
 
         self._error_card(
@@ -498,7 +511,7 @@ class TakoTerminalApp(App[None]):
 
         if self.pairing_dm is not None:
             with contextlib.suppress(Exception):
-                await self.pairing_dm.send("Paired. You are now the operator. Reply `help` for commands.")
+                await self.pairing_dm.send("Paired! You are now the operator. Reply `help` for commands.")
 
         self.operator_paired = True
         self.operator_inbox_id = self.pairing_operator_inbox_id
@@ -508,10 +521,8 @@ class TakoTerminalApp(App[None]):
         await self._cleanup_pairing_resources()
 
         self._set_state(SessionState.PAIRED)
-        self._write_tako("paired. XMTP is now primary control plane for identity/config/tools/routines.")
-        await self._start_xmtp_runtime()
-        self._set_state(SessionState.RUNNING)
-        self._write_tako("terminal remains your local cockpit. type `help`.")
+        self._write_tako("paired! XMTP is now primary control channel for identity/config/tools/routines.")
+        self._begin_identity_onboarding()
 
     async def _cleanup_pairing_resources(self) -> None:
         current = asyncio.current_task()
@@ -540,6 +551,24 @@ class TakoTerminalApp(App[None]):
         await self._stop_xmtp_runtime()
         await self._start_local_heartbeat()
         self._write_tako("continuing in terminal-managed local mode. use `pair` any time to add XMTP operator control.")
+
+    async def _finalize_onboarding(self) -> None:
+        if self.operator_paired:
+            self.mode = "paired"
+            self._set_state(SessionState.PAIRED)
+            self._write_tako("onboarding complete. spinning up XMTP runtime currents.")
+            await self._start_xmtp_runtime()
+            self._set_state(SessionState.RUNNING)
+            self._write_tako("all tentacles online. terminal remains your local cockpit. type `help`.")
+            return
+
+        await self._enter_local_only_mode()
+
+    def _begin_identity_onboarding(self) -> None:
+        self.mode = "onboarding"
+        self._set_state(SessionState.ONBOARDING_IDENTITY)
+        self.identity_step = 0
+        self._write_tako("next tiny question: what should I be called?")
 
     async def _start_xmtp_runtime(self) -> None:
         if self.paths is None:
@@ -632,11 +661,11 @@ class TakoTerminalApp(App[None]):
         await self._stop_local_heartbeat()
         await self._stop_xmtp_runtime()
         self.runtime_mode = "safe"
-        self._write_tako("safe mode enabled. runtime tasks are paused.")
+        self._write_tako("safe mode enabled. tucked into a little shell for now.")
 
     async def _disable_safe_mode(self) -> None:
         self.safe_mode = False
-        self._write_tako("safe mode disabled.")
+        self._write_tako("safe mode disabled. paddling again.")
         if self.operator_paired:
             self.mode = "paired"
             await self._start_xmtp_runtime()

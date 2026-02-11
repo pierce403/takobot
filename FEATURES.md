@@ -65,12 +65,15 @@
 - **Description**: A persistent full-screen terminal UI acts as the primary operator-facing runtime loop.
 - **Properties**:
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
-  - Runs onboarding as explicit states: `BOOTING`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `RUNNING`.
+  - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
+  - Prompts for XMTP control-channel setup first (ASAP), before identity questions.
+  - Uses a playful octopus voice in onboarding transcript copy.
   - Runs background runtime tasks (heartbeat + XMTP daemon loop) under UI orchestration.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Surfaces operational failures as concise in-UI error cards with suggested next actions.
 - **Test Criteria**:
   - [x] Running `tako` opens app mode by default (no required subcommand).
+  - [x] XMTP setup prompt appears first in-chat on unpaired startup.
   - [x] Identity + routine onboarding happens in-chat in the terminal app (not shell prompts).
   - [x] Terminal input can confirm outbound pairing code and continue to running mode.
 

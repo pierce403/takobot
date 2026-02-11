@@ -651,8 +651,8 @@
 # If you already have the repo:
 ./start.sh
 
-# In app: onboarding questions (name/purpose/routines)
-# Then: pair over XMTP (or continue local-only mode)
+# In app: XMTP setup prompt appears first
+# Then: onboarding questions (name/purpose/routines)
 # After pairing: XMTP controls identity/config/tools/routines</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Setup also initializes a local <code>local</code> branch that tracks <code>origin/main</code> for
@@ -723,7 +723,7 @@
                 Launches the interactive terminal app and runs onboarding as explicit states.
               </li>
               <li>
-                Asks for operator handle in-app, sends outbound XMTP pairing DM, supports XMTP reply or terminal code confirmation,
+                Prompts XMTP setup first in-app, sends outbound pairing DM, supports XMTP reply or terminal code confirmation,
                 then stores operator imprint in <code>.tako/operator.json</code> when paired.
               </li>
             </ul>

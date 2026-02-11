@@ -32,10 +32,10 @@ If you already have this repo cloned:
 Pairing flow:
 
 - `tako` always starts the interactive terminal app first.
-- During onboarding, Tako asks name/purpose/routine questions in-chat.
-- Tako asks whether you have an XMTP handle:
+- During onboarding, Tako asks for XMTP setup ASAP (in-chat):
   - yes: outbound DM pairing challenge (`.eth` or `0x...`) with code confirmation in app
-  - no: continue in terminal-managed local mode
+  - no: continue onboarding locally and allow later pairing from terminal
+- Tako then asks name/purpose/routine questions in-chat.
 - After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `reimprint`).
 
 ## Architecture (minimal)
@@ -64,7 +64,7 @@ Runtime-only (ignored):
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
 - Launches the interactive terminal app main loop (`tako app`, default `tako`).
-- Runs onboarding as an explicit state machine inside the app.
+- Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit.
 
 ## Configuration

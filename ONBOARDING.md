@@ -27,11 +27,11 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - `start.sh` verifies repo/runtime prerequisites and launches `tako` (interactive app main loop).
 - `tako` onboarding runs as explicit states inside the app UI:
   - `BOOTING`
-  - `ONBOARDING_IDENTITY`
-  - `ONBOARDING_ROUTINES`
   - `ASK_XMTP_HANDLE`
   - `PAIRING_OUTBOUND`
   - `PAIRED`
+  - `ONBOARDING_IDENTITY`
+  - `ONBOARDING_ROUTINES`
   - `RUNNING`
 - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.
 
@@ -43,7 +43,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 4) **Imprint the operator (optional during first wake)**
 
 - Pairing is terminal-first in the interactive app (no inbound-first DM requirement).
-- Tako asks in-chat whether the operator has an XMTP handle.
+- Tako asks in-chat for XMTP setup as the first onboarding prompt.
 - If yes: Tako sends an outbound DM challenge code to that handle.
 - Operator can confirm by replying on XMTP or by copying the code back into terminal input.
 - Tako stores operator metadata in `.tako/operator.json` (runtime-only; ignored by git).

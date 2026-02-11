@@ -28,6 +28,17 @@
   - [x] `./tako.sh start` starts the daemon.
   - [x] `./tako.sh doctor` runs without requiring a recipient.
 
+### Setup + start bootstrap (`setup.sh`, `start.sh`)
+- **Stability**: in-progress
+- **Description**: First-wake bootstrap from current directory, then onboarding prompts and daemon start.
+- **Properties**:
+  - `setup.sh` clones (or reuses) repo in the caller's current directory, then runs `start.sh`.
+  - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako.sh`.
+  - Site and README expose a `curl -fsSL .../setup.sh | bash` path.
+- **Test Criteria**:
+  - [x] `./setup.sh` targets current directory semantics (not hardcoded `$HOME`).
+  - [x] `./start.sh` exists and launches Tako through `tako.sh`.
+
 ### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)
 - **Stability**: in-progress
 - **Description**: A multi-command CLI where `run` starts the daemon; operator management happens over XMTP.

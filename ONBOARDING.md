@@ -18,12 +18,19 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 - Create: `.tako/locks/`, `.tako/logs/`, `.tako/state/`, `.tako/xmtp-db/`.
 
-2) **Generate/ensure XMTP keys (local, unencrypted)**
+2) **Run first-wake identity prompts**
+
+- Preferred bootstrap flow:
+  - `curl -fsSL https://raw.githubusercontent.com/pierce403/tako-bot/main/setup.sh | bash`
+  - or (from an existing checkout) `./start.sh`
+- `start.sh` updates SOUL identity fields (name + purpose/role) before daemon startup.
+
+3) **Generate/ensure XMTP keys (local, unencrypted)**
 
 - Create `.tako/keys.json` with `0600` permissions (best-effort).
 - Do not write keys anywhere outside `.tako/`.
 
-3) **Imprint the operator**
+4) **Imprint the operator**
 
 - Start the daemon (no operator flags, no env-var configuration):
   - `./tako.sh` (recommended)
@@ -32,23 +39,23 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - Tako replies with a pairing challenge; reply with `pair <code>` to complete pairing.
 - Store operator metadata in `.tako/operator.json` (runtime-only; ignored by git).
 
-4) **Pairing / handshake**
+5) **Pairing / handshake**
 
 - Pairing happens in-chat over XMTP (challenge/response).
 - The first successful pairing becomes the operator imprint.
 - Re-imprinting requires an explicit operator command over XMTP (never via CLI flags).
 
-5) **Initialize today’s daily log**
+6) **Initialize today’s daily log**
 
 - Ensure `memory/dailies/YYYY-MM-DD.md` exists.
 - Never log secrets; summarize actions and decisions.
 
-6) **Start heartbeat (safe by default)**
+7) **Start heartbeat (safe by default)**
 
 - Start a heartbeat loop; sensors are disabled by default.
 - Store runtime-only heartbeat/cognition state under `.tako/state/`.
 
-7) **Emit completion summary**
+8) **Emit completion summary**
 
 - After pairing, the operator can request status via XMTP commands:
   - `help`, `status`, `doctor`

@@ -614,9 +614,12 @@
           <div class="card panel">
             <h2>Quickstart</h2>
             <p>
-              Use the helper script. It creates a local venv, installs deps, and starts the daemon:
+              Bootstrap from your current directory (clone if needed), run first-wake SOUL prompts, then start Tako:
             </p>
-            <pre><code>./tako.sh
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/pierce403/tako-bot/main/setup.sh | bash
+
+# If you already have the repo:
+./start.sh
 
 # DM the printed "tako address" over XMTP
 # Reply with: pair &lt;code&gt;
@@ -746,7 +749,7 @@
               </li>
               <li>
                 Entrypoint:
-                <code>tako.sh</code> (bootstrap)
+                <code>setup.sh</code> / <code>start.sh</code> / <code>tako.sh</code>
               </li>
               <li>
                 CLI:

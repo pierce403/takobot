@@ -20,7 +20,7 @@ EOF
 
 is_tako_repo() {
   local root="$1"
-  [[ -f "$root/AGENTS.md" && -f "$root/ONBOARDING.md" && -f "$root/SOUL.md" && -f "$root/tako.sh" ]]
+  [[ -f "$root/AGENTS.md" && -f "$root/ONBOARDING.md" && -f "$root/SOUL.md" && -f "$root/tako.sh" && -f "$root/start.sh" ]]
 }
 
 clone_target() {

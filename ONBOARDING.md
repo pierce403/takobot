@@ -24,6 +24,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
   - `curl -fsSL https://tako.bot/setup.sh | bash`
   - or (from an existing checkout) `./start.sh`
 - `start.sh` updates SOUL identity fields (name + purpose/role) before daemon startup.
+- If `uv` is missing, `start.sh` attempts a user-local `uv` install automatically.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**
 

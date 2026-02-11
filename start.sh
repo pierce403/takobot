@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOUL_PATH="$ROOT/SOUL.md"
+UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
 usage() {
   cat <<'EOF'
@@ -55,7 +56,7 @@ sanitize_line() {
 }
 
 interactive_tty() {
-  [[ -t 0 && -t 1 && -r /dev/tty && -w /dev/tty ]]
+  [[ -r /dev/tty && -w /dev/tty ]]
 }
 
 prompt_line() {
@@ -141,6 +142,45 @@ run_soul_onboarding() {
   echo > /dev/tty
 }
 
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for candidate in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
+    if [[ -x "$candidate" ]]; then
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+
+  echo "uv not found. Installing a user-local copy..." >&2
+  if command -v curl >/dev/null 2>&1; then
+    curl -LsSf "$UV_INSTALL_URL" | sh
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$UV_INSTALL_URL" | sh
+  else
+    echo "Error: neither curl nor wget is available to install uv." >&2
+    echo "Install uv manually: https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 1
+  fi
+
+  for candidate in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
+    if [[ -x "$candidate" ]]; then
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Error: uv installation did not place uv on PATH." >&2
+  echo "Install uv manually: https://docs.astral.sh/uv/getting-started/installation/" >&2
+  exit 1
+}
+
 main() {
   case "${1:-}" in
     -h|--help|help)
@@ -151,6 +191,7 @@ main() {
 
   require_repo_layout
   warn_if_unusual_home
+  ensure_uv
   run_soul_onboarding
 
   exec "$ROOT/tako.sh" "$@"

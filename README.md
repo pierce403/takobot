@@ -74,4 +74,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 ## Notes
 
 - The bootstrap flow requires `uv` to manage the project virtualenv and Python dependencies.
+- `setup.sh` / `start.sh` will attempt a user-local `uv` install automatically if `uv` is missing.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

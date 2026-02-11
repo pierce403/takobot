@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOUL_PATH="$ROOT/SOUL.md"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
+LOCAL_RUNTIME_DIR="$ROOT/.tako"
+LOCAL_TMP_DIR="$LOCAL_RUNTIME_DIR/tmp"
+LOCAL_UV_BIN_DIR="$LOCAL_RUNTIME_DIR/bin"
+LOCAL_UV_CACHE_DIR="$LOCAL_RUNTIME_DIR/uv-cache"
+LOCAL_XDG_CACHE_DIR="$LOCAL_RUNTIME_DIR/xdg-cache"
+LOCAL_XDG_CONFIG_DIR="$LOCAL_RUNTIME_DIR/xdg-config"
 
 usage() {
   cat <<'EOF'
@@ -41,14 +47,25 @@ require_repo_layout() {
   fi
 }
 
-warn_if_unusual_home() {
+enforce_local_write_policy() {
   if [[ "$ROOT" == /tmp/* || "$ROOT" == /var/tmp/* ]]; then
-    echo "Warning: repo is under a temporary directory: $ROOT" >&2
+    echo "Error: repo directory under /tmp is disallowed by local-write policy: $ROOT" >&2
+    exit 1
   fi
   if [[ ! -w "$ROOT" ]]; then
     echo "Error: repo directory is not writable: $ROOT" >&2
     exit 1
   fi
+}
+
+configure_local_runtime_env() {
+  mkdir -p "$LOCAL_TMP_DIR" "$LOCAL_UV_BIN_DIR" "$LOCAL_UV_CACHE_DIR" "$LOCAL_XDG_CACHE_DIR" "$LOCAL_XDG_CONFIG_DIR"
+
+  # Keep installer/runtime temp + cache writes inside this repo checkout.
+  export TMPDIR="$LOCAL_TMP_DIR"
+  export UV_CACHE_DIR="$LOCAL_UV_CACHE_DIR"
+  export XDG_CACHE_HOME="$LOCAL_XDG_CACHE_DIR"
+  export XDG_CONFIG_HOME="$LOCAL_XDG_CONFIG_DIR"
 }
 
 sanitize_line() {
@@ -333,7 +350,8 @@ update_soul_identity() {
   local name="$1"
   local role="$2"
   local tmp
-  tmp="$(mktemp)"
+  mkdir -p "$LOCAL_TMP_DIR"
+  tmp="$(mktemp "$LOCAL_TMP_DIR/soul.XXXXXX")"
 
   awk -v name="$name" -v role="$role" '
     BEGIN { in_identity = 0 }
@@ -387,41 +405,39 @@ run_soul_onboarding() {
 }
 
 ensure_uv() {
+  if [[ -x "$LOCAL_UV_BIN_DIR/uv" ]]; then
+    export PATH="$LOCAL_UV_BIN_DIR:$PATH"
+    return 0
+  fi
+
   if command -v uv >/dev/null 2>&1; then
     return 0
   fi
 
-  for candidate in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
-    if [[ -x "$candidate" ]]; then
-      export PATH="$(dirname "$candidate"):$PATH"
-      return 0
-    fi
-  done
-
-  echo "uv not found. Installing a user-local copy..." >&2
+  echo "uv not found. Installing a repo-local copy..." >&2
   if command -v curl >/dev/null 2>&1; then
-    curl -LsSf "$UV_INSTALL_URL" | sh
+    curl -LsSf "$UV_INSTALL_URL" | \
+      UV_UNMANAGED_INSTALL="$LOCAL_UV_BIN_DIR" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "$UV_INSTALL_URL" | sh
+    wget -qO- "$UV_INSTALL_URL" | \
+      UV_UNMANAGED_INSTALL="$LOCAL_UV_BIN_DIR" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh
   else
     echo "Error: neither curl nor wget is available to install uv." >&2
     echo "Install uv manually: https://docs.astral.sh/uv/getting-started/installation/" >&2
     exit 1
   fi
 
-  for candidate in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
-    if [[ -x "$candidate" ]]; then
-      export PATH="$(dirname "$candidate"):$PATH"
-      return 0
-    fi
-  done
+  if [[ -x "$LOCAL_UV_BIN_DIR/uv" ]]; then
+    export PATH="$LOCAL_UV_BIN_DIR:$PATH"
+    return 0
+  fi
 
   if command -v uv >/dev/null 2>&1; then
     return 0
   fi
 
   echo "Error: uv installation did not place uv on PATH." >&2
-  echo "Install uv manually: https://docs.astral.sh/uv/getting-started/installation/" >&2
+  echo "Expected local uv path: $LOCAL_UV_BIN_DIR/uv" >&2
   exit 1
 }
 
@@ -436,7 +452,8 @@ main() {
   # Ensure all relative operations run from the repo root.
   cd "$ROOT"
   require_repo_layout
-  warn_if_unusual_home
+  enforce_local_write_policy
+  configure_local_runtime_env
   ensure_uv
   run_soul_onboarding
 

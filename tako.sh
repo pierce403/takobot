@@ -3,6 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+LOCAL_RUNTIME_DIR="$ROOT/.tako"
+LOCAL_TMP_DIR="$LOCAL_RUNTIME_DIR/tmp"
+LOCAL_UV_BIN_DIR="$LOCAL_RUNTIME_DIR/bin"
+LOCAL_UV_CACHE_DIR="$LOCAL_RUNTIME_DIR/uv-cache"
+LOCAL_XDG_CACHE_DIR="$LOCAL_RUNTIME_DIR/xdg-cache"
+LOCAL_XDG_CONFIG_DIR="$LOCAL_RUNTIME_DIR/xdg-config"
+
+mkdir -p "$LOCAL_TMP_DIR" "$LOCAL_UV_BIN_DIR" "$LOCAL_UV_CACHE_DIR" "$LOCAL_XDG_CACHE_DIR" "$LOCAL_XDG_CONFIG_DIR"
+
+export TMPDIR="$LOCAL_TMP_DIR"
+export UV_CACHE_DIR="$LOCAL_UV_CACHE_DIR"
+export XDG_CACHE_HOME="$LOCAL_XDG_CACHE_DIR"
+export XDG_CONFIG_HOME="$LOCAL_XDG_CONFIG_DIR"
+export PATH="$LOCAL_UV_BIN_DIR:$PATH"
 
 case "${1:-}" in
   -h|--help|help)
@@ -63,13 +77,19 @@ else
 fi
 
 PYTHON="${PYTHON:-python3}"
-UV="${UV:-uv}"
+if [[ -n "${UV:-}" ]]; then
+  UV="$UV"
+elif [[ -x "$LOCAL_UV_BIN_DIR/uv" ]]; then
+  UV="$LOCAL_UV_BIN_DIR/uv"
+else
+  UV="uv"
+fi
 VENV="$ROOT/.venv"
 VENV_PY="$VENV/bin/python"
 
 if ! command -v "$UV" >/dev/null 2>&1; then
   echo "Error: uv is required to manage Tako Python dependencies." >&2
-  echo "Install uv: https://docs.astral.sh/uv/getting-started/installation/" >&2
+  echo "Run ./start.sh once to install a repo-local uv at .tako/bin/uv." >&2
   exit 1
 fi
 

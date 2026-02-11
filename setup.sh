@@ -13,10 +13,10 @@ Usage:
 
 Behavior:
   - If already inside the Tako git repo, runs ./start.sh.
-  - Otherwise clones tako-bot into ./tako-bot from your current directory
+  - Otherwise bootstraps tako-bot into ./tako-bot from your current directory
     (or a timestamped fallback in the same directory)
     and then runs ./start.sh from there.
-  - Fresh clones are checked out to a local branch (`local`) tracking `origin/main`.
+  - Fresh checkouts are created on a local branch (`local`) tracking `origin/main`.
 EOF
 }
 
@@ -38,6 +38,27 @@ clone_target() {
   fi
 
   printf "%s\n" "$target"
+}
+
+set_repo_tmpdir() {
+  local root="$1"
+  mkdir -p "$root/.tako/tmp"
+  export TMPDIR="$root/.tako/tmp"
+}
+
+bootstrap_checkout() {
+  local target="$1"
+  local branch="$LOCAL_TRACKING_BRANCH"
+
+  mkdir -p "$target"
+  set_repo_tmpdir "$target"
+
+  git -C "$target" init --quiet
+  git -C "$target" remote add origin "$REPO_URL"
+  git -C "$target" fetch --depth 1 origin main
+  git -C "$target" checkout -b "$branch" FETCH_HEAD >/dev/null 2>&1
+  git -C "$target" branch --set-upstream-to=origin/main "$branch" >/dev/null 2>&1 || true
+  echo "Initialized local branch '$branch' (tracks origin/main)." >&2
 }
 
 ensure_local_tracking_branch() {
@@ -94,15 +115,15 @@ main() {
 
   target="$(clone_target)"
   if [[ -d "$target/.git" ]]; then
+    set_repo_tmpdir "$target"
     cd "$target"
     ensure_local_tracking_branch
     if ! git pull --ff-only; then
       echo "Warning: git pull failed; continuing with existing local checkout." >&2
     fi
   else
-    git clone "$REPO_URL" "$target"
+    bootstrap_checkout "$target"
     cd "$target"
-    ensure_local_tracking_branch
   fi
 
   exec ./start.sh

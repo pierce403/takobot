@@ -3,12 +3,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import importlib.util
+import json
+import os
+import platform
 import random
 import secrets
+import shutil
 import socket
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -31,6 +38,15 @@ from .xmtp import create_client, hint_for_xmtp_error
 PAIRING_CODE_ATTEMPTS = 5
 PAIRING_CODE_LENGTH = 8
 PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+HEARTBEAT_JITTER = 0.2
+EVENT_INGEST_INTERVAL_S = 0.8
+
+SEVERITY_ORDER = {
+    "info": 0,
+    "warn": 1,
+    "error": 2,
+    "critical": 3,
+}
 
 
 class SessionState(str, Enum):
@@ -130,11 +146,31 @@ class TakoTerminalApp(App[None]):
 
         self.runtime_task: asyncio.Task[None] | None = None
         self.local_heartbeat_task: asyncio.Task[None] | None = None
+        self.event_ingest_task: asyncio.Task[None] | None = None
+        self.type1_task: asyncio.Task[None] | None = None
+        self.type2_task: asyncio.Task[None] | None = None
         self.boot_task: asyncio.Task[None] | None = None
 
         self.lock_context = None
         self.lock_acquired = False
         self.shutdown_complete = False
+
+        self.event_log_path: Path | None = None
+        self.event_cursor = 0
+        self.pending_events: list[dict[str, Any]] = []
+        self.seen_event_ids: set[str] = set()
+        self.type1_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.type2_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+        self.instance_kind = "unknown"
+        self.health_summary: dict[str, str] = {}
+        self.heartbeat_ticks = 0
+        self.last_heartbeat_at: float | None = None
+        self.type1_processed = 0
+        self.type2_escalations = 0
+        self.type2_last = "none"
+        self.event_total_written = 0
+        self.event_total_ingested = 0
 
         self.status_bar: Static
         self.transcript: RichLog
@@ -204,6 +240,11 @@ class TakoTerminalApp(App[None]):
             self.paths = ensure_runtime_dirs(runtime_paths())
             root = repo_root()
 
+            keys_preexisting = self.paths.keys_json.exists()
+            operator_preexisting = self.paths.operator_json.exists()
+            xmtp_db_preexisting = any(self.paths.xmtp_db_dir.glob("*.db3"))
+            state_preexisting = _dir_has_entries(self.paths.state_dir)
+
             panic_check_runtime_secrets(root, self.paths.root)
             assert_not_tracked(root, self.paths.keys_json)
 
@@ -220,6 +261,19 @@ class TakoTerminalApp(App[None]):
             append_daily_note(daily_root(), date.today(), "Interactive terminal app session started.")
 
             self.identity_name, self.identity_role = read_identity()
+            self.instance_kind = (
+                "established"
+                if keys_preexisting or operator_preexisting or xmtp_db_preexisting or state_preexisting
+                else "brand-new"
+            )
+
+            await self._initialize_reasoning_runtime()
+            await self._run_startup_health_check(
+                keys_preexisting=keys_preexisting,
+                operator_preexisting=operator_preexisting,
+                xmtp_db_preexisting=xmtp_db_preexisting,
+                state_preexisting=state_preexisting,
+            )
 
             self._write_tako(f"all set! my XMTP address is {self.address}.")
 
@@ -259,6 +313,268 @@ class TakoTerminalApp(App[None]):
         finally:
             self._set_indicator("idle")
 
+    async def _initialize_reasoning_runtime(self) -> None:
+        if self.paths is None:
+            return
+
+        if self.event_log_path is None:
+            self.event_log_path = self.paths.state_dir / "events.jsonl"
+            self.event_log_path.parent.mkdir(parents=True, exist_ok=True)
+            self.event_log_path.touch(exist_ok=True)
+            self.event_cursor = 0
+
+        await self._flush_pending_events()
+
+        if self.event_ingest_task is None:
+            self.event_ingest_task = asyncio.create_task(self._event_ingest_loop(), name="tako-event-ingest")
+        if self.type1_task is None:
+            self.type1_task = asyncio.create_task(self._type1_loop(), name="tako-type1")
+        if self.type2_task is None:
+            self.type2_task = asyncio.create_task(self._type2_loop(), name="tako-type2")
+        await self._start_local_heartbeat()
+
+        self._write_system("Type1 tide scanner online. Consuming event log and triaging signals.")
+        self._record_event(
+            "reasoning.engine.started",
+            "Type1/Type2 reasoning loops started.",
+            source="startup",
+            metadata={"event_log": str(self.event_log_path)},
+        )
+
+    async def _run_startup_health_check(
+        self,
+        *,
+        keys_preexisting: bool,
+        operator_preexisting: bool,
+        xmtp_db_preexisting: bool,
+        state_preexisting: bool,
+    ) -> None:
+        if self.paths is None:
+            return
+
+        disk = shutil.disk_usage(self.paths.root)
+        disk_free_mb = int(disk.free / (1024 * 1024))
+        dns_xmtp_ok = _dns_lookup_ok("grpc.production.xmtp.network")
+        xmtp_import_ok = importlib.util.find_spec("xmtp") is not None
+        web3_import_ok = importlib.util.find_spec("web3") is not None
+        textual_import_ok = importlib.util.find_spec("textual") is not None
+
+        self.health_summary = {
+            "instance_kind": self.instance_kind,
+            "lock": "ok" if self.lock_acquired else "missing",
+            "repo_writable": _yes_no(os.access(repo_root(), os.W_OK)),
+            "runtime_writable": _yes_no(os.access(self.paths.root, os.W_OK)),
+            "disk_free_mb": str(disk_free_mb),
+            "keys_preexisting": _yes_no(keys_preexisting),
+            "operator_preexisting": _yes_no(operator_preexisting),
+            "xmtp_db_preexisting": _yes_no(xmtp_db_preexisting),
+            "state_preexisting": _yes_no(state_preexisting),
+            "xmtp_import": _yes_no(xmtp_import_ok),
+            "web3_import": _yes_no(web3_import_ok),
+            "textual_import": _yes_no(textual_import_ok),
+            "dns_xmtp": _yes_no(dns_xmtp_ok),
+            "python": platform.python_version(),
+        }
+
+        issues: list[tuple[str, str]] = []
+        if not self.lock_acquired:
+            issues.append(("critical", "Instance lock is not held."))
+        if not os.access(repo_root(), os.W_OK):
+            issues.append(("error", "Repo directory is not writable."))
+        if disk_free_mb < 256:
+            issues.append(("warn", f"Low disk space under .tako: {disk_free_mb} MB free."))
+        if not xmtp_import_ok:
+            issues.append(("warn", "xmtp import unavailable; XMTP runtime/pairing may fail until dependencies are installed."))
+        if not dns_xmtp_ok:
+            issues.append(("warn", "DNS lookup for XMTP host failed; outbound XMTP connectivity may be unavailable."))
+
+        health_line = (
+            f"health check: {self.instance_kind} instance | "
+            f"lock={self.health_summary['lock']} | "
+            f"disk_free_mb={disk_free_mb} | "
+            f"xmtp_import={self.health_summary['xmtp_import']} | "
+            f"dns_xmtp={self.health_summary['dns_xmtp']}"
+        )
+        self._write_system(health_line)
+        self._record_event(
+            "health.check.summary",
+            health_line,
+            severity="warn" if issues else "info",
+            source="health",
+            metadata=self.health_summary,
+        )
+
+        for severity, message in issues:
+            self._write_system(f"health issue [{severity}]: {message}")
+            self._record_event("health.check.issue", message, severity=severity, source="health")
+
+    def _record_event(
+        self,
+        event_type: str,
+        message: str,
+        *,
+        severity: str = "info",
+        source: str = "system",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        event = {
+            "id": _new_event_id(),
+            "ts": _utc_now_iso(),
+            "type": event_type,
+            "severity": severity.lower(),
+            "source": source,
+            "message": message,
+            "metadata": metadata or {},
+        }
+        if self.event_log_path is None:
+            self.pending_events.append(event)
+        else:
+            self._append_event_to_log(event)
+
+        self._enqueue_type1_event(event)
+
+    async def _flush_pending_events(self) -> None:
+        if self.event_log_path is None or not self.pending_events:
+            return
+        pending = list(self.pending_events)
+        self.pending_events.clear()
+        for event in pending:
+            self._append_event_to_log(event)
+
+    def _append_event_to_log(self, event: dict[str, Any]) -> None:
+        if self.event_log_path is None:
+            return
+        try:
+            with self.event_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, sort_keys=True, ensure_ascii=True))
+                handle.write("\n")
+            self.event_total_written += 1
+        except Exception as exc:  # noqa: BLE001
+            self._write_system(f"event-log write warning: {_summarize_error(exc)}")
+
+    def _enqueue_type1_event(self, event: dict[str, Any]) -> None:
+        event_id = str(event.get("id") or "")
+        if event_id and event_id in self.seen_event_ids:
+            return
+        if event_id:
+            self.seen_event_ids.add(event_id)
+        self.event_total_ingested += 1
+        with contextlib.suppress(asyncio.QueueFull):
+            self.type1_queue.put_nowait(event)
+
+    async def _event_ingest_loop(self) -> None:
+        while True:
+            await asyncio.sleep(EVENT_INGEST_INTERVAL_S)
+            if self.event_log_path is None:
+                continue
+            try:
+                with self.event_log_path.open("r", encoding="utf-8") as handle:
+                    handle.seek(self.event_cursor)
+                    while True:
+                        line = handle.readline()
+                        if not line:
+                            break
+                        self.event_cursor = handle.tell()
+                        payload = line.strip()
+                        if not payload:
+                            continue
+                        try:
+                            event = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(event, dict):
+                            continue
+                        if "id" not in event:
+                            event["id"] = _line_event_id(payload)
+                        self._enqueue_type1_event(event)
+            except FileNotFoundError:
+                continue
+            except Exception as exc:  # noqa: BLE001
+                self._write_system(f"event-log ingest warning: {_summarize_error(exc)}")
+
+    async def _type1_loop(self) -> None:
+        while True:
+            event = await self.type1_queue.get()
+            self.type1_processed += 1
+
+            serious, depth, reason = self._assess_event_for_type2(event)
+            if not serious:
+                continue
+
+            event_type = str(event.get("type", "unknown"))
+            self._write_system(f"Type1: serious event `{event_type}` detected -> launching Type2 ({depth}).")
+            self._record_event(
+                "type1.escalation",
+                f"Escalated event {event_type} to Type2 ({depth}): {reason}",
+                severity="warn",
+                source="type1",
+                metadata={"event_type": event_type, "depth": depth, "reason": reason},
+            )
+            await self.type2_queue.put({"event": event, "depth": depth, "reason": reason})
+
+    async def _type2_loop(self) -> None:
+        while True:
+            payload = await self.type2_queue.get()
+            event = payload.get("event")
+            depth = str(payload.get("depth", "medium"))
+            reason = str(payload.get("reason", "serious signal"))
+            if not isinstance(event, dict):
+                continue
+            await self._run_type2_thinking(event, depth=depth, reason=reason)
+
+    async def _run_type2_thinking(self, event: dict[str, Any], *, depth: str, reason: str) -> None:
+        sleep_s = {"light": 0.15, "medium": 0.4, "deep": 0.9}.get(depth, 0.4)
+        previous_indicator = self.indicator
+        self._set_indicator(f"type2:{depth}")
+        try:
+            await asyncio.sleep(sleep_s)
+        finally:
+            self._set_indicator(previous_indicator if previous_indicator.startswith("type2:") else "idle")
+
+        event_type = str(event.get("type", "unknown"))
+        message = str(event.get("message", ""))
+        recommendation = _type2_recommendation(event_type, message)
+        self.type2_escalations += 1
+        self.type2_last = f"{event_type}:{depth}"
+        self._write_system(f"Type2[{depth}]: {recommendation}")
+        append_daily_note(
+            daily_root(),
+            date.today(),
+            f"Type2 escalation ({depth}) on {event_type}: {reason}. Recommendation: {recommendation}",
+        )
+        self._record_event(
+            "type2.result",
+            recommendation,
+            source="type2",
+            metadata={"event_type": event_type, "depth": depth, "reason": reason},
+        )
+
+    def _assess_event_for_type2(self, event: dict[str, Any]) -> tuple[bool, str, str]:
+        source = str(event.get("source", "")).lower()
+        if source in {"type1", "type2"}:
+            return False, "light", "already processed by cognition loop"
+
+        severity = str(event.get("severity", "info")).lower()
+        event_type = str(event.get("type", "")).lower()
+        message = str(event.get("message", "")).lower()
+
+        if severity in {"critical", "error"}:
+            depth = _depth_for_severity(severity)
+            return True, depth, f"severity={severity}"
+
+        if "another tako instance" in message or "instance lock" in message:
+            return True, "deep", "duplicate-instance risk"
+
+        if event_type.startswith("health.check.issue"):
+            return True, "medium", "startup health issue"
+
+        if event_type.startswith("runtime.") and severity == "warn" and (
+            "crash" in message or "unstable" in message or "polling fallback" in message
+        ):
+            return True, "medium", "runtime instability"
+
+        return False, "light", "type1 handled"
+
     async def _route_input(self, text: str) -> None:
         if self.state == SessionState.BOOTING:
             self._write_tako("still booting. give me a moment.")
@@ -296,6 +612,12 @@ class TakoTerminalApp(App[None]):
             date.today(),
             f"Identity set in terminal app: name={self.identity_name}; role={self.identity_role}",
         )
+        self._record_event(
+            "onboarding.identity.saved",
+            "Identity values saved to SOUL.md.",
+            source="onboarding",
+            metadata={"name": self.identity_name},
+        )
         self._write_tako(f"identity tucked away in my little shell: {self.identity_name} — {self.identity_role}")
         self._set_state(SessionState.ONBOARDING_ROUTINES)
         self._write_tako("last onboarding nibble: what should I watch or do daily? free-form note.")
@@ -306,11 +628,13 @@ class TakoTerminalApp(App[None]):
             routines_path = self.paths.state_dir / "routines.txt"
             routines_path.write_text(self.routines + "\n", encoding="utf-8")
         append_daily_note(daily_root(), date.today(), f"Routine note captured: {self.routines}")
+        self._record_event("onboarding.routines.saved", "Routine preferences captured.", source="onboarding")
         await self._finalize_onboarding()
 
     async def _handle_xmtp_handle_prompt(self, text: str) -> None:
         lowered = text.strip().lower()
         if lowered in {"local", "local-only", "skip"}:
+            self._record_event("pairing.user.local_only", "Operator chose local-only mode.", source="pairing")
             if self.mode == "onboarding":
                 self._write_tako("no worries, captain. we'll keep paddling locally for now.")
                 self._begin_identity_onboarding()
@@ -329,10 +653,12 @@ class TakoTerminalApp(App[None]):
 
         if yes_no:
             self.awaiting_xmtp_handle = True
+            self._record_event("pairing.user.has_handle", "Operator confirmed XMTP handle availability.", source="pairing")
             self._write_tako("splash it over: share the handle (.eth or 0x...).")
             return
 
         if self.mode == "onboarding":
+            self._record_event("pairing.user.no_handle", "Operator has no XMTP handle yet.", source="pairing")
             self._write_tako("got it. we'll continue in local mode first, and you can pair later with `pair`.")
             self._begin_identity_onboarding()
             return
@@ -348,6 +674,12 @@ class TakoTerminalApp(App[None]):
         self.pairing_handle = handle
         self._set_state(SessionState.PAIRING_OUTBOUND)
         self._set_indicator("acting")
+        self._record_event(
+            "pairing.outbound.start",
+            "Starting outbound pairing attempt.",
+            source="pairing",
+            metadata={"handle": handle},
+        )
 
         try:
             resolved = resolve_recipient(handle, list(DEFAULT_ENS_RPC_URLS))
@@ -359,6 +691,13 @@ class TakoTerminalApp(App[None]):
                     "Check ENS/address spelling.",
                     "Share another handle or type `local-only`.",
                 ],
+            )
+            self._record_event(
+                "pairing.outbound.resolve_failed",
+                f"Could not resolve pairing handle: {exc}",
+                severity="warn",
+                source="pairing",
+                metadata={"handle": handle},
             )
             self._set_state(SessionState.ASK_XMTP_HANDLE)
             self.awaiting_xmtp_handle = True
@@ -390,6 +729,13 @@ class TakoTerminalApp(App[None]):
             if hint:
                 next_steps.append(hint)
             self._error_card("pairing DM failed", str(exc), next_steps)
+            self._record_event(
+                "pairing.outbound.send_failed",
+                f"Outbound pairing DM failed: {exc}",
+                severity="error",
+                source="pairing",
+                metadata={"resolved": resolved},
+            )
             await self._cleanup_pairing_resources()
             self._set_state(SessionState.PAIRING_OUTBOUND)
             self._set_indicator("idle")
@@ -404,6 +750,12 @@ class TakoTerminalApp(App[None]):
         self.pairing_completed = False
 
         self._write_tako(f"outbound pairing DM sent to {handle} ({resolved}).")
+        self._record_event(
+            "pairing.outbound.sent",
+            "Outbound pairing DM sent.",
+            source="pairing",
+            metadata={"resolved": resolved},
+        )
         self._write_tako(
             "confirm by replying with the code on XMTP, or paste the code here with your human hands. "
             "commands: `retry`, `change`, `local-only`"
@@ -432,6 +784,12 @@ class TakoTerminalApp(App[None]):
                     continue
                 if _normalize_pairing_code(content) == expected:
                     self._write_tako("yay! received matching pairing code over XMTP.")
+                    self._record_event(
+                        "pairing.confirmed.xmtp",
+                        "Pairing code confirmed over XMTP reply.",
+                        source="pairing",
+                        metadata={"sender_inbox_id": sender_inbox_id},
+                    )
                     await self._complete_pairing("xmtp_reply_v1")
                     break
         except asyncio.CancelledError:
@@ -473,6 +831,7 @@ class TakoTerminalApp(App[None]):
         expected = _normalize_pairing_code(self.pairing_code)
         entered = _normalize_pairing_code(text)
         if entered == expected:
+            self._record_event("pairing.confirmed.terminal", "Pairing code confirmed in terminal.", source="pairing")
             await self._complete_pairing("terminal_copyback_v2")
             return
 
@@ -522,6 +881,12 @@ class TakoTerminalApp(App[None]):
 
         self._set_state(SessionState.PAIRED)
         self._write_tako("paired! XMTP is now primary control channel for identity/config/tools/routines.")
+        self._record_event(
+            "pairing.completed",
+            "Operator pairing completed successfully.",
+            source="pairing",
+            metadata={"operator_address": self.pairing_resolved, "pairing_method": pairing_method},
+        )
         self._begin_identity_onboarding()
 
     async def _cleanup_pairing_resources(self) -> None:
@@ -547,27 +912,32 @@ class TakoTerminalApp(App[None]):
     async def _enter_local_only_mode(self) -> None:
         self.mode = "local-only"
         self.operator_paired = False
+        self.runtime_mode = "local"
         self._set_state(SessionState.RUNNING)
         await self._stop_xmtp_runtime()
         await self._start_local_heartbeat()
         self._write_tako("continuing in terminal-managed local mode. use `pair` any time to add XMTP operator control.")
+        self._record_event("runtime.local_mode", "Running in local-only mode.", source="startup")
 
     async def _finalize_onboarding(self) -> None:
         if self.operator_paired:
             self.mode = "paired"
             self._set_state(SessionState.PAIRED)
             self._write_tako("onboarding complete. spinning up XMTP runtime currents.")
+            self._record_event("onboarding.completed", "Onboarding completed with operator pairing.", source="onboarding")
             await self._start_xmtp_runtime()
             self._set_state(SessionState.RUNNING)
             self._write_tako("all tentacles online. terminal remains your local cockpit. type `help`.")
             return
 
+        self._record_event("onboarding.completed", "Onboarding completed in local-only mode.", source="onboarding")
         await self._enter_local_only_mode()
 
     def _begin_identity_onboarding(self) -> None:
         self.mode = "onboarding"
         self._set_state(SessionState.ONBOARDING_IDENTITY)
         self.identity_step = 0
+        self._record_event("onboarding.identity.begin", "Identity prompt phase started.", source="onboarding")
         self._write_tako("next tiny question: what should I be called?")
 
     async def _start_xmtp_runtime(self) -> None:
@@ -579,7 +949,6 @@ class TakoTerminalApp(App[None]):
             self._write_tako("safe mode is enabled; XMTP runtime is paused.")
             return
 
-        await self._stop_local_heartbeat()
         await self._stop_xmtp_runtime()
 
         hooks = RuntimeHooks(log=self._on_runtime_log, inbound_message=self._on_runtime_inbound, emit_console=False)
@@ -589,6 +958,7 @@ class TakoTerminalApp(App[None]):
             self._run_runtime_task(args, hooks),
             name="tako-xmtp-runtime",
         )
+        self._record_event("runtime.xmtp.started", "XMTP runtime loop started.", source="runtime")
 
     async def _run_runtime_task(self, args: argparse.Namespace, hooks: RuntimeHooks) -> None:
         if self.paths is None:
@@ -613,6 +983,12 @@ class TakoTerminalApp(App[None]):
                     ],
                 )
                 self.runtime_mode = "offline"
+                self._record_event(
+                    "runtime.exit.nonzero",
+                    f"XMTP runtime exited with code {code}.",
+                    severity="error",
+                    source="runtime",
+                )
         except asyncio.CancelledError:
             self.runtime_mode = "offline"
             raise
@@ -626,6 +1002,12 @@ class TakoTerminalApp(App[None]):
                     "Check network/XMTP connectivity and try again.",
                 ],
             )
+            self._record_event(
+                "runtime.crash",
+                f"XMTP runtime crashed: {exc}",
+                severity="error",
+                source="runtime",
+            )
 
     async def _stop_xmtp_runtime(self) -> None:
         if self.runtime_task is None:
@@ -635,11 +1017,13 @@ class TakoTerminalApp(App[None]):
             await self.runtime_task
         self.runtime_task = None
         self.runtime_mode = "offline"
+        self._record_event("runtime.xmtp.stopped", "XMTP runtime loop stopped.", source="runtime")
 
     async def _start_local_heartbeat(self) -> None:
         if self.local_heartbeat_task is not None:
             return
         self.local_heartbeat_task = asyncio.create_task(self._local_heartbeat_loop(), name="tako-local-heartbeat")
+        self._record_event("heartbeat.loop.started", "Heartbeat loop started.", source="heartbeat")
 
     async def _stop_local_heartbeat(self) -> None:
         if self.local_heartbeat_task is None:
@@ -648,12 +1032,28 @@ class TakoTerminalApp(App[None]):
         with contextlib.suppress(asyncio.CancelledError):
             await self.local_heartbeat_task
         self.local_heartbeat_task = None
+        self._record_event("heartbeat.loop.stopped", "Heartbeat loop stopped.", source="heartbeat")
 
     async def _local_heartbeat_loop(self) -> None:
-        self.runtime_mode = "local-heartbeat"
         while True:
-            ensure_daily_log(daily_root(), date.today())
-            await asyncio.sleep(self.interval + random.uniform(-0.2 * self.interval, 0.2 * self.interval))
+            if not self.safe_mode:
+                ensure_daily_log(daily_root(), date.today())
+                self.heartbeat_ticks += 1
+                self.last_heartbeat_at = time.monotonic()
+                self._record_event(
+                    "heartbeat.tick",
+                    "Heartbeat tick completed.",
+                    source="heartbeat",
+                    metadata={
+                        "tick": self.heartbeat_ticks,
+                        "mode": self.mode,
+                        "runtime_mode": self.runtime_mode,
+                    },
+                )
+            await asyncio.sleep(
+                self.interval
+                + random.uniform(-HEARTBEAT_JITTER * self.interval, HEARTBEAT_JITTER * self.interval)
+            )
 
     async def _enable_safe_mode(self) -> None:
         self.safe_mode = True
@@ -662,22 +1062,24 @@ class TakoTerminalApp(App[None]):
         await self._stop_xmtp_runtime()
         self.runtime_mode = "safe"
         self._write_tako("safe mode enabled. tucked into a little shell for now.")
+        self._record_event("runtime.safe_mode", "Safe mode enabled.", source="operator")
 
     async def _disable_safe_mode(self) -> None:
         self.safe_mode = False
         self._write_tako("safe mode disabled. paddling again.")
+        self._record_event("runtime.safe_mode", "Safe mode disabled.", source="operator")
+        await self._start_local_heartbeat()
         if self.operator_paired:
             self.mode = "paired"
             await self._start_xmtp_runtime()
         else:
             self.mode = "local-only"
-            await self._start_local_heartbeat()
 
     async def _handle_running_input(self, text: str) -> None:
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, doctor, pair, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, doctor, pair, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -685,16 +1087,36 @@ class TakoTerminalApp(App[None]):
             uptime = int(time.monotonic() - self.started_at)
             paired = "yes" if self.operator_paired else "no"
             safe = "on" if self.safe_mode else "off"
+            heartbeat_age = (
+                f"{int(time.monotonic() - self.last_heartbeat_at)}s ago"
+                if self.last_heartbeat_at is not None
+                else "n/a"
+            )
             self._write_tako(
                 "status: ok\n"
                 f"paired: {paired}\n"
+                f"instance_kind: {self.instance_kind}\n"
                 f"mode: {self.mode}\n"
                 f"runtime_mode: {self.runtime_mode}\n"
                 f"safe_mode: {safe}\n"
+                f"heartbeat_ticks: {self.heartbeat_ticks}\n"
+                f"last_heartbeat: {heartbeat_age}\n"
+                f"type1_processed: {self.type1_processed}\n"
+                f"type2_escalations: {self.type2_escalations}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
                 f"tako_address: {self.address}"
             )
+            return
+
+        if cmd == "health":
+            if not self.health_summary:
+                self._write_tako("health summary is not available yet.")
+                return
+            lines = ["health summary:"]
+            for key in sorted(self.health_summary):
+                lines.append(f"{key}: {self.health_summary[key]}")
+            self._write_tako("\n".join(lines))
             return
 
         if cmd == "doctor":
@@ -746,14 +1168,29 @@ class TakoTerminalApp(App[None]):
         elif "retrying stream mode" in lowered or "daemon started" in lowered:
             self.runtime_mode = "stream"
         elif "status: unpaired" in lowered and not self.operator_paired:
-            self.runtime_mode = "local-heartbeat"
+            self.runtime_mode = "local"
 
         if level in {"warn", "error"} or message.startswith(("status:", "pairing:", "inbox_id:")):
             self._write_system(f"runtime[{level}]: {message}")
+        severity = level if level in {"warn", "error"} else "info"
+        event_type = "runtime.log"
+        if "crash" in lowered:
+            event_type = "runtime.crash"
+        elif "polling" in lowered:
+            event_type = "runtime.polling"
+        elif "reconnecting" in lowered:
+            event_type = "runtime.reconnect"
+        self._record_event(event_type, message, severity=severity, source="runtime")
 
     def _on_runtime_inbound(self, sender_inbox_id: str, text: str) -> None:
         short_sender = sender_inbox_id[:10]
         self._write_system(f"xmtp<{short_sender}>: {text}")
+        self._record_event(
+            "xmtp.inbound.message",
+            "Inbound XMTP message received.",
+            source="xmtp",
+            metadata={"sender_inbox_id": sender_inbox_id, "preview": _summarize_text(text)},
+        )
 
     async def _shutdown_background_tasks(self) -> None:
         if self.shutdown_complete:
@@ -768,6 +1205,12 @@ class TakoTerminalApp(App[None]):
         await self._cleanup_pairing_resources()
         await self._stop_xmtp_runtime()
         await self._stop_local_heartbeat()
+        await _cancel_task(self.event_ingest_task)
+        await _cancel_task(self.type1_task)
+        await _cancel_task(self.type2_task)
+        self.event_ingest_task = None
+        self.type1_task = None
+        self.type2_task = None
 
         if self.lock_context is not None and self.lock_acquired:
             with contextlib.suppress(Exception):
@@ -793,21 +1236,31 @@ class TakoTerminalApp(App[None]):
 
     def _refresh_panels(self) -> None:
         pair_next = "establish XMTP pairing" if not self.operator_paired else "process operator commands via XMTP"
+        heartbeat_age = (
+            f"{int(time.monotonic() - self.last_heartbeat_at)}s"
+            if self.last_heartbeat_at is not None
+            else "n/a"
+        )
         tasks = (
             "Tasks\n"
             f"- state: {self.state.value}\n"
+            f"- instance: {self.instance_kind}\n"
             f"- next: {pair_next}\n"
             f"- runtime: {self.runtime_mode}\n"
-            f"- safe mode: {'on' if self.safe_mode else 'off'}"
+            f"- safe mode: {'on' if self.safe_mode else 'off'}\n"
+            f"- heartbeat ticks: {self.heartbeat_ticks}\n"
+            f"- last heartbeat: {heartbeat_age}"
         )
         self.tasks_panel.update(tasks)
 
+        event_log_value = str(self.event_log_path) if self.event_log_path is not None else "not ready"
         memory = (
             "Memory\n"
             f"- name: {self.identity_name}\n"
             f"- role: {self.identity_role}\n"
             f"- daily log: memory/dailies/{date.today().isoformat()}.md\n"
-            f"- routines: {self.routines or 'not captured yet'}"
+            f"- routines: {self.routines or 'not captured yet'}\n"
+            f"- event log: {event_log_value}"
         )
         self.memory_panel.update(memory)
 
@@ -815,9 +1268,11 @@ class TakoTerminalApp(App[None]):
         sensors = (
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
-            "- task sensor: disabled\n"
-            "- memory sensor: disabled\n"
-            f"- operator: {operator}"
+            f"- type1 processed: {self.type1_processed}\n"
+            f"- type2 escalations: {self.type2_escalations}\n"
+            f"- type2 last: {self.type2_last}\n"
+            f"- operator: {operator}\n"
+            f"- events written: {self.event_total_written} / ingested: {self.event_total_ingested}"
         )
         self.sensors_panel.update(sensors)
 
@@ -835,6 +1290,14 @@ class TakoTerminalApp(App[None]):
         self._write_system("Next steps:")
         for step in next_steps:
             self._write_system(f"- {step}")
+        severity = "critical" if summary == "startup blocked" else "error"
+        self._record_event(
+            "ui.error_card",
+            f"{summary}: {_summarize_text(detail)}",
+            severity=severity,
+            source="ui",
+            metadata={"summary": summary},
+        )
 
 
 def run_terminal_app(*, interval: float = 30.0) -> int:
@@ -905,3 +1368,69 @@ def _summarize_text(text: str) -> str:
     if len(value) <= 220:
         return value
     return f"{value[:217]}..."
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _new_event_id() -> str:
+    stamp = int(time.time() * 1000)
+    token = secrets.token_hex(4)
+    return f"evt-{stamp}-{token}"
+
+
+def _line_event_id(payload: str) -> str:
+    token = secrets.token_hex(4)
+    return f"line-{abs(hash(payload))}-{token}"
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _depth_for_severity(severity: str) -> str:
+    rank = SEVERITY_ORDER.get(severity, 0)
+    if rank >= 3:
+        return "deep"
+    if rank >= 2:
+        return "medium"
+    return "light"
+
+
+def _type2_recommendation(event_type: str, message: str) -> str:
+    text = message.lower()
+    kind = event_type.lower()
+
+    if "another tako instance" in text or "instance lock" in text:
+        return "Another Tako instance may be active here. Stop the duplicate process before continuing."
+    if "xmtp import unavailable" in text or "no module named 'xmtp'" in text:
+        return "Install dependencies via `./tako.sh` and retry XMTP pairing/runtime startup."
+    if "dns lookup for xmtp" in text:
+        return "Check network/DNS egress for XMTP hosts, then retry pairing or runtime startup."
+    if "runtime crashed" in text or "runtime.crash" in kind:
+        return "Enable safe mode, inspect `doctor` output, then restart XMTP runtime."
+    if kind.startswith("health.check.issue"):
+        return "Resolve reported health issue before proceeding with risky actions."
+    return "Review the event details, then choose a safe next action or pause in safe mode."
+
+
+def _dns_lookup_ok(host: str) -> bool:
+    with contextlib.suppress(Exception):
+        socket.gethostbyname(host)
+        return True
+    return False
+
+
+def _dir_has_entries(path: Path) -> bool:
+    with contextlib.suppress(FileNotFoundError):
+        return any(path.iterdir())
+    return False
+
+
+async def _cancel_task(task: asyncio.Task[None] | None) -> None:
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task

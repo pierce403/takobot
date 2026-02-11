@@ -652,6 +652,7 @@
 ./start.sh
 
 # In app: XMTP setup prompt appears first
+# Startup: health check (instance + resources + lock)
 # Then: onboarding questions (name/purpose/routines)
 # After pairing: XMTP controls identity/config/tools/routines</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
@@ -720,11 +721,17 @@
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
               <li>
+                Runs a startup health check to classify environment state (brand-new vs established), verify lock/safety, and probe resources.
+              </li>
+              <li>
                 Launches the interactive terminal app and runs onboarding as explicit states.
               </li>
               <li>
                 Prompts XMTP setup first in-app, sends outbound pairing DM, supports XMTP reply or terminal code confirmation,
                 then stores operator imprint in <code>.tako/operator.json</code> when paired.
+              </li>
+              <li>
+                Starts heartbeat + event-log ingestion with Type 1 triage and Type 2 escalation for serious events.
               </li>
             </ul>
           </div>
@@ -755,6 +762,9 @@
               <li>
                 XMTP requires outbound network access; if messaging fails, double-check your HTTPS /
                 HTTP2 egress.
+              </li>
+              <li>
+                Runtime cognition consumes <code>.tako/state/events.jsonl</code> with Type 1 triage and escalates critical signals to Type 2 depth tasks.
               </li>
               <li>
                 The daemon retries XMTP stream subscriptions with backoff and falls back to polling when stream errors persist.

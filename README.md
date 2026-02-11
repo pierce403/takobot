@@ -3,7 +3,9 @@
 Tako is a **highly autonomous, operator-imprinted agent** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - A first-class interactive terminal app main loop (`tako`) with transcript, status bar, panels, and input box
+- Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - A background XMTP runtime with stream retries + polling fallback
+- Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - A small command router over the operator channel (`help`, `status`, `doctor`, `reimprint`)
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
@@ -64,7 +66,9 @@ Runtime-only (ignored):
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
 - Launches the interactive terminal app main loop (`tako app`, default `tako`).
+- Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
+- Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit.
 
 ## Configuration
@@ -87,4 +91,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
 - XMTP client initialization disables history sync by default for compatibility.
+- Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

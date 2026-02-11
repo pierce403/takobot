@@ -65,17 +65,22 @@
 - **Description**: A persistent full-screen terminal UI acts as the primary operator-facing runtime loop.
 - **Properties**:
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
+  - Runs startup health checks (instance context, lock state, writable paths, dependency/network probes) before onboarding.
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
   - Prompts for XMTP control-channel setup first (ASAP), before identity questions.
   - Uses a playful octopus voice in onboarding transcript copy.
-  - Runs background runtime tasks (heartbeat + XMTP daemon loop) under UI orchestration.
+  - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
+  - Escalates serious events into Type 2 tasks with depth-aware handling.
+  - Runs XMTP daemon loop as a background task when paired.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Surfaces operational failures as concise in-UI error cards with suggested next actions.
 - **Test Criteria**:
   - [x] Running `tako` opens app mode by default (no required subcommand).
+  - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
   - [x] XMTP setup prompt appears first in-chat on unpaired startup.
   - [x] Identity + routine onboarding happens in-chat in the terminal app (not shell prompts).
   - [x] Terminal input can confirm outbound pairing code and continue to running mode.
+  - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable
@@ -200,12 +205,15 @@
   - [ ] Disabled sensors produce no events.
 
 ### Cognitive state (Type 1 / Type 2)
-- **Stability**: planned
-- **Description**: Runtime-only cognitive state that influences cadence and depth, never overriding SOUL/AGENTS constraints.
+- **Stability**: in-progress
+- **Description**: Runtime-only cognition loop that triages events with Type 1 and escalates serious signals to Type 2 depth passes.
 - **Properties**:
-  - Stored in `.tako/state/cognition.json` (ignored).
+  - Event log is stored at `.tako/state/events.jsonl` (ignored).
+  - Type 1 continuously consumes and evaluates event-log items.
+  - Type 2 is triggered for serious events with `light` / `medium` / `deep` depth.
 - **Test Criteria**:
-  - [ ] Operator can request a Type 2 pass for risky/config changes.
+  - [x] Startup health-check issues can trigger Type 2 escalation.
+  - [x] Runtime error events can trigger Type 2 escalation.
 
 ### “Eat the crab” importer
 - **Stability**: planned

@@ -255,8 +255,8 @@ maybe_suggest_soul_identity() {
   local tool=""
   local prompt=""
   local output=""
-  local suggested_name=""
-  local suggested_role=""
+  local inferred_name=""
+  local inferred_role=""
 
   if ! interactive_tty; then
     suggested_name_ref="$default_name"
@@ -293,23 +293,23 @@ maybe_suggest_soul_identity() {
     return 0
   fi
 
-  suggested_name="$(extract_soul_field "NAME" "$output")"
-  suggested_role="$(extract_soul_field "ROLE" "$output")"
+  inferred_name="$(extract_soul_field "NAME" "$output")"
+  inferred_role="$(extract_soul_field "ROLE" "$output")"
 
-  if [[ -z "$suggested_name" ]]; then
-    suggested_name="$default_name"
+  if [[ -z "$inferred_name" ]]; then
+    inferred_name="$default_name"
   fi
-  if [[ -z "$suggested_role" ]]; then
-    suggested_role="$default_role"
+  if [[ -z "$inferred_role" ]]; then
+    inferred_role="$default_role"
   fi
 
   echo "Suggested defaults from $tool:" > /dev/tty
-  echo "  Name: $suggested_name" > /dev/tty
-  echo "  Role: $suggested_role" > /dev/tty
+  echo "  Name: $inferred_name" > /dev/tty
+  echo "  Role: $inferred_role" > /dev/tty
 
   if prompt_yes_no "Use these suggestions as prompt defaults?" "y"; then
-    suggested_name_ref="$suggested_name"
-    suggested_role_ref="$suggested_role"
+    suggested_name_ref="$inferred_name"
+    suggested_role_ref="$inferred_role"
   else
     suggested_name_ref="$default_name"
     suggested_role_ref="$default_role"
@@ -368,6 +368,9 @@ run_soul_onboarding() {
   echo "This updates the Identity section in SOUL.md before startup." > /dev/tty
   echo > /dev/tty
 
+  # Defensive defaults; maybe_suggest_soul_identity may override them.
+  suggested_name="$default_name"
+  suggested_role="$default_role"
   maybe_suggest_soul_identity "$default_name" "$default_role" suggested_name suggested_role
 
   name="$(prompt_line "Name" "$suggested_name")"

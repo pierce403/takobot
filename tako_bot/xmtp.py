@@ -41,7 +41,7 @@ async def create_client(env: str, db_root: Path, wallet_key: str, db_encryption_
     api_url = None
     history_sync_url = None
     gateway_host = None
-    disable_history_sync = False
+    disable_history_sync = True
     disable_device_sync = True
 
     options = ClientOptions(

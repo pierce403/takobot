@@ -83,4 +83,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - If one-shot inference CLI onboarding fails, `start.sh` now prints attempted command diagnostics before manual fallback.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
+- XMTP client initialization disables history sync by default for compatibility.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

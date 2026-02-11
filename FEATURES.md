@@ -89,6 +89,7 @@
 - **Properties**:
   - Default message includes the machine hostname.
   - `--message` overrides the default message.
+  - XMTP client options disable history sync by default.
 - **Test Criteria**:
   - [x] Without `--message`, a default “hi from <hostname> (tako)” message is used.
 

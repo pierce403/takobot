@@ -58,6 +58,7 @@ Runtime-only (ignored):
 - Installs the XMTP Python SDK (`xmtp`) via `uv pip`. If it is not yet on PyPI, it clones `xmtp-py` and installs from source.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
+- If available, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL name/role defaults.
 - Starts listening on XMTP and waits for the first inbound DM to initiate pairing.
 
 ## Configuration
@@ -75,4 +76,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 
 - The bootstrap flow requires `uv` to manage the project virtualenv and Python dependencies.
 - `setup.sh` / `start.sh` will attempt a user-local `uv` install automatically if `uv` is missing.
+- The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

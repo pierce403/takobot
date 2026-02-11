@@ -34,6 +34,7 @@
 - **Properties**:
   - `setup.sh` clones (or reuses) repo in the caller's current directory, then runs `start.sh`.
   - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako.sh`.
+  - If installed, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL defaults.
   - If `uv` is missing, `start.sh` attempts a user-local install before handing off to `tako.sh`.
   - Site and README expose a `curl -fsSL https://tako.bot/setup.sh | bash` path.
 - **Test Criteria**:
@@ -45,6 +46,7 @@
 - **Description**: A multi-command CLI where `run` starts the daemon; operator management happens over XMTP.
 - **Properties**:
   - `tako run` starts the daemon, prints `tako address`, and listens for pairing DMs.
+  - `tako run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
   - Pairing and all post-boot management happens over XMTP (not CLI flags).
   - `tako doctor` and `tako hi` exist as developer utilities.
   - `tako.py` remains as a backwards-compatible wrapper.

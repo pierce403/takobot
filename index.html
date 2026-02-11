@@ -625,6 +625,10 @@
 # Reply with: pair &lt;code&gt;
 # Then: help / status / doctor</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
+              If installed, <code>start.sh</code> can optionally use one-shot local inference CLIs
+              (<code>codex</code>/<code>claude</code>/<code>gemini</code>) to suggest SOUL defaults.
+            </p>
+            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Developer utilities: <code>./tako.sh doctor</code> and <code>./tako.sh hi &lt;to&gt; ["message"]</code>.
             </p>
           </div>
@@ -685,6 +689,10 @@
                 Generates <code>.tako/keys.json</code> with a wallet key and DB encryption key (unencrypted; file-perms only).
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
+              <li>
+                If available, optionally asks to use one-shot local inference CLIs
+                (<code>codex</code>/<code>claude</code>/<code>gemini</code>) for SOUL identity prompt defaults.
+              </li>
               <li>Waits for the first inbound DM to initiate pairing; stores the operator imprint in <code>.tako/operator.json</code>.</li>
             </ul>
           </div>
@@ -713,6 +721,9 @@
               <li>
                 XMTP requires outbound network access; if messaging fails, double-check your HTTPS /
                 HTTP2 egress.
+              </li>
+              <li>
+                The daemon retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
               </li>
               <li>
                 Ensure <code>uv</code> is installed locally; bootstrap and dependency management run through it.

@@ -59,6 +59,16 @@ interactive_tty() {
   [[ -r /dev/tty && -w /dev/tty ]]
 }
 
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --foreground "$seconds" "$@"
+  else
+    "$@"
+  fi
+}
+
 prompt_line() {
   local label="$1"
   local default="$2"
@@ -76,6 +86,233 @@ prompt_line() {
     printf "%s" "$default"
   else
     printf "%s" "$input"
+  fi
+}
+
+prompt_yes_no() {
+  local label="$1"
+  local default="${2:-n}"
+  local input=""
+  local normalized_default
+
+  normalized_default="$(printf "%s" "$default" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$normalized_default" != "y" && "$normalized_default" != "n" ]]; then
+    normalized_default="n"
+  fi
+
+  if ! interactive_tty; then
+    [[ "$normalized_default" == "y" ]]
+    return
+  fi
+
+  while true; do
+    if [[ "$normalized_default" == "y" ]]; then
+      printf "%s [Y/n]: " "$label" > /dev/tty
+    else
+      printf "%s [y/N]: " "$label" > /dev/tty
+    fi
+    IFS= read -r input < /dev/tty || true
+    input="$(sanitize_line "$input")"
+    input="$(printf "%s" "$input" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ -z "$input" ]]; then
+      [[ "$normalized_default" == "y" ]]
+      return
+    fi
+    if [[ "$input" == "y" || "$input" == "yes" ]]; then
+      return 0
+    fi
+    if [[ "$input" == "n" || "$input" == "no" ]]; then
+      return 1
+    fi
+    echo "Please answer y or n." > /dev/tty
+  done
+}
+
+detect_inference_tools() {
+  local tool
+  local tools=()
+  for tool in codex claude gemini; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      tools+=("$tool")
+    fi
+  done
+  printf "%s\n" "${tools[@]}"
+}
+
+build_soul_inference_prompt() {
+  local default_name="$1"
+  local default_role="$2"
+  cat <<EOF
+You are assisting first-run onboarding for tako-bot.
+Generate suggested identity fields for SOUL.md.
+
+Constraints:
+- Name should be short (1-3 words).
+- Role should be one sentence, practical, and operator-imprinted.
+- Keep role under 180 characters.
+- Preserve this direction: highly autonomous agent, Python implementation, docs-first memory, Type 1 / Type 2 thinking, web3-native XMTP/Ethereum/Farcaster path.
+
+Current defaults:
+NAME: $default_name
+ROLE: $default_role
+
+Return exactly two lines:
+NAME: <suggested name>
+ROLE: <suggested role sentence>
+EOF
+}
+
+extract_soul_field() {
+  local key="$1"
+  local text="$2"
+  local value
+  value="$(printf "%s\n" "$text" | sed -n -E "s/^[[:space:]]*${key}:[[:space:]]*//p" | head -n 1 || true)"
+  sanitize_line "$value"
+}
+
+try_inference_command() {
+  local output=""
+  if output="$(run_with_timeout 30 "$@" 2>/dev/null)"; then
+    if [[ -n "$(sanitize_line "$output")" ]]; then
+      printf "%s" "$output"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+run_one_shot_inference() {
+  local tool="$1"
+  local prompt="$2"
+  local output=""
+
+  case "$tool" in
+    codex)
+      output="$(try_inference_command codex exec "$prompt")" && { printf "%s" "$output"; return 0; }
+      output="$(try_inference_command codex -p "$prompt")" && { printf "%s" "$output"; return 0; }
+      output="$(try_inference_command codex "$prompt")" && { printf "%s" "$output"; return 0; }
+      ;;
+    claude)
+      output="$(try_inference_command claude -p "$prompt")" && { printf "%s" "$output"; return 0; }
+      output="$(try_inference_command claude --print "$prompt")" && { printf "%s" "$output"; return 0; }
+      output="$(try_inference_command claude "$prompt")" && { printf "%s" "$output"; return 0; }
+      ;;
+    gemini)
+      output="$(try_inference_command gemini -p "$prompt")" && { printf "%s" "$output"; return 0; }
+      output="$(try_inference_command gemini --prompt "$prompt")" && { printf "%s" "$output"; return 0; }
+      output="$(try_inference_command gemini "$prompt")" && { printf "%s" "$output"; return 0; }
+      ;;
+  esac
+
+  return 1
+}
+
+choose_inference_tool() {
+  local -a tools=("$@")
+  local choice=""
+  local idx=1
+
+  if [[ ${#tools[@]} -eq 1 ]]; then
+    printf "%s" "${tools[0]}"
+    return 0
+  fi
+
+  if ! interactive_tty; then
+    printf "%s" "${tools[0]}"
+    return 0
+  fi
+
+  echo "Detected local inference CLIs:" > /dev/tty
+  for tool in "${tools[@]}"; do
+    echo "  $idx) $tool" > /dev/tty
+    idx=$((idx + 1))
+  done
+
+  while true; do
+    printf "Choose a tool [1-%d] (default 1): " "${#tools[@]}" > /dev/tty
+    IFS= read -r choice < /dev/tty || true
+    choice="$(sanitize_line "$choice")"
+    if [[ -z "$choice" ]]; then
+      printf "%s" "${tools[0]}"
+      return 0
+    fi
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#tools[@]} )); then
+      printf "%s" "${tools[$((choice - 1))]}"
+      return 0
+    fi
+    echo "Invalid selection." > /dev/tty
+  done
+}
+
+maybe_suggest_soul_identity() {
+  local default_name="$1"
+  local default_role="$2"
+  local -n suggested_name_ref="$3"
+  local -n suggested_role_ref="$4"
+  local -a tools=()
+  local detected=""
+  local tool=""
+  local prompt=""
+  local output=""
+  local suggested_name=""
+  local suggested_role=""
+
+  if ! interactive_tty; then
+    suggested_name_ref="$default_name"
+    suggested_role_ref="$default_role"
+    return 0
+  fi
+
+  while IFS= read -r detected; do
+    detected="$(sanitize_line "$detected")"
+    if [[ -n "$detected" ]]; then
+      tools+=("$detected")
+    fi
+  done < <(detect_inference_tools)
+
+  if [[ ${#tools[@]} -eq 0 ]]; then
+    suggested_name_ref="$default_name"
+    suggested_role_ref="$default_role"
+    return 0
+  fi
+
+  if ! prompt_yes_no "Use a local inference CLI (${tools[*]}) to suggest SOUL defaults?" "n"; then
+    suggested_name_ref="$default_name"
+    suggested_role_ref="$default_role"
+    return 0
+  fi
+
+  tool="$(choose_inference_tool "${tools[@]}")"
+  prompt="$(build_soul_inference_prompt "$default_name" "$default_role")"
+  echo "Querying $tool for onboarding suggestion..." > /dev/tty
+  if ! output="$(run_one_shot_inference "$tool" "$prompt")"; then
+    echo "Could not run one-shot inference with $tool; continuing with manual prompts." > /dev/tty
+    suggested_name_ref="$default_name"
+    suggested_role_ref="$default_role"
+    return 0
+  fi
+
+  suggested_name="$(extract_soul_field "NAME" "$output")"
+  suggested_role="$(extract_soul_field "ROLE" "$output")"
+
+  if [[ -z "$suggested_name" ]]; then
+    suggested_name="$default_name"
+  fi
+  if [[ -z "$suggested_role" ]]; then
+    suggested_role="$default_role"
+  fi
+
+  echo "Suggested defaults from $tool:" > /dev/tty
+  echo "  Name: $suggested_name" > /dev/tty
+  echo "  Role: $suggested_role" > /dev/tty
+
+  if prompt_yes_no "Use these suggestions as prompt defaults?" "y"; then
+    suggested_name_ref="$suggested_name"
+    suggested_role_ref="$suggested_role"
+  else
+    suggested_name_ref="$default_name"
+    suggested_role_ref="$default_role"
   fi
 }
 
@@ -113,6 +350,8 @@ update_soul_identity() {
 run_soul_onboarding() {
   local default_name
   local default_role
+  local suggested_name
+  local suggested_role
   local name
   local purpose
   local role
@@ -129,8 +368,10 @@ run_soul_onboarding() {
   echo "This updates the Identity section in SOUL.md before startup." > /dev/tty
   echo > /dev/tty
 
-  name="$(prompt_line "Name" "$default_name")"
-  purpose="$(prompt_line "Purpose (single line)" "$default_role")"
+  maybe_suggest_soul_identity "$default_name" "$default_role" suggested_name suggested_role
+
+  name="$(prompt_line "Name" "$suggested_name")"
+  purpose="$(prompt_line "Purpose (single line)" "$suggested_role")"
 
   role="$(sanitize_line "$purpose")"
   if [[ -z "$role" ]]; then

@@ -21,6 +21,11 @@ from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_s
 
 
 DEFAULT_ENV = "production"
+STREAM_RECONNECT_BASE_S = 1.5
+STREAM_RECONNECT_MAX_S = 45.0
+STREAM_ERROR_BURST_WINDOW_S = 18.0
+STREAM_ERROR_BURST_THRESHOLD = 3
+STREAM_HINT_COOLDOWN_S = 90.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -222,121 +227,169 @@ async def _run_daemon(
     start = time.monotonic()
     heartbeat = asyncio.create_task(_heartbeat_loop(args))
     pairing_path = paths.state_dir / "pairing.json"
-    stream = client.conversations.stream_all_messages()
+    reconnect_attempt = 0
+    error_burst_count = 0
+    last_error_at = 0.0
+    hint_last_printed: dict[str, float] = {}
 
     try:
-        async for item in stream:
-            if isinstance(item, Exception):
-                print(f"XMTP stream error: {item}", file=sys.stderr)
-                continue
+        while True:
+            stream = client.conversations.stream_all_messages()
+            try:
+                async for item in stream:
+                    if isinstance(item, Exception):
+                        now = time.monotonic()
+                        if now - last_error_at > STREAM_ERROR_BURST_WINDOW_S:
+                            error_burst_count = 0
+                        error_burst_count += 1
+                        last_error_at = now
 
-            sender_inbox_id = getattr(item, "sender_inbox_id", None)
-            if not isinstance(sender_inbox_id, str):
-                continue
-            if sender_inbox_id == client.inbox_id:
-                continue
+                        summary = _summarize_stream_error(item)
+                        print(f"XMTP stream warning: {summary}", file=sys.stderr)
 
-            content = getattr(item, "content", None)
-            if not isinstance(content, str):
-                continue
-            text = content.strip()
-            if not text:
-                continue
+                        hint = hint_for_xmtp_error(item)
+                        if hint:
+                            last_hint_time = hint_last_printed.get(hint, 0.0)
+                            if now - last_hint_time > STREAM_HINT_COOLDOWN_S:
+                                hint_last_printed[hint] = now
+                                print(hint, file=sys.stderr)
 
-            convo_id = getattr(item, "conversation_id", None)
-            if not isinstance(convo_id, (bytes, bytearray)):
-                continue
+                        if error_burst_count >= STREAM_ERROR_BURST_THRESHOLD:
+                            print("XMTP stream unstable; reconnecting...", file=sys.stderr)
+                            break
+                        continue
 
-            convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
-            if convo is None:
-                continue
+                    error_burst_count = 0
+                    reconnect_attempt = 0
+                    await _handle_incoming_message(item, client, paths, pairing_path, address, env, start)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                now = time.monotonic()
+                summary = _summarize_stream_error(exc)
+                print(f"XMTP stream crashed: {summary}", file=sys.stderr)
+                hint = hint_for_xmtp_error(exc)
+                if hint:
+                    last_hint_time = hint_last_printed.get(hint, 0.0)
+                    if now - last_hint_time > STREAM_HINT_COOLDOWN_S:
+                        hint_last_printed[hint] = now
+                        print(hint, file=sys.stderr)
+            finally:
+                with contextlib.suppress(Exception):
+                    await stream.close()
 
-            operator_cfg = load_operator(paths.operator_json)
-            operator_inbox_id = get_operator_inbox_id(operator_cfg)
-
-            if operator_inbox_id is None:
-                pending = load_pending(pairing_path)
-                if pending and pending.requested_by_inbox_id != sender_inbox_id:
-                    await convo.send("This Tako instance is currently pairing with someone else. Try again later.")
-                    continue
-
-                cmd, rest = _parse_command(text)
-                if cmd == "pair" and pending and pending.requested_by_inbox_id == sender_inbox_id:
-                    if verify_pairing_code(pairing_path, requested_by_inbox_id=sender_inbox_id, code=rest):
-                        imprint_operator(
-                            paths.operator_json,
-                            operator_inbox_id=sender_inbox_id,
-                            operator_address=None,
-                        )
-                        clear_pending(pairing_path)
-                        append_daily_note(daily_root(), date.today(), "Operator paired via XMTP challenge.")
-                        await convo.send("Paired. You are now the operator.\n\nReply 'help' for commands.")
-                    else:
-                        await convo.send("Pairing code incorrect or expired. Reply with `pair <code>` from my last message.")
-                    continue
-
-                if pending is None:
-                    pending = issue_pairing_code(pairing_path, requested_by_inbox_id=sender_inbox_id)
-                    append_daily_note(daily_root(), date.today(), "Pairing challenge issued (pending).")
-
-                mins = max(1, int((pending.expires_at - pending.requested_at).total_seconds() / 60))
-                await convo.send(
-                    "This Tako instance is unpaired.\n\n"
-                    f"To become the operator, reply: `pair {pending.code}` (expires in ~{mins} min).\n\n"
-                    f"tako address: {address}"
-                )
-                continue
-
-            if sender_inbox_id != operator_inbox_id:
-                if _looks_like_command(text):
-                    await convo.send("Operator-only: config/tools/permissions/routines require the operator.")
-                continue
-
-            cmd, rest = _parse_command(text)
-            if cmd in {"help", "h", "?"}:
-                await convo.send(_help_text())
-                continue
-            if cmd == "status":
-                uptime = int(time.monotonic() - start)
-                await convo.send(
-                    "status: ok\n"
-                    f"paired: yes\n"
-                    f"env: {env}\n"
-                    f"uptime_s: {uptime}\n"
-                    f"version: {__version__}\n"
-                    f"tako_address: {address}"
-                )
-                continue
-            if cmd == "doctor":
-                append_daily_note(daily_root(), date.today(), "Operator ran doctor.")
-                lines, problems = _doctor_report(repo_root(), paths, env)
-                report = "\n".join(lines)
-                if problems:
-                    report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
-                await convo.send(report)
-                continue
-            if cmd == "reimprint":
-                if rest.strip().lower() != "confirm":
-                    await convo.send(
-                        "Re-imprint is operator-only and destructive.\n\n"
-                        "Reply: `reimprint CONFIRM` to clear the current operator and reopen pairing."
-                    )
-                    continue
-                clear_operator(paths.operator_json)
-                clear_pending(pairing_path)
-                append_daily_note(daily_root(), date.today(), "Operator cleared imprint (reimprint CONFIRM).")
-                await convo.send("Operator imprint cleared. The next DM will start pairing.")
-                continue
-
-            await convo.send("Unknown command. Reply 'help'.")
+            reconnect_delay = _stream_reconnect_delay(reconnect_attempt)
+            reconnect_attempt += 1
+            print(f"XMTP stream reconnecting in {reconnect_delay:.1f}s...", file=sys.stderr)
+            await asyncio.sleep(reconnect_delay)
     finally:
         heartbeat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat
-        with contextlib.suppress(Exception):
-            await stream.close()
 
     return 0
+
+
+async def _handle_incoming_message(item, client, paths, pairing_path, address: str, env: str, start: float) -> None:
+    sender_inbox_id = getattr(item, "sender_inbox_id", None)
+    if not isinstance(sender_inbox_id, str):
+        return
+    if sender_inbox_id == client.inbox_id:
+        return
+
+    content = getattr(item, "content", None)
+    if not isinstance(content, str):
+        return
+    text = content.strip()
+    if not text:
+        return
+
+    convo_id = getattr(item, "conversation_id", None)
+    if not isinstance(convo_id, (bytes, bytearray)):
+        return
+
+    convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
+    if convo is None:
+        return
+
+    operator_cfg = load_operator(paths.operator_json)
+    operator_inbox_id = get_operator_inbox_id(operator_cfg)
+
+    if operator_inbox_id is None:
+        pending = load_pending(pairing_path)
+        if pending and pending.requested_by_inbox_id != sender_inbox_id:
+            await convo.send("This Tako instance is currently pairing with someone else. Try again later.")
+            return
+
+        cmd, rest = _parse_command(text)
+        if cmd == "pair" and pending and pending.requested_by_inbox_id == sender_inbox_id:
+            if verify_pairing_code(pairing_path, requested_by_inbox_id=sender_inbox_id, code=rest):
+                imprint_operator(
+                    paths.operator_json,
+                    operator_inbox_id=sender_inbox_id,
+                    operator_address=None,
+                )
+                clear_pending(pairing_path)
+                append_daily_note(daily_root(), date.today(), "Operator paired via XMTP challenge.")
+                await convo.send("Paired. You are now the operator.\n\nReply 'help' for commands.")
+            else:
+                await convo.send("Pairing code incorrect or expired. Reply with `pair <code>` from my last message.")
+            return
+
+        if pending is None:
+            pending = issue_pairing_code(pairing_path, requested_by_inbox_id=sender_inbox_id)
+            append_daily_note(daily_root(), date.today(), "Pairing challenge issued (pending).")
+
+        mins = max(1, int((pending.expires_at - pending.requested_at).total_seconds() / 60))
+        await convo.send(
+            "This Tako instance is unpaired.\n\n"
+            f"To become the operator, reply: `pair {pending.code}` (expires in ~{mins} min).\n\n"
+            f"tako address: {address}"
+        )
+        return
+
+    if sender_inbox_id != operator_inbox_id:
+        if _looks_like_command(text):
+            await convo.send("Operator-only: config/tools/permissions/routines require the operator.")
+        return
+
+    cmd, rest = _parse_command(text)
+    if cmd in {"help", "h", "?"}:
+        await convo.send(_help_text())
+        return
+    if cmd == "status":
+        uptime = int(time.monotonic() - start)
+        await convo.send(
+            "status: ok\n"
+            f"paired: yes\n"
+            f"env: {env}\n"
+            f"uptime_s: {uptime}\n"
+            f"version: {__version__}\n"
+            f"tako_address: {address}"
+        )
+        return
+    if cmd == "doctor":
+        append_daily_note(daily_root(), date.today(), "Operator ran doctor.")
+        lines, problems = _doctor_report(repo_root(), paths, env)
+        report = "\n".join(lines)
+        if problems:
+            report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
+        await convo.send(report)
+        return
+    if cmd == "reimprint":
+        if rest.strip().lower() != "confirm":
+            await convo.send(
+                "Re-imprint is operator-only and destructive.\n\n"
+                "Reply: `reimprint CONFIRM` to clear the current operator and reopen pairing."
+            )
+            return
+        clear_operator(paths.operator_json)
+        clear_pending(pairing_path)
+        append_daily_note(daily_root(), date.today(), "Operator cleared imprint (reimprint CONFIRM).")
+        await convo.send("Operator imprint cleared. The next DM will start pairing.")
+        return
+
+    await convo.send("Unknown command. Reply 'help'.")
 
 
 async def _heartbeat_loop(args: argparse.Namespace) -> None:
@@ -376,6 +429,24 @@ def _help_text() -> str:
 def _looks_like_command(text: str) -> bool:
     value = text.strip().lower()
     return value.startswith(("help", "status", "doctor", "tako", "/"))
+
+
+def _summarize_stream_error(error: Exception) -> str:
+    first_line = str(error).strip().splitlines()
+    if not first_line:
+        return error.__class__.__name__
+    text = first_line[0].strip()
+    if not text:
+        return error.__class__.__name__
+    if len(text) > 220:
+        return f"{text[:217]}..."
+    return text
+
+
+def _stream_reconnect_delay(attempt: int) -> float:
+    base = min(STREAM_RECONNECT_MAX_S, STREAM_RECONNECT_BASE_S * (2**max(0, attempt)))
+    jitter = random.uniform(0.0, base * 0.2)
+    return base + jitter
 
 
 def main(argv: list[str] | None = None) -> int:

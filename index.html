@@ -766,6 +766,9 @@
                 If <code>uv</code> is missing, <code>start.sh</code> installs a repo-local copy at <code>.tako/bin/uv</code>.
               </li>
               <li>
+                If one-shot inference CLI setup fails, onboarding prints command-level diagnostics and falls back to manual prompts.
+              </li>
+              <li>
                 If you see DB errors (e.g., “file is not a database”), delete <code>.tako/xmtp-db</code>
                 (or delete <code>.tako/</code>) to force a clean rebuild.
               </li>

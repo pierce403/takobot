@@ -26,6 +26,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - `setup.sh` bootstraps into your current directory and initializes a local working branch (`local`) that tracks `origin/main`.
 - `start.sh` updates SOUL identity fields (name + purpose/role) before daemon startup.
 - If installed, `start.sh` can optionally use one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL defaults.
+- If inference CLI attempts fail, `start.sh` prints command-level diagnostics and falls back to manual prompts.
 - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**

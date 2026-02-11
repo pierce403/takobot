@@ -36,6 +36,7 @@
   - `setup.sh` ensures a local working branch (`local`) tracks `origin/main` for local-first changes with upstream sync.
   - `start.sh` checks repo layout/home sanity, prompts for SOUL identity fields, then runs `tako.sh`.
   - If installed, `start.sh` can optionally call one-shot local inference CLIs (`codex`, `claude`, `gemini`) to suggest SOUL defaults.
+  - If one-shot inference fails, `start.sh` prints attempted command diagnostics (exit + stderr summary) before manual fallback.
   - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` before handing off to `tako.sh`.
   - Site and README expose a `curl -fsSL https://tako.bot/setup.sh | bash` path.
 - **Test Criteria**:

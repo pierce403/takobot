@@ -78,5 +78,6 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 
 - The bootstrap flow requires `uv` to manage the project virtualenv and Python dependencies.
 - `setup.sh` / `start.sh` will attempt a repo-local `uv` install automatically at `.tako/bin/uv` if `uv` is missing.
+- If one-shot inference CLI onboarding fails, `start.sh` now prints attempted command diagnostics before manual fallback.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

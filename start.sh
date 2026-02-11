@@ -10,6 +10,11 @@ LOCAL_UV_BIN_DIR="$LOCAL_RUNTIME_DIR/bin"
 LOCAL_UV_CACHE_DIR="$LOCAL_RUNTIME_DIR/uv-cache"
 LOCAL_XDG_CACHE_DIR="$LOCAL_RUNTIME_DIR/xdg-cache"
 LOCAL_XDG_CONFIG_DIR="$LOCAL_RUNTIME_DIR/xdg-config"
+TRY_INFERENCE_LAST_EXIT=0
+TRY_INFERENCE_LAST_ERROR=""
+TRY_INFERENCE_LAST_OUTPUT=""
+INFERENCE_FAILURE_REPORT=""
+INFERENCE_OUTPUT=""
 
 usage() {
   cat <<'EOF'
@@ -189,36 +194,172 @@ extract_soul_field() {
 }
 
 try_inference_command() {
+  local output_file=""
+  local error_file=""
   local output=""
-  if output="$(run_with_timeout 30 "$@" 2>/dev/null)"; then
+  local error=""
+  local status=0
+
+  mkdir -p "$LOCAL_TMP_DIR"
+  output_file="$(mktemp "$LOCAL_TMP_DIR/infer.out.XXXXXX")"
+  error_file="$(mktemp "$LOCAL_TMP_DIR/infer.err.XXXXXX")"
+
+  if run_with_timeout 30 "$@" >"$output_file" 2>"$error_file"; then
+    output="$(cat "$output_file" || true)"
+    error="$(cat "$error_file" || true)"
+    rm -f "$output_file" "$error_file"
+
     if [[ -n "$(sanitize_line "$output")" ]]; then
-      printf "%s" "$output"
+      TRY_INFERENCE_LAST_EXIT=0
+      TRY_INFERENCE_LAST_ERROR=""
+      TRY_INFERENCE_LAST_OUTPUT="$output"
       return 0
     fi
+
+    TRY_INFERENCE_LAST_EXIT=0
+    TRY_INFERENCE_LAST_OUTPUT=""
+    if [[ -n "$(sanitize_line "$error")" ]]; then
+      TRY_INFERENCE_LAST_ERROR="$(sanitize_line "$error")"
+    else
+      TRY_INFERENCE_LAST_ERROR="command succeeded but produced no output"
+    fi
+    return 1
+  else
+    status=$?
   fi
+
+  output="$(cat "$output_file" || true)"
+  error="$(cat "$error_file" || true)"
+  rm -f "$output_file" "$error_file"
+
+  TRY_INFERENCE_LAST_EXIT="$status"
+  TRY_INFERENCE_LAST_OUTPUT=""
+  if [[ -n "$(sanitize_line "$error")" ]]; then
+    TRY_INFERENCE_LAST_ERROR="$(sanitize_line "$error")"
+  elif [[ -n "$(sanitize_line "$output")" ]]; then
+    TRY_INFERENCE_LAST_ERROR="$(sanitize_line "$output")"
+  else
+    TRY_INFERENCE_LAST_ERROR="command failed without stderr output"
+  fi
+  return 1
+}
+
+reset_inference_failures() {
+  INFERENCE_FAILURE_REPORT=""
+}
+
+shorten_inference_error() {
+  local text="$1"
+  local max_len=220
+  if (( ${#text} <= max_len )); then
+    printf "%s" "$text"
+  else
+    printf "%s..." "${text:0:$((max_len - 3))}"
+  fi
+}
+
+append_inference_failure() {
+  local label="$1"
+  local exit_code="$2"
+  local detail="$3"
+  local clean_detail
+
+  clean_detail="$(shorten_inference_error "$(sanitize_line "$detail")")"
+  if [[ -z "$clean_detail" ]]; then
+    clean_detail="no diagnostic output"
+  fi
+
+  if [[ -n "$INFERENCE_FAILURE_REPORT" ]]; then
+    INFERENCE_FAILURE_REPORT+=$'\n'
+  fi
+  INFERENCE_FAILURE_REPORT+="- ${label} (exit ${exit_code}): ${clean_detail}"
+}
+
+try_inference_variant() {
+  local label="$1"
+  shift
+
+  if try_inference_command "$@"; then
+    return 0
+  fi
+
+  append_inference_failure "$label" "$TRY_INFERENCE_LAST_EXIT" "$TRY_INFERENCE_LAST_ERROR"
+  return 1
+}
+
+inference_hint_for_failures() {
+  local tool="$1"
+  local report="$2"
+
+  if [[ "$report" == *"does not exist or you do not have access"* ]]; then
+    case "$tool" in
+      codex)
+        echo "Tip: codex is installed, but the configured model/account is unavailable. Check \`codex login\` and model config (for example: \`codex exec --model gpt-5 'ping'\`)."
+        ;;
+      *)
+        echo "Tip: the CLI appears installed, but model/account access failed. Re-authenticate and verify your default model."
+        ;;
+    esac
+    return 0
+  fi
+
+  if [[ "$report" == *"command failed without stderr output"* || "$report" == *"exit 124"* ]]; then
+    echo "Tip: the command likely timed out or failed silently. Try running it directly once to validate auth/network."
+    return 0
+  fi
+
   return 1
 }
 
 run_one_shot_inference() {
   local tool="$1"
   local prompt="$2"
-  local output=""
+
+  reset_inference_failures
+  INFERENCE_OUTPUT=""
 
   case "$tool" in
     codex)
-      output="$(try_inference_command codex exec "$prompt")" && { printf "%s" "$output"; return 0; }
-      output="$(try_inference_command codex -p "$prompt")" && { printf "%s" "$output"; return 0; }
-      output="$(try_inference_command codex "$prompt")" && { printf "%s" "$output"; return 0; }
+      if try_inference_variant "codex exec <prompt>" codex exec "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
+      if try_inference_variant "codex -p <prompt>" codex -p "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
+      if try_inference_variant "codex <prompt>" codex "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
       ;;
     claude)
-      output="$(try_inference_command claude -p "$prompt")" && { printf "%s" "$output"; return 0; }
-      output="$(try_inference_command claude --print "$prompt")" && { printf "%s" "$output"; return 0; }
-      output="$(try_inference_command claude "$prompt")" && { printf "%s" "$output"; return 0; }
+      if try_inference_variant "claude -p <prompt>" claude -p "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
+      if try_inference_variant "claude --print <prompt>" claude --print "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
+      if try_inference_variant "claude <prompt>" claude "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
       ;;
     gemini)
-      output="$(try_inference_command gemini -p "$prompt")" && { printf "%s" "$output"; return 0; }
-      output="$(try_inference_command gemini --prompt "$prompt")" && { printf "%s" "$output"; return 0; }
-      output="$(try_inference_command gemini "$prompt")" && { printf "%s" "$output"; return 0; }
+      if try_inference_variant "gemini -p <prompt>" gemini -p "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
+      if try_inference_variant "gemini --prompt <prompt>" gemini --prompt "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
+      if try_inference_variant "gemini <prompt>" gemini "$prompt"; then
+        INFERENCE_OUTPUT="$TRY_INFERENCE_LAST_OUTPUT"
+        return 0
+      fi
       ;;
   esac
 
@@ -303,12 +444,18 @@ maybe_suggest_soul_identity() {
   tool="$(choose_inference_tool "${tools[@]}")"
   prompt="$(build_soul_inference_prompt "$default_name" "$default_role")"
   echo "Querying $tool for onboarding suggestion..." > /dev/tty
-  if ! output="$(run_one_shot_inference "$tool" "$prompt")"; then
+  if ! run_one_shot_inference "$tool" "$prompt"; then
     echo "Could not run one-shot inference with $tool; continuing with manual prompts." > /dev/tty
+    if [[ -n "$INFERENCE_FAILURE_REPORT" ]]; then
+      echo "Inference attempts:" > /dev/tty
+      printf "%s\n" "$INFERENCE_FAILURE_REPORT" > /dev/tty
+      inference_hint_for_failures "$tool" "$INFERENCE_FAILURE_REPORT" > /dev/tty || true
+    fi
     suggested_name_ref="$default_name"
     suggested_role_ref="$default_role"
     return 0
   fi
+  output="$INFERENCE_OUTPUT"
 
   inferred_name="$(extract_soul_field "NAME" "$output")"
   inferred_role="$(extract_soul_field "ROLE" "$output")"

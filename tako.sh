@@ -18,6 +18,22 @@ export XDG_CACHE_HOME="$LOCAL_XDG_CACHE_DIR"
 export XDG_CONFIG_HOME="$LOCAL_XDG_CONFIG_DIR"
 export PATH="$LOCAL_UV_BIN_DIR:$PATH"
 
+ensure_tui_stdin() {
+  if [[ "${ARGS[0]:-}" != "app" ]]; then
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    return 0
+  fi
+  if [[ -e /dev/tty ]] && ( : </dev/tty ) 2>/dev/null; then
+    exec </dev/tty
+    return 0
+  fi
+  echo "Error: interactive app mode requires a TTY on stdin." >&2
+  echo "Run ./start.sh from a terminal (avoid piping stdin into the launcher)." >&2
+  exit 1
+}
+
 case "${1:-}" in
   -h|--help|help)
     cat <<'EOF'
@@ -78,6 +94,8 @@ else
     ARGS=("$SUBCMD" "$@")
   fi
 fi
+
+ensure_tui_stdin
 
 PYTHON="${PYTHON:-python3}"
 if [[ -n "${UV:-}" ]]; then

@@ -97,4 +97,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - XMTP client initialization disables history sync by default for compatibility.
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
+- App launcher (`tako.sh`) rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` startup can still run interactive TUI input correctly.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

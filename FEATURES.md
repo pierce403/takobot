@@ -78,6 +78,7 @@
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.
   - Filters terminal control-sequence noise from input/transcript rendering.
+  - Rebinds app stdin to `/dev/tty` in launcher flow so `curl ... | bash` startup doesn't inherit a pipe for TUI input.
   - Surfaces operational failures as concise in-UI error cards with suggested next actions.
 - **Test Criteria**:
   - [x] Running `tako` opens app mode by default (no required subcommand).
@@ -90,6 +91,7 @@
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
+  - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable

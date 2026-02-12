@@ -1,0 +1,31 @@
+[workspace]
+name = "tako-workspace"
+version = 1
+
+[dose.baseline]
+# 0..1. Defaults bias toward steady/calm without being flat.
+d = 0.55
+o = 0.55
+s = 0.55
+e = 0.55
+
+[productivity]
+daily_outcomes = 3
+weekly_review_day = "sun"
+
+[security.download]
+# Default: HTTPS only.
+allow_non_https = false
+# Maximum download size for skill/tool packages (quarantine fetch).
+max_bytes = 15000000
+# Optional allowlist. Empty = allow any https domain.
+allowlist_domains = []
+
+[security.defaults]
+# Default permissions for enabled workspace code (skills/tools).
+# Installed != enabled; enabled != unrestricted.
+network = false
+shell = false
+xmtp = false
+filesystem = false
+

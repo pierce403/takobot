@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+import tomllib
+
+
+def _clamp01(value: float) -> float:
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+
+def _as_float(value, *, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:  # noqa: BLE001
+        return float(default)
+
+
+def _as_int(value, *, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:  # noqa: BLE001
+        return int(default)
+
+
+def _as_bool(value, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(default)
+
+
+def _as_str_list(value) -> list[str]:
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                out.append(item.strip())
+        return out
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+@dataclass(frozen=True)
+class WorkspaceConfig:
+    name: str = "tako-workspace"
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class DoseBaselineConfig:
+    d: float = 0.55
+    o: float = 0.55
+    s: float = 0.55
+    e: float = 0.55
+
+
+@dataclass(frozen=True)
+class ProductivityConfig:
+    daily_outcomes: int = 3
+    weekly_review_day: str = "sun"  # informational only for now
+
+
+@dataclass(frozen=True)
+class SecurityDownloadConfig:
+    allow_non_https: bool = False
+    max_bytes: int = 15_000_000
+    allowlist_domains: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SecurityDefaultPermissions:
+    network: bool = False
+    shell: bool = False
+    xmtp: bool = False
+    filesystem: bool = False
+
+
+@dataclass(frozen=True)
+class SecurityConfig:
+    download: SecurityDownloadConfig = field(default_factory=SecurityDownloadConfig)
+    default_permissions: SecurityDefaultPermissions = field(default_factory=SecurityDefaultPermissions)
+
+
+@dataclass(frozen=True)
+class TakoConfig:
+    workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
+    dose_baseline: DoseBaselineConfig = field(default_factory=DoseBaselineConfig)
+    productivity: ProductivityConfig = field(default_factory=ProductivityConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
+
+
+def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
+    """Load workspace config from tako.toml.
+
+    Returns (config, warning). Warning is empty on success.
+    """
+
+    if not path.exists():
+        return TakoConfig(), ""
+
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return TakoConfig(), f"tako.toml parse failed: {exc}"
+
+    if not isinstance(data, dict):
+        return TakoConfig(), "tako.toml parse failed: top-level is not a table"
+
+    workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
+    dose = data.get("dose") if isinstance(data.get("dose"), dict) else {}
+    dose_baseline = dose.get("baseline") if isinstance(dose.get("baseline"), dict) else {}
+    productivity = data.get("productivity") if isinstance(data.get("productivity"), dict) else {}
+    security = data.get("security") if isinstance(data.get("security"), dict) else {}
+    security_download = security.get("download") if isinstance(security.get("download"), dict) else {}
+    security_defaults = security.get("defaults") if isinstance(security.get("defaults"), dict) else {}
+
+    cfg = TakoConfig(
+        workspace=WorkspaceConfig(
+            name=str(workspace.get("name") or WorkspaceConfig.name),
+            version=_as_int(workspace.get("version"), default=WorkspaceConfig.version),
+        ),
+        dose_baseline=DoseBaselineConfig(
+            d=_clamp01(_as_float(dose_baseline.get("d"), default=DoseBaselineConfig.d)),
+            o=_clamp01(_as_float(dose_baseline.get("o"), default=DoseBaselineConfig.o)),
+            s=_clamp01(_as_float(dose_baseline.get("s"), default=DoseBaselineConfig.s)),
+            e=_clamp01(_as_float(dose_baseline.get("e"), default=DoseBaselineConfig.e)),
+        ),
+        productivity=ProductivityConfig(
+            daily_outcomes=max(1, _as_int(productivity.get("daily_outcomes"), default=ProductivityConfig.daily_outcomes)),
+            weekly_review_day=str(productivity.get("weekly_review_day") or ProductivityConfig.weekly_review_day),
+        ),
+        security=SecurityConfig(
+            download=SecurityDownloadConfig(
+                allow_non_https=_as_bool(
+                    security_download.get("allow_non_https"),
+                    default=SecurityDownloadConfig.allow_non_https,
+                ),
+                max_bytes=max(1_000_000, _as_int(security_download.get("max_bytes"), default=SecurityDownloadConfig.max_bytes)),
+                allowlist_domains=_as_str_list(security_download.get("allowlist_domains")),
+            ),
+            default_permissions=SecurityDefaultPermissions(
+                network=_as_bool(security_defaults.get("network"), default=SecurityDefaultPermissions.network),
+                shell=_as_bool(security_defaults.get("shell"), default=SecurityDefaultPermissions.shell),
+                xmtp=_as_bool(security_defaults.get("xmtp"), default=SecurityDefaultPermissions.xmtp),
+                filesystem=_as_bool(security_defaults.get("filesystem"), default=SecurityDefaultPermissions.filesystem),
+            ),
+        ),
+    )
+
+    return cfg, ""

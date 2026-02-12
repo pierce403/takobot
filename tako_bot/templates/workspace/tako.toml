@@ -1,0 +1,25 @@
+[workspace]
+name = "tako-workspace"
+version = 1
+
+[dose.baseline]
+d = 0.55
+o = 0.55
+s = 0.55
+e = 0.55
+
+[productivity]
+daily_outcomes = 3
+weekly_review_day = "sun"
+
+[security.download]
+allow_non_https = false
+max_bytes = 15000000
+allowlist_domains = []
+
+[security.defaults]
+network = false
+shell = false
+xmtp = false
+filesystem = false
+

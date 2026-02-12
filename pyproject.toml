@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tako"
+version = "0.1.0"
+description = "Tako — highly autonomous operator-imprinted agent"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "textual",
+  "web3",
+]
+
+[project.scripts]
+tako = "tako_bot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tako_bot*"]
+
+[tool.setuptools.package-data]
+tako_bot = ["templates/**/*"]
+

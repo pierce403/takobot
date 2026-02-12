@@ -227,43 +227,51 @@ class DoseState:
         }
 
 
-def default_state(*, now: float | None = None) -> DoseState:
+def default_state(
+    *,
+    now: float | None = None,
+    baseline: tuple[float, float, float, float] | None = None,
+) -> DoseState:
     ts = float(now if now is not None else time.time())
-    baseline = 0.55
+    bd, bo, bs, be = baseline or (0.55, 0.55, 0.55, 0.55)
     state = DoseState(
-        d=baseline,
-        o=baseline,
-        s=baseline,
-        e=baseline,
-        baseline_d=baseline,
-        baseline_o=baseline,
-        baseline_s=baseline,
-        baseline_e=baseline,
+        d=bd,
+        o=bo,
+        s=bs,
+        e=be,
+        baseline_d=bd,
+        baseline_o=bo,
+        baseline_s=bs,
+        baseline_e=be,
         last_updated_ts=ts,
     )
     state.clamp()
     return state
 
 
-def load(path: Path) -> DoseState:
+def load(path: Path, *, baseline: tuple[float, float, float, float] | None = None) -> DoseState:
     if not path.exists():
-        return default_state()
+        return default_state(baseline=baseline)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return default_state()
+        return default_state(baseline=baseline)
     if not isinstance(payload, dict):
-        return default_state()
+        return default_state(baseline=baseline)
 
-    state = default_state(now=_safe_float(payload.get("last_updated_ts"), default=time.time()))
+    state = default_state(
+        now=_safe_float(payload.get("last_updated_ts"), default=time.time()),
+        baseline=baseline,
+    )
     state.d = _safe_float(payload.get("d"), default=state.d)
     state.o = _safe_float(payload.get("o"), default=state.o)
     state.s = _safe_float(payload.get("s"), default=state.s)
     state.e = _safe_float(payload.get("e"), default=state.e)
-    state.baseline_d = _safe_float(payload.get("baseline_d"), default=state.baseline_d)
-    state.baseline_o = _safe_float(payload.get("baseline_o"), default=state.baseline_o)
-    state.baseline_s = _safe_float(payload.get("baseline_s"), default=state.baseline_s)
-    state.baseline_e = _safe_float(payload.get("baseline_e"), default=state.baseline_e)
+    if baseline is None:
+        state.baseline_d = _safe_float(payload.get("baseline_d"), default=state.baseline_d)
+        state.baseline_o = _safe_float(payload.get("baseline_o"), default=state.baseline_o)
+        state.baseline_s = _safe_float(payload.get("baseline_s"), default=state.baseline_s)
+        state.baseline_e = _safe_float(payload.get("baseline_e"), default=state.baseline_e)
     state.last_updated_ts = _safe_float(payload.get("last_updated_ts"), default=state.last_updated_ts)
     state.clamp()
     return state
@@ -276,7 +284,14 @@ def save(path: Path, state: DoseState) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
 
 
-def load_or_create(path: Path) -> DoseState:
-    state = load(path)
+def load_or_create(path: Path, *, baseline: tuple[float, float, float, float] | None = None) -> DoseState:
+    state = load(path, baseline=baseline)
+    if baseline is not None:
+        bd, bo, bs, be = baseline
+        state.baseline_d = bd
+        state.baseline_o = bo
+        state.baseline_s = bs
+        state.baseline_e = be
+        state.clamp()
     save(path, state)
     return state

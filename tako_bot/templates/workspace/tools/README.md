@@ -18,3 +18,4 @@ Tools installed from URLs go through:
 2. static analysis + permission diff + risk rating
 3. install into `tools/<name>/` (disabled)
 4. operator enables explicitly (hashes verified again)
+

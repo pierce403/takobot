@@ -69,13 +69,16 @@
   - Detects inference providers from local CLI installs (`codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
-  - Prompts for XMTP control-channel setup first (ASAP), before identity questions.
+  - Prompts for XMTP control-channel setup first (ASAP), and delays identity/routine prompts until inference has actually run.
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes discovered inference providers with automatic fallback across ready CLIs.
   - Runs XMTP daemon loop as a background task when paired.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
+  - Includes an activity panel with inference/tool/runtime trace lines.
+  - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
+  - Shows a top-right ASCII octopus level panel in the sidebar.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.
   - Filters terminal control-sequence noise from input/transcript rendering.
@@ -85,13 +88,14 @@
   - [x] Running `tako` opens app mode by default (no required subcommand).
   - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
   - [x] XMTP setup prompt appears first in-chat on unpaired startup.
-  - [x] Identity + routine onboarding happens in-chat in the terminal app (not shell prompts).
-  - [x] Terminal input can confirm outbound pairing code and continue to running mode.
+  - [x] Identity + routine onboarding prompts are delayed until inference is active (or manually triggered).
+  - [x] Outbound XMTP pairing can auto-complete without code copyback confirmation.
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
   - [x] Runtime can report Codex/Claude/Gemini CLI+auth discovery status via `inference` command.
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.
+  - [x] Activity panel shows inference/tool/runtime actions.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
   - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).
 
@@ -160,15 +164,17 @@
 - **Stability**: in-progress
 - **Description**: Tako stores a single operator (controller) imprinted over XMTP and refuses silent reassignment.
 - **Properties**:
-  - Pairing is terminal-first in app mode: Tako sends an outbound DM challenge and supports both XMTP reply or terminal code paste-back confirmation.
+  - Pairing is terminal-first in app mode: Tako sends an outbound DM and auto-assumes readiness once recipient inbox id resolves.
   - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
   - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs a new operator.
   - Operator can run `update` over XMTP to perform a guarded fast-forward self-update.
+  - Operator can run `web <url>` and `run <command>` over XMTP.
   - Plain-text XMTP messages are handled as chat (inference-backed when available) while command-style messages route to command handlers.
 - **Test Criteria**:
   - [x] `tako` app mode can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
   - [x] Operator can run `update` / `update check` over XMTP and receive result details.
+  - [x] Operator can run `web` / `run` over XMTP and receive output.
   - [x] Operator plain-text XMTP messages no longer return `Unknown command`; they receive chat replies.
 
 ### Daily logs (`memory/dailies/YYYY-MM-DD.md`)

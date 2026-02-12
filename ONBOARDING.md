@@ -8,7 +8,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] `uv` is installed for virtualenv + dependency management.
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally, or local-only mode is explicitly chosen.
-- [ ] If pairing is attempted: operator pairing is confirmed in-app after receiving an outbound XMTP DM challenge.
+- [ ] If pairing is attempted: outbound pairing DM is sent and operator imprint is stored without manual code copyback.
 - [ ] `memory/dailies/YYYY-MM-DD.md` exists for today.
 - [ ] `SOUL.md`, `memory/MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
 
@@ -36,6 +36,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During `BOOTING`, Tako runs a startup health check (instance context, lock state, and resource probes).
 - During `BOOTING`, Tako scans local inference bridges (`codex`, `claude`, `gemini`) and records runtime metadata in `.tako/state/inference.json`.
 - During `BOOTING`, inference execution remains gated; first model calls are allowed only after the first interactive chat turn.
+- During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
 - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.
 
@@ -48,14 +49,13 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 - Pairing is terminal-first in the interactive app (no inbound-first DM requirement).
 - Tako asks in-chat for XMTP setup as the first onboarding prompt.
-- If yes: Tako sends an outbound DM challenge code to that handle.
-- Operator can confirm by replying on XMTP or by copying the code back into terminal input.
+- If yes: Tako sends an outbound DM to that handle and assumes the recipient is ready once inbox id resolves.
 - Tako stores operator metadata in `.tako/operator.json` (runtime-only; ignored by git).
 
 5) **Pairing / handshake**
 
-- Pairing confirmation is completed in terminal for first wake.
-- After imprint, management moves to XMTP only (`help`, `status`, `doctor`, `reimprint`).
+- Pairing is auto-completed in-app after successful outbound DM + inbox resolution.
+- After imprint, management moves to XMTP only (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`).
 - Re-imprinting is still operator-only over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs the next operator.
 
 6) **Initialize today’s daily log**
@@ -70,9 +70,10 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 8) **Emit completion summary**
 
-- After pairing, Tako keeps terminal as local cockpit (status/logs/read-only queries/safe mode) while XMTP is the control plane.
+- After pairing, Tako keeps terminal as local cockpit (status/logs/chat/safe mode) while XMTP is the control plane.
+- TUI exposes an activity panel (inference/tool/runtime traces) and clipboard helpers (`Ctrl+Shift+C`, `Ctrl+Shift+L`).
 - The operator can request status via XMTP commands:
-  - `help`, `status`, `doctor`
+  - `help`, `status`, `doctor`, `update`, `web`, `run`
 
 Notes:
 

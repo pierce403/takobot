@@ -49,6 +49,8 @@ def imprint_operator(
             "status",
             "doctor",
             "update",
+            "web",
+            "run",
             "reimprint",
         ],
     }

@@ -22,6 +22,7 @@ from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .pairing import clear_pending
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
+from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
 
 
@@ -554,6 +555,39 @@ async def _handle_incoming_message(
             append_daily_note(daily_root(), date.today(), f"Operator ran self-update: {result.summary}")
         await convo.send("\n".join(report_lines))
         return
+    if cmd == "web":
+        target = rest.strip()
+        if not target:
+            await convo.send("Usage: `web <https://...>`")
+            return
+        result = await asyncio.to_thread(fetch_webpage, target)
+        if not result.ok:
+            await convo.send(f"web fetch failed: {result.error}")
+            return
+        append_daily_note(daily_root(), date.today(), f"Operator fetched webpage: {result.url}")
+        title_line = f"title: {result.title}\n" if result.title else ""
+        await convo.send(f"web: {result.url}\n{title_line}{result.text}")
+        return
+    if cmd == "run":
+        command = rest.strip()
+        if not command:
+            await convo.send("Usage: `run <shell command>`")
+            return
+        result = await asyncio.to_thread(run_local_command, command)
+        append_daily_note(
+            daily_root(),
+            date.today(),
+            f"Operator ran local command via XMTP: `{command}` (exit={result.exit_code})",
+        )
+        if not result.ok and result.error:
+            await convo.send(f"command failed before execution: {result.error}")
+            return
+        await convo.send(
+            f"run: {result.command}\n"
+            f"exit_code: {result.exit_code}\n"
+            f"{result.output}"
+        )
+        return
     if cmd == "reimprint":
         if rest.strip().lower() != "confirm":
             await convo.send(
@@ -708,6 +742,8 @@ def _help_text() -> str:
         "- status\n"
         "- doctor\n"
         "- update (or `update check`)\n"
+        "- web <https://...>\n"
+        "- run <shell command>\n"
         "- reimprint (operator-only)\n"
         "- plain text chat (inference-backed when available)\n"
     )
@@ -727,6 +763,8 @@ def _looks_like_command(text: str) -> bool:
         return tail == ""
     if cmd == "update":
         return tail_lower in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
+    if cmd in {"web", "run"}:
+        return tail != ""
     if cmd == "reimprint":
         return True
     return False
@@ -780,7 +818,7 @@ def _chat_prompt(text: str, *, is_operator: bool, operator_paired: bool) -> str:
 
 def _fallback_chat_reply(*, is_operator: bool, operator_paired: bool) -> str:
     if is_operator:
-        return "I can chat here. Commands: help, status, doctor, update, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
+        return "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
     if operator_paired:
         return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
     return "Happy to chat. This instance is not paired yet; run `tako` (or `./start.sh`) locally to set the operator channel."

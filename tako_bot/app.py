@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import deque
 import contextlib
 import importlib.util
 import json
@@ -42,16 +43,16 @@ from .pairing import clear_pending
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
+from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, hint_for_xmtp_error
 
 
-PAIRING_CODE_ATTEMPTS = 5
-PAIRING_CODE_LENGTH = 8
-PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 HEARTBEAT_JITTER = 0.2
 EVENT_INGEST_INTERVAL_S = 0.8
 LOCAL_CHAT_TIMEOUT_S = 75.0
 LOCAL_CHAT_MAX_CHARS = 700
+ACTIVITY_LOG_MAX = 80
+TRANSCRIPT_LOG_MAX = 2000
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -115,6 +116,13 @@ class TakoTerminalApp(App[None]):
         padding: 0 1;
     }
 
+    #panel-octo {
+        height: 8;
+        border: solid $primary;
+        margin: 0 0 1 0;
+        padding: 0 1;
+    }
+
     .panel {
         height: 1fr;
         border: solid $primary;
@@ -131,6 +139,9 @@ class TakoTerminalApp(App[None]):
     BINDINGS = [
         ("ctrl+c", "request_quit", "Quit"),
         ("f2", "toggle_safe_mode", "Safe Mode"),
+        ("ctrl+shift+c", "copy_transcript", "Copy Transcript"),
+        ("ctrl+shift+l", "copy_last_line", "Copy Last Line"),
+        ("ctrl+shift+v", "paste_input", "Paste"),
     ]
 
     def __init__(self, *, interval: float = 30.0) -> None:
@@ -159,11 +170,10 @@ class TakoTerminalApp(App[None]):
 
         self.identity_step = 0
         self.awaiting_xmtp_handle = False
+        self.identity_onboarding_pending = False
 
         self.pairing_handle = ""
         self.pairing_resolved = ""
-        self.pairing_code = ""
-        self.pairing_code_attempts = 0
         self.pairing_completed = False
         self.pairing_operator_inbox_id = ""
         self.pairing_client = None
@@ -205,22 +215,30 @@ class TakoTerminalApp(App[None]):
         self.inference_gate_opened_state = "none"
         self.inference_gate_opened_at: float | None = None
         self.inference_gate_block_noted = False
+        self.inference_ever_used = False
+
+        self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
+        self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
 
         self.status_bar: Static
         self.transcript: RichLog
         self.input_box: Input
+        self.octo_panel: Static
         self.tasks_panel: Static
         self.memory_panel: Static
         self.sensors_panel: Static
+        self.activity_panel: Static
 
     def compose(self) -> ComposeResult:
         yield Static("", id="status-bar")
         with Horizontal(id="main"):
             yield RichLog(id="transcript", wrap=True, highlight=False, markup=False, auto_scroll=True)
             with Vertical(id="sidebar"):
+                yield Static("", id="panel-octo")
                 yield Static("", id="panel-tasks", classes="panel")
                 yield Static("", id="panel-memory", classes="panel")
                 yield Static("", id="panel-sensors", classes="panel")
+                yield Static("", id="panel-activity", classes="panel")
         yield Input(id="input-box", placeholder="Type here. During onboarding, answer the current question.")
         yield Footer()
 
@@ -228,9 +246,11 @@ class TakoTerminalApp(App[None]):
         self.status_bar = self.query_one("#status-bar", Static)
         self.transcript = self.query_one("#transcript", RichLog)
         self.input_box = self.query_one("#input-box", Input)
+        self.octo_panel = self.query_one("#panel-octo", Static)
         self.tasks_panel = self.query_one("#panel-tasks", Static)
         self.memory_panel = self.query_one("#panel-memory", Static)
         self.sensors_panel = self.query_one("#panel-sensors", Static)
+        self.activity_panel = self.query_one("#panel-activity", Static)
         self._ensure_input_focus()
         self.set_interval(0.5, self._refresh_status)
         self._refresh_panels()
@@ -257,6 +277,40 @@ class TakoTerminalApp(App[None]):
             return
         await self._enable_safe_mode()
 
+    def action_copy_transcript(self) -> None:
+        if not self.transcript_lines:
+            self._write_system("clipboard: transcript is empty.")
+            return
+        payload = "\n".join(self.transcript_lines)
+        self.copy_to_clipboard(payload)
+        self._write_system(f"clipboard: copied transcript ({len(self.transcript_lines)} lines).")
+        self._add_activity("clipboard", "copied full transcript")
+
+    def action_copy_last_line(self) -> None:
+        if not self.transcript_lines:
+            self._write_system("clipboard: no transcript lines yet.")
+            return
+        payload = self.transcript_lines[-1]
+        self.copy_to_clipboard(payload)
+        self._write_system("clipboard: copied last transcript line.")
+        self._add_activity("clipboard", "copied last line")
+
+    def action_paste_input(self) -> None:
+        if self.input_box.disabled:
+            return
+        self._ensure_input_focus()
+        self.input_box.action_paste()
+
+    def on_paste(self, event: events.Paste) -> None:
+        if self.input_box.disabled or self.input_box.has_focus is False:
+            return
+        cleaned = _clean_paste_text(event.text)
+        if cleaned == event.text:
+            return
+        event.stop()
+        self.input_box.insert_text_at_cursor(cleaned)
+        self._add_activity("clipboard", "sanitized pasted text")
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         raw_value = event.value
         text = _sanitize(event.value)
@@ -282,6 +336,7 @@ class TakoTerminalApp(App[None]):
         self.runtime_mode = "offline"
         self._set_indicator("acting")
         self._write_tako("waking up... tiny octopus stretch complete.")
+        self._add_activity("startup", "boot sequence started")
 
         try:
             self.paths = ensure_runtime_dirs(runtime_paths())
@@ -324,6 +379,7 @@ class TakoTerminalApp(App[None]):
             )
 
             self._write_tako(f"all set! my XMTP address is {self.address}.")
+            self._add_activity("xmtp", f"wallet address ready: {self.address[:12]}...")
 
             operator_cfg = load_operator(self.paths.operator_json)
             self.operator_inbox_id = get_operator_inbox_id(operator_cfg)
@@ -335,6 +391,7 @@ class TakoTerminalApp(App[None]):
                 self.mode = "paired"
                 self._set_state(SessionState.PAIRED)
                 self._write_tako("operator imprint found. XMTP is already my control current for config changes.")
+                self._add_activity("xmtp", "operator imprint detected; starting runtime")
                 await self._start_xmtp_runtime()
                 self._set_state(SessionState.RUNNING)
                 self._write_tako("terminal is now your local cockpit. chat works here too. type `help`.")
@@ -346,7 +403,8 @@ class TakoTerminalApp(App[None]):
             self.awaiting_xmtp_handle = False
             self._write_tako(
                 "first tentacle task, ASAP: let's set up your XMTP control channel. "
-                "do you have an XMTP handle? (yes/no)"
+                "do you have an XMTP handle? (yes/no)\n"
+                "we'll do identity/goals after inference currents are awake."
             )
         except Exception as exc:  # noqa: BLE001
             self._error_card(
@@ -382,6 +440,7 @@ class TakoTerminalApp(App[None]):
         await self._start_local_heartbeat()
 
         self._write_system("Type1 tide scanner online. Consuming event log and triaging signals.")
+        self._add_activity("reasoning", "Type1/Type2 loops online")
         self._record_event(
             "reasoning.engine.started",
             "Type1/Type2 reasoning loops started.",
@@ -405,6 +464,7 @@ class TakoTerminalApp(App[None]):
             ready = "yes" if runtime.ready else "no"
             source = runtime.selected_key_source or "none"
             self._write_system(f"inference bridge: provider={selected} ready={ready} source={source}")
+            self._add_activity("inference", f"discovered provider={selected} ready={ready}")
             self._record_event(
                 "inference.runtime.detected",
                 f"Inference discovery complete. selected={selected}; ready={ready}; source={source}",
@@ -421,6 +481,7 @@ class TakoTerminalApp(App[None]):
             self.inference_last_error = _summarize_error(exc)
             self.inference_last_provider = "none"
             self._write_system(f"inference discovery warning: {self.inference_last_error}")
+            self._add_activity("inference", f"discovery warning: {self.inference_last_error}")
             self._record_event(
                 "inference.runtime.error",
                 f"Inference discovery failed: {exc}",
@@ -443,6 +504,7 @@ class TakoTerminalApp(App[None]):
         self._write_system(
             f"inference gate opened on first interactive turn (state={self.inference_gate_opened_state})."
         )
+        self._add_activity("inference", f"gate opened in state={self.inference_gate_opened_state}")
         self._record_event(
             "inference.gate.opened",
             "Inference gate opened after first interactive user turn.",
@@ -671,6 +733,7 @@ class TakoTerminalApp(App[None]):
         recommendation = _type2_recommendation(event_type, message)
         model_used = "heuristic"
         if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
+            self._add_activity("inference", f"Type2[{depth}] -> requesting model reasoning")
             prompt = _build_type2_prompt(event=event, depth=depth, reason=reason, fallback=recommendation)
             try:
                 self._record_event(
@@ -693,13 +756,16 @@ class TakoTerminalApp(App[None]):
                 if cleaned:
                     recommendation = _summarize_text(cleaned)
                     model_used = provider
+                    self.inference_ever_used = True
                     self.inference_last_provider = provider
                     self.inference_last_error = ""
+                    self._add_activity("inference", f"Type2[{depth}] used provider={provider}")
             except Exception as exc:  # noqa: BLE001
                 self.inference_last_error = _summarize_error(exc)
                 self._write_system(
                     f"inference warning: {self.inference_last_error}. falling back to heuristics."
                 )
+                self._add_activity("inference", f"Type2 fallback due to error: {self.inference_last_error}")
                 self._record_event(
                     "inference.error",
                     f"Inference provider chain failed: {exc}",
@@ -718,6 +784,7 @@ class TakoTerminalApp(App[None]):
                 self._write_system(
                     "inference gate is closed until the first interactive turn; Type2 is using heuristics for now."
                 )
+                self._add_activity("inference", "Type2 blocked: gate is closed")
                 self._record_event(
                     "inference.gate.blocked",
                     "Inference call skipped because gate is closed before first interactive turn.",
@@ -789,8 +856,16 @@ class TakoTerminalApp(App[None]):
             return
 
         await self._handle_running_input(text)
+        await self._maybe_start_delayed_identity_onboarding()
 
     async def _handle_identity_onboarding(self, text: str) -> None:
+        lowered = text.strip().lower()
+        if lowered in {"skip", "later"}:
+            self._write_tako("copy that. we can tune identity/goals later with `setup`.")
+            self.identity_onboarding_pending = False
+            self._set_state(SessionState.RUNNING)
+            return
+
         if self.identity_step == 0:
             self.identity_name = text or self.identity_name
             self.identity_step = 1
@@ -810,26 +885,33 @@ class TakoTerminalApp(App[None]):
             source="onboarding",
             metadata={"name": self.identity_name},
         )
+        self._add_activity("identity", f"name/role updated ({self.identity_name})")
         self._write_tako(f"identity tucked away in my little shell: {self.identity_name} — {self.identity_role}")
         self._set_state(SessionState.ONBOARDING_ROUTINES)
         self._write_tako("last onboarding nibble: what should I watch or do daily? free-form note.")
 
     async def _handle_routines_onboarding(self, text: str) -> None:
-        self.routines = text or "No explicit routines yet."
+        if text.strip().lower() in {"skip", "later"}:
+            self.routines = "No explicit routines yet."
+        else:
+            self.routines = text or "No explicit routines yet."
         if self.paths is not None:
             routines_path = self.paths.state_dir / "routines.txt"
             routines_path.write_text(self.routines + "\n", encoding="utf-8")
         append_daily_note(daily_root(), date.today(), f"Routine note captured: {self.routines}")
         self._record_event("onboarding.routines.saved", "Routine preferences captured.", source="onboarding")
+        self._add_activity("identity", "daily routines captured")
         await self._finalize_onboarding()
 
     async def _handle_xmtp_handle_prompt(self, text: str) -> None:
         lowered = text.strip().lower()
         if lowered in {"local", "local-only", "skip"}:
             self._record_event("pairing.user.local_only", "Operator chose local-only mode.", source="pairing")
+            self._add_activity("pairing", "operator chose local-only mode")
             if self.mode == "onboarding":
                 self._write_tako("no worries, captain. we'll keep paddling locally for now.")
-                self._begin_identity_onboarding()
+                await self._enter_local_only_mode()
+                self._schedule_identity_onboarding_after_awake()
                 return
             await self._enter_local_only_mode()
             return
@@ -846,13 +928,15 @@ class TakoTerminalApp(App[None]):
         if yes_no:
             self.awaiting_xmtp_handle = True
             self._record_event("pairing.user.has_handle", "Operator confirmed XMTP handle availability.", source="pairing")
+            self._add_activity("pairing", "operator has XMTP handle")
             self._write_tako("splash it over: share the handle (.eth or 0x...).")
             return
 
         if self.mode == "onboarding":
             self._record_event("pairing.user.no_handle", "Operator has no XMTP handle yet.", source="pairing")
             self._write_tako("got it. we'll continue in local mode first, and you can pair later with `pair`.")
-            self._begin_identity_onboarding()
+            await self._enter_local_only_mode()
+            self._schedule_identity_onboarding_after_awake()
             return
 
         await self._enter_local_only_mode()
@@ -866,6 +950,7 @@ class TakoTerminalApp(App[None]):
         self.pairing_handle = handle
         self._set_state(SessionState.PAIRING_OUTBOUND)
         self._set_indicator("acting")
+        self._add_activity("pairing", f"starting outbound pairing to {handle}")
         self._record_event(
             "pairing.outbound.start",
             "Starting outbound pairing attempt.",
@@ -891,18 +976,17 @@ class TakoTerminalApp(App[None]):
                 source="pairing",
                 metadata={"handle": handle},
             )
+            self._add_activity("pairing", f"resolve failed: {_summarize_error(exc)}")
             self._set_state(SessionState.ASK_XMTP_HANDLE)
             self.awaiting_xmtp_handle = True
             self._set_indicator("idle")
             return
 
-        pairing_code = _new_pairing_code()
         host = socket.gethostname()
         outbound_message = (
             f"Hi from Tako on {host}!\n\n"
-            "Tiny octopus pairing is in progress.\n"
-            "Reply with this code on XMTP, or paste it back into terminal:\n\n"
-            f"{pairing_code}"
+            "Pairing is automatic in this setup; I assume you're ready to talk.\n"
+            "Reply `help` and I'll answer."
         )
 
         try:
@@ -928,6 +1012,7 @@ class TakoTerminalApp(App[None]):
                 source="pairing",
                 metadata={"resolved": resolved},
             )
+            self._add_activity("pairing", f"DM failed: {_summarize_error(exc)}")
             await self._cleanup_pairing_resources()
             self._set_state(SessionState.PAIRING_OUTBOUND)
             self._set_indicator("idle")
@@ -937,60 +1022,18 @@ class TakoTerminalApp(App[None]):
         self.pairing_dm = dm
         self.pairing_resolved = resolved
         self.pairing_operator_inbox_id = operator_inbox_id
-        self.pairing_code = pairing_code
-        self.pairing_code_attempts = 0
         self.pairing_completed = False
 
-        self._write_tako(f"outbound pairing DM sent to {handle} ({resolved}).")
+        self._write_tako(f"outbound pairing DM sent to {handle} ({resolved}). assuming the other side is ready.")
+        self._add_activity("pairing", f"DM sent; auto-confirming {resolved}")
         self._record_event(
             "pairing.outbound.sent",
             "Outbound pairing DM sent.",
             source="pairing",
             metadata={"resolved": resolved},
         )
-        self._write_tako(
-            "confirm by replying with the code on XMTP, or paste the code here with your human hands. "
-            "commands: `retry`, `change`, `local-only`"
-        )
-
-        self.pairing_watch_task = asyncio.create_task(self._watch_for_pairing_reply())
+        await self._complete_pairing("outbound_assumed_ready_v1")
         self._set_indicator("idle")
-
-    async def _watch_for_pairing_reply(self) -> None:
-        if not self.pairing_client or not self.pairing_operator_inbox_id or not self.pairing_code:
-            return
-
-        expected = _normalize_pairing_code(self.pairing_code)
-        stream = self.pairing_client.conversations.stream_all_messages()
-        try:
-            async for item in stream:
-                if self.pairing_completed:
-                    break
-                if isinstance(item, Exception):
-                    continue
-                sender_inbox_id = getattr(item, "sender_inbox_id", None)
-                if sender_inbox_id != self.pairing_operator_inbox_id:
-                    continue
-                content = getattr(item, "content", None)
-                if not isinstance(content, str):
-                    continue
-                if _normalize_pairing_code(content) == expected:
-                    self._write_tako("yay! received matching pairing code over XMTP.")
-                    self._record_event(
-                        "pairing.confirmed.xmtp",
-                        "Pairing code confirmed over XMTP reply.",
-                        source="pairing",
-                        metadata={"sender_inbox_id": sender_inbox_id},
-                    )
-                    await self._complete_pairing("xmtp_reply_v1")
-                    break
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._write_system(f"pairing watcher warning: {_summarize_error(exc)}")
-        finally:
-            with contextlib.suppress(Exception):
-                await stream.close()
 
     async def _handle_pairing_input(self, text: str) -> None:
         lowered = text.strip().lower()
@@ -1010,38 +1053,14 @@ class TakoTerminalApp(App[None]):
         if lowered in {"local", "local-only", "skip"}:
             await self._cleanup_pairing_resources()
             if self.mode == "onboarding":
-                self._write_tako("roger that. we'll keep things local and continue onboarding.")
-                self._begin_identity_onboarding()
+                self._write_tako("roger that. we'll keep things local.")
+                await self._enter_local_only_mode()
+                self._schedule_identity_onboarding_after_awake()
                 return
             await self._enter_local_only_mode()
             return
 
-        if not self.pairing_code:
-            self._write_tako("pairing code is not active. type `retry` or `local-only`.")
-            return
-
-        expected = _normalize_pairing_code(self.pairing_code)
-        entered = _normalize_pairing_code(text)
-        if entered == expected:
-            self._record_event("pairing.confirmed.terminal", "Pairing code confirmed in terminal.", source="pairing")
-            await self._complete_pairing("terminal_copyback_v2")
-            return
-
-        self.pairing_code_attempts += 1
-        remaining = PAIRING_CODE_ATTEMPTS - self.pairing_code_attempts
-        if remaining > 0:
-            self._write_tako(f"oops, code mismatch. try again ({remaining} attempts left), or type `local-only`.")
-            return
-
-        self._error_card(
-            "pairing confirmation limit reached",
-            "too many incorrect code attempts",
-            [
-                "Type `retry` to send a fresh DM/code.",
-                "Type `change` to use a different handle.",
-                "Type `local-only` to keep running without pairing.",
-            ],
-        )
+        self._write_tako("pairing is automatic now. commands: `retry`, `change`, `local-only`")
 
     async def _complete_pairing(self, pairing_method: str) -> None:
         if self.pairing_completed or self.paths is None:
@@ -1068,6 +1087,7 @@ class TakoTerminalApp(App[None]):
         self.operator_inbox_id = self.pairing_operator_inbox_id
         self.operator_address = self.pairing_resolved
         self.mode = "paired"
+        self._add_activity("pairing", f"paired with {self.pairing_resolved}")
 
         await self._cleanup_pairing_resources()
 
@@ -1079,7 +1099,10 @@ class TakoTerminalApp(App[None]):
             source="pairing",
             metadata={"operator_address": self.pairing_resolved, "pairing_method": pairing_method},
         )
-        self._begin_identity_onboarding()
+        await self._start_xmtp_runtime()
+        self._set_state(SessionState.RUNNING)
+        self._write_tako("all tentacles online. chat is open here too. type `help`.")
+        self._schedule_identity_onboarding_after_awake()
 
     async def _cleanup_pairing_resources(self) -> None:
         current = asyncio.current_task()
@@ -1109,28 +1132,52 @@ class TakoTerminalApp(App[None]):
         await self._stop_xmtp_runtime()
         await self._start_local_heartbeat()
         self._write_tako("continuing in terminal-managed local mode. use `pair` any time to add XMTP operator control.")
+        self._add_activity("runtime", "entered local-only mode")
         self._record_event("runtime.local_mode", "Running in local-only mode.", source="startup")
 
     async def _finalize_onboarding(self) -> None:
         if self.operator_paired:
             self.mode = "paired"
-            self._set_state(SessionState.PAIRED)
-            self._write_tako("onboarding complete. spinning up XMTP runtime currents.")
             self._record_event("onboarding.completed", "Onboarding completed with operator pairing.", source="onboarding")
-            await self._start_xmtp_runtime()
             self._set_state(SessionState.RUNNING)
-            self._write_tako("all tentacles online. terminal remains your local cockpit, and chat stays open here. type `help`.")
+            self._write_tako("identity + routines updated. current stays strong.")
             return
 
+        self.mode = "local-only"
         self._record_event("onboarding.completed", "Onboarding completed in local-only mode.", source="onboarding")
-        await self._enter_local_only_mode()
+        self._set_state(SessionState.RUNNING)
+        self._write_tako("identity + routines updated. local mode stays active.")
 
     def _begin_identity_onboarding(self) -> None:
         self.mode = "onboarding"
         self._set_state(SessionState.ONBOARDING_IDENTITY)
         self.identity_step = 0
+        self.identity_onboarding_pending = False
+        self._add_activity("identity", "interactive identity setup started")
         self._record_event("onboarding.identity.begin", "Identity prompt phase started.", source="onboarding")
-        self._write_tako("next tiny question: what should I be called?")
+        self._write_tako("next tiny question: what should I be called? (or `skip`)")
+
+    def _schedule_identity_onboarding_after_awake(self) -> None:
+        self.identity_onboarding_pending = True
+        self._write_tako("once inference is awake, I'll ask about name/goals/routines.")
+        self._add_activity("identity", "identity setup queued until inference is active")
+
+    async def _maybe_start_delayed_identity_onboarding(self) -> None:
+        if not self.identity_onboarding_pending:
+            return
+        if not self._inference_is_awake():
+            return
+        self.identity_onboarding_pending = False
+        self._write_tako("inference is awake now. want to tune my identity and goals? let's do it.")
+        self._begin_identity_onboarding()
+
+    def _inference_is_awake(self) -> bool:
+        return bool(
+            self.inference_runtime is not None
+            and self.inference_runtime.ready
+            and self.inference_gate_open
+            and self.inference_ever_used
+        )
 
     async def _start_xmtp_runtime(self) -> None:
         if self.paths is None:
@@ -1276,7 +1323,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, inference, doctor, pair, update, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, inference, doctor, pair, setup, update, web, run, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1358,6 +1405,10 @@ class TakoTerminalApp(App[None]):
             self._write_tako("share your XMTP handle to start outbound pairing, or `local-only`.")
             return
 
+        if cmd in {"setup", "profile"}:
+            self._begin_identity_onboarding()
+            return
+
         if cmd == "update":
             action = rest.strip().lower()
             if action in {"help", "?"}:
@@ -1368,6 +1419,7 @@ class TakoTerminalApp(App[None]):
                 return
 
             apply_update = action not in {"check", "status", "dry-run", "dryrun"}
+            self._add_activity("update", f"requested local update apply={_yes_no(apply_update)}")
             self._record_event(
                 "runtime.self_update.requested",
                 "Local self-update requested from terminal.",
@@ -1379,6 +1431,7 @@ class TakoTerminalApp(App[None]):
             except Exception as exc:  # noqa: BLE001
                 summary = _summarize_error(exc)
                 self._write_tako(f"self-update failed: {summary}")
+                self._add_activity("update", f"failed: {summary}")
                 self._record_event(
                     "runtime.self_update.error",
                     f"Local self-update failed: {exc}",
@@ -1391,6 +1444,7 @@ class TakoTerminalApp(App[None]):
             if result.changed:
                 lines.append("restart Tako to load updated code.")
             self._write_tako("\n".join(lines))
+            self._add_activity("update", result.summary)
             append_daily_note(daily_root(), date.today(), f"Local self-update command: {result.summary}")
             self._record_event(
                 "runtime.self_update.result",
@@ -1399,6 +1453,64 @@ class TakoTerminalApp(App[None]):
                 source="terminal",
                 metadata={"changed": result.changed, "apply": apply_update},
             )
+            return
+
+        if cmd == "web":
+            target = rest.strip()
+            if not target:
+                self._write_tako("usage: `web <https://...>`")
+                return
+            self._add_activity("tool:web", f"fetching {target}")
+            previous_indicator = self.indicator
+            self._set_indicator("acting")
+            try:
+                result = await asyncio.to_thread(fetch_webpage, target)
+            finally:
+                if self.indicator == "acting":
+                    self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
+            if not result.ok:
+                self._add_activity("tool:web", f"failed: {result.error}")
+                self._write_tako(f"web fetch failed: {result.error}")
+                return
+            title_line = f"title: {result.title}\n" if result.title else ""
+            self._write_tako(f"web: {result.url}\n{title_line}{result.text}")
+            self._add_activity("tool:web", f"fetched {result.url}")
+            return
+
+        if cmd == "run":
+            command = rest.strip()
+            if not command:
+                self._write_tako("usage: `run <shell command>`")
+                return
+            self._add_activity("tool:run", f"executing `{command}`")
+            previous_indicator = self.indicator
+            self._set_indicator("acting")
+            try:
+                result = await asyncio.to_thread(run_local_command, command)
+            finally:
+                if self.indicator == "acting":
+                    self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
+            if result.error:
+                self._add_activity("tool:run", f"failed: {result.error}")
+                self._write_tako(f"run failed: {result.error}")
+                return
+            self._write_tako(f"run: {result.command}\nexit_code: {result.exit_code}\n{result.output}")
+            self._add_activity("tool:run", f"finished exit={result.exit_code}")
+            return
+
+        if cmd == "copy":
+            target = rest.strip().lower()
+            if target == "last":
+                self.action_copy_last_line()
+                return
+            if target == "transcript":
+                self.action_copy_transcript()
+                return
+            self._write_tako("usage: `copy last` or `copy transcript`.")
+            return
+
+        if cmd == "activity":
+            self._write_tako(_activity_text(list(self.activity_entries)))
             return
 
         if cmd in {"safe", "stop", "resume"}:
@@ -1436,6 +1548,7 @@ class TakoTerminalApp(App[None]):
             state=self.state.value,
             operator_paired=self.operator_paired,
         )
+        self._add_activity("inference", "terminal chat inference requested")
 
         try:
             provider, reply = await asyncio.to_thread(
@@ -1452,13 +1565,16 @@ class TakoTerminalApp(App[None]):
                 severity="warn",
                 source="inference",
             )
+            self._add_activity("inference", f"chat inference fallback: {self.inference_last_error}")
             return fallback
 
         cleaned = _clean_chat_reply(reply)
         if not cleaned:
             return fallback
+        self.inference_ever_used = True
         self.inference_last_provider = provider
         self.inference_last_error = ""
+        self._add_activity("inference", f"terminal chat used provider={provider}")
         self._record_event(
             "inference.chat.reply",
             "Terminal chat reply generated.",
@@ -1478,6 +1594,10 @@ class TakoTerminalApp(App[None]):
 
         if level in {"warn", "error"} or message.startswith(("status:", "pairing:", "inbox_id:")):
             self._write_system(f"runtime[{level}]: {message}")
+        if level in {"warn", "error"}:
+            self._add_activity("runtime", f"{level}: {_summarize_text(message)}")
+        elif message.startswith(("status:", "pairing:", "inbox_id:")):
+            self._add_activity("runtime", _summarize_text(message))
         severity = level if level in {"warn", "error"} else "info"
         event_type = "runtime.log"
         if "crash" in lowered:
@@ -1491,6 +1611,7 @@ class TakoTerminalApp(App[None]):
     def _on_runtime_inbound(self, sender_inbox_id: str, text: str) -> None:
         short_sender = sender_inbox_id[:10]
         self._write_system(f"xmtp<{short_sender}>: {text}")
+        self._add_activity("xmtp", f"inbound from {short_sender}")
         self._record_event(
             "xmtp.inbound.message",
             "Inbound XMTP message received.",
@@ -1566,6 +1687,12 @@ class TakoTerminalApp(App[None]):
             f"- last heartbeat: {heartbeat_age}"
         )
         self.tasks_panel.update(tasks)
+        level = _octopus_level(
+            heartbeat_ticks=self.heartbeat_ticks,
+            type2_escalations=self.type2_escalations,
+            operator_paired=self.operator_paired,
+        )
+        self.octo_panel.update(_octopus_panel_text(level))
 
         event_log_value = str(self.event_log_path) if self.event_log_path is not None else "not ready"
         memory = (
@@ -1595,15 +1722,28 @@ class TakoTerminalApp(App[None]):
             f"- events written: {self.event_total_written} / ingested: {self.event_total_ingested}"
         )
         self.sensors_panel.update(sensors)
+        self.activity_panel.update(_activity_text(list(self.activity_entries)))
 
     def _write_tako(self, text: str) -> None:
-        self.transcript.write(f"Tako: {_sanitize_for_display(text)}")
+        line = f"Tako: {_sanitize_for_display(text)}"
+        self.transcript_lines.append(line)
+        self.transcript.write(line)
 
     def _write_user(self, text: str) -> None:
-        self.transcript.write(f"You: {_sanitize_for_display(text)}")
+        line = f"You: {_sanitize_for_display(text)}"
+        self.transcript_lines.append(line)
+        self.transcript.write(line)
 
     def _write_system(self, text: str) -> None:
-        self.transcript.write(f"System: {_sanitize_for_display(text)}")
+        line = f"System: {_sanitize_for_display(text)}"
+        self.transcript_lines.append(line)
+        self.transcript.write(line)
+
+    def _add_activity(self, kind: str, detail: str) -> None:
+        stamp = datetime.now().strftime("%H:%M:%S")
+        entry = f"{stamp} {kind}: {_summarize_text(_sanitize_for_display(detail))}"
+        self.activity_entries.appendleft(entry)
+        self._refresh_panels()
 
     def _error_card(self, summary: str, detail: str, next_steps: list[str]) -> None:
         self._write_system(f"ERROR: {summary}: {_summarize_text(detail)}")
@@ -1643,11 +1783,6 @@ async def _resolve_operator_inbox_id(client, address: str, dm) -> str | None:
     return None
 
 
-def _new_pairing_code() -> str:
-    raw = "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
-    return f"{raw[:4]}-{raw[4:]}"
-
-
 def _strip_terminal_controls(value: str) -> str:
     cleaned = ANSI_CSI_RE.sub("", value)
     cleaned = ANSI_OSC_RE.sub("", cleaned)
@@ -1667,6 +1802,13 @@ def _contains_terminal_control(value: str) -> bool:
 def _sanitize(value: str) -> str:
     cleaned = _strip_terminal_controls(value)
     return " ".join(cleaned.strip().split())
+
+
+def _clean_paste_text(value: str) -> str:
+    cleaned = _strip_terminal_controls(value).replace("\r", "\n")
+    lines = [line.strip() for line in cleaned.split("\n")]
+    parts = [line for line in lines if line]
+    return " ".join(parts)
 
 
 def _parse_yes_no(value: str) -> bool | None:
@@ -1702,12 +1844,16 @@ def _looks_like_local_command(text: str) -> bool:
 
     cmd, rest = _parse_command(value)
     tail = rest.strip().lower()
-    if cmd in {"help", "h", "?", "status", "health", "doctor", "pair", "stop", "resume", "quit", "exit"}:
+    if cmd in {"help", "h", "?", "status", "health", "doctor", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
         return tail == ""
     if cmd == "inference":
         return tail in {"", "refresh", "rescan", "scan", "reload"}
     if cmd == "update":
         return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
+    if cmd in {"web", "run"}:
+        return tail != ""
+    if cmd == "copy":
+        return tail in {"last", "transcript"}
     if cmd == "safe":
         return tail in {"", "on", "off", "enable", "enabled", "disable", "disabled", "true", "false", "1", "0"}
     return False
@@ -1795,10 +1941,6 @@ def _type2_inference_timeout(depth: str) -> float:
     return 60.0
 
 
-def _normalize_pairing_code(value: str) -> str:
-    return "".join(char for char in value.upper() if char.isalnum())
-
-
 def _summarize_error(error: Exception) -> str:
     return _summarize_text(str(error) or error.__class__.__name__)
 
@@ -1853,6 +1995,73 @@ def _type2_recommendation(event_type: str, message: str) -> str:
     if kind.startswith("health.check.issue"):
         return "Resolve reported health issue before proceeding with risky actions."
     return "Review the event details, then choose a safe next action or pause in safe mode."
+
+
+def _activity_text(entries: list[str]) -> str:
+    if not entries:
+        return "Activity\n- idle"
+    lines = ["Activity"]
+    for entry in entries[:10]:
+        lines.append(f"- {entry}")
+    return "\n".join(lines)
+
+
+def _octopus_level(*, heartbeat_ticks: int, type2_escalations: int, operator_paired: bool) -> int:
+    score = (heartbeat_ticks // 20) + type2_escalations + (2 if operator_paired else 0)
+    if score >= 18:
+        return 4
+    if score >= 10:
+        return 3
+    if score >= 4:
+        return 2
+    if score >= 1:
+        return 1
+    return 0
+
+
+def _octopus_panel_text(level: int) -> str:
+    art = _octopus_art(level)
+    return f"Octopus\nlevel: {level}\n{art}"
+
+
+def _octopus_art(level: int) -> str:
+    arts = [
+        r"""   .-.
+  (o o)
+  / V \
+ /(   )\
+  ^^ ^^""",
+        r"""    .-.
+   (o o)
+  /  V  \
+ /(  _  )\
+  / / \ \
+  ^^   ^^""",
+        r"""     .-.
+    (o o)
+   /  V  \
+ _/  ---  \_
+/  /|   |\  \
+\_/ |___| \_/
+  /_/   \_\ """,
+        r"""      .-.
+   _ (o o) _
+  / \/  V  \/ \
+ /  /  ---  \  \
+|  |  /___\  |  |
+ \  \_/   \_/  /
+  \__\_____/__/""",
+        r"""      .-.
+   _ (O O) _
+  / \/  V  \/ \
+ /  /  ===  \  \
+|  |  /___\  |  |
+|  | (_____) |  |
+ \  \_/   \_/  /
+  \___\___/___/""",
+    ]
+    index = max(0, min(level, len(arts) - 1))
+    return arts[index]
 
 
 def _dns_lookup_ok(host: str) -> bool:

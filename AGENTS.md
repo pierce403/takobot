@@ -57,6 +57,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-12 — TUI activity visibility + auto-pair startup
+
+- What happened: onboarding still required manual pairing code copyback and identity prompts could fire before the agent had performed live inference.
+- Fix: switched pairing to outbound-assume-ready, delayed identity/routine prompts until inference is actually active, and added a visible activity panel + clipboard-friendly controls in the TUI.
+- Prevention: keep first-run friction low, surface runtime actions explicitly in-UI, and avoid identity capture before the model loop is truly awake.
+
 ### 2026-02-11 — Terminal app became the primary runtime loop
 
 - What happened: startup UX was still designed around shell prompts + daemon subcommands, which made first-run flow brittle and fragmented.

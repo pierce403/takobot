@@ -105,6 +105,22 @@
   - [x] Resize/blur does not leave the app without a usable text-input focus.
   - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).
 
+### DOSE cognitive state (D/O/S/E)
+- **Stability**: in-progress
+- **Description**: Runtime-only simulated DOSE (Dopamine/Oxytocin/Serotonin/Endorphins) state that biases behavior without overriding operator boundaries.
+- **Properties**:
+  - Stored in `.tako/state/dose.json` (runtime-only; ignored by git).
+  - Deterministic: decays toward baselines on heartbeat ticks and clamps each channel to `[0,1]`.
+  - Updated from all recorded events via a single hook in the app event recorder.
+  - Displayed in the TUI status bar and sidebar sensor panel.
+  - Biases Type 1 → Type 2 escalation sensitivity (more cautious when low S/E; more tolerant when high S/E).
+- **Test Criteria**:
+  - [ ] Launch `tako` shows DOSE values + label in the UI.
+  - [ ] A simulated runtime/pairing failure reduces S/E and shifts the label toward `stressed`.
+  - [ ] After calm heartbeats, DOSE decays back toward baseline.
+  - [ ] Type 1 → Type 2 escalation threshold changes measurably with DOSE (critical/error still escalate).
+  - [ ] `.tako/state/dose.json` persists across restarts and is never committed.
+
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable
 - **Description**: Keys are stored locally (unencrypted) under `.tako/` with OS file permissions as the protection.

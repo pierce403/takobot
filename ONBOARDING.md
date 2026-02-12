@@ -10,6 +10,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] Operator is imprinted (paired) and stored locally, or local-only mode is explicitly chosen.
 - [ ] If pairing is attempted: outbound pairing DM is sent and operator imprint is stored without manual code copyback.
 - [ ] `memory/dailies/YYYY-MM-DD.md` exists for today.
+- [ ] DOSE engine initialized at `.tako/state/dose.json`, shown in UI, and biases Type 1 → Type 2 escalation sensitivity.
 - [ ] `SOUL.md`, `memory/MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
 
 ## Steps
@@ -38,6 +39,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During `BOOTING`, inference execution remains gated; first model calls are allowed only after the first interactive chat turn.
 - During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
+- During `RUNNING`, Tako keeps a small runtime-only DOSE model (D/O/S/E) ticking on heartbeat and reflecting mode in the UI.
 - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**

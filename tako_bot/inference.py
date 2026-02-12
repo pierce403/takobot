@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -9,10 +10,12 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 PROVIDER_PRIORITY = ("codex", "claude", "gemini")
+
+StreamEventHook = Callable[[str, str], None]
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,45 @@ def run_inference_prompt_with_fallback(
             return provider, text
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{provider}: {_summarize_error_text(str(exc))}")
+
+    detail = "; ".join(failures) if failures else "all provider attempts failed"
+    raise RuntimeError(f"inference provider fallback exhausted: {detail}")
+
+
+async def stream_inference_prompt_with_fallback(
+    runtime: InferenceRuntime,
+    prompt: str,
+    *,
+    timeout_s: float = 70.0,
+    on_event: StreamEventHook | None = None,
+) -> tuple[str, str]:
+    order: list[str] = []
+    if runtime.selected_provider:
+        status = runtime.statuses.get(runtime.selected_provider)
+        if status and status.ready:
+            order.append(runtime.selected_provider)
+    for provider in PROVIDER_PRIORITY:
+        status = runtime.statuses.get(provider)
+        if not status or not status.ready:
+            continue
+        if provider in order:
+            continue
+        order.append(provider)
+
+    if not order:
+        raise RuntimeError("no ready inference providers available")
+
+    failures: list[str] = []
+    for provider in order:
+        if on_event:
+            on_event("provider", provider)
+        try:
+            text = await _stream_with_provider(runtime, provider, prompt, timeout_s=timeout_s, on_event=on_event)
+            return provider, text
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{provider}: {_summarize_error_text(str(exc))}")
+            if on_event:
+                on_event("status", f"{provider} failed: {_summarize_error_text(str(exc))}")
 
     detail = "; ".join(failures) if failures else "all provider attempts failed"
     raise RuntimeError(f"inference provider fallback exhausted: {detail}")
@@ -589,6 +631,244 @@ def _run_with_provider(runtime: InferenceRuntime, provider: str, prompt: str, *,
     if provider == "gemini":
         return _run_gemini(prompt, env=env, timeout_s=timeout_s)
     raise RuntimeError(f"unsupported inference provider: {provider}")
+
+
+async def _stream_with_provider(
+    runtime: InferenceRuntime,
+    provider: str,
+    prompt: str,
+    *,
+    timeout_s: float,
+    on_event: StreamEventHook | None,
+) -> str:
+    env = os.environ.copy()
+    env.update(runtime.env_overrides_for(provider))
+
+    if provider == "gemini":
+        return await _stream_gemini(prompt, env=env, timeout_s=timeout_s, on_event=on_event)
+    if provider == "codex":
+        return await _stream_codex(prompt, env=env, timeout_s=timeout_s, on_event=on_event)
+    if provider == "claude":
+        text = await asyncio.to_thread(_run_claude, prompt, env=env, timeout_s=timeout_s)
+        await _simulate_stream(text, on_event=on_event)
+        return text
+
+    raise RuntimeError(f"unsupported inference provider: {provider}")
+
+
+async def _simulate_stream(text: str, *, on_event: StreamEventHook | None) -> None:
+    if not on_event:
+        return
+    if not text:
+        return
+    chunk_size = 24
+    delay_s = 0.01
+    for idx in range(0, len(text), chunk_size):
+        on_event("delta", text[idx : idx + chunk_size])
+        await asyncio.sleep(delay_s)
+
+
+async def _stream_gemini(
+    prompt: str,
+    *,
+    env: dict[str, str],
+    timeout_s: float,
+    on_event: StreamEventHook | None,
+) -> str:
+    cmd = ["gemini", "--output-format", "stream-json", prompt]
+    assistant_text = ""
+
+    def handle_stdout_line(line: str) -> None:
+        nonlocal assistant_text
+        stripped = line.strip()
+        if not stripped:
+            return
+        if not stripped.startswith("{"):
+            if on_event:
+                on_event("status", stripped)
+            return
+        try:
+            payload = json.loads(stripped)
+        except Exception:
+            if on_event:
+                on_event("status", stripped)
+            return
+        if not isinstance(payload, dict):
+            return
+        if payload.get("type") != "message":
+            return
+        if payload.get("role") != "assistant":
+            return
+        content = payload.get("content")
+        if not isinstance(content, str) or not content:
+            return
+
+        is_delta = payload.get("delta") is True
+        if is_delta:
+            assistant_text += content
+            if on_event:
+                on_event("delta", content)
+            return
+
+        if content.startswith(assistant_text):
+            delta = content[len(assistant_text) :]
+            assistant_text = content
+            if delta and on_event:
+                on_event("delta", delta)
+            return
+
+        assistant_text = content
+        if on_event:
+            on_event("delta", content)
+
+    stderr_lines: list[str] = []
+
+    def handle_stderr_line(line: str) -> None:
+        stripped = line.strip()
+        if stripped:
+            stderr_lines.append(stripped)
+            if on_event:
+                on_event("status", stripped)
+
+    await _run_streaming_process(cmd, env=env, timeout_s=timeout_s, on_stdout_line=handle_stdout_line, on_stderr_line=handle_stderr_line)
+
+    if not assistant_text:
+        detail = "; ".join(stderr_lines[-5:]) if stderr_lines else "no assistant output received"
+        raise RuntimeError(f"gemini inference returned no assistant output: {detail}")
+    return assistant_text
+
+
+async def _stream_codex(
+    prompt: str,
+    *,
+    env: dict[str, str],
+    timeout_s: float,
+    on_event: StreamEventHook | None,
+) -> str:
+    cmd = ["codex", "exec", "--skip-git-repo-check", "--color", "never", "--json", prompt]
+    final_messages: list[str] = []
+    streamed_any_delta = False
+
+    def handle_stdout_line(line: str) -> None:
+        nonlocal streamed_any_delta
+        stripped = line.strip()
+        if not stripped:
+            return
+        if not stripped.startswith("{"):
+            if on_event:
+                on_event("status", stripped)
+            return
+        try:
+            payload = json.loads(stripped)
+        except Exception:
+            if on_event:
+                on_event("status", stripped)
+            return
+        if not isinstance(payload, dict):
+            return
+
+        event_type = payload.get("type")
+        if isinstance(event_type, str) and event_type in {"thread.started", "turn.started"}:
+            if on_event:
+                on_event("status", event_type)
+            return
+
+        if event_type == "turn.completed":
+            usage = payload.get("usage")
+            if isinstance(usage, dict) and on_event:
+                tokens = usage.get("output_tokens")
+                if tokens is not None:
+                    on_event("status", f"turn.completed output_tokens={tokens}")
+            return
+
+        if event_type == "item.completed":
+            item = payload.get("item")
+            if not isinstance(item, dict):
+                return
+            if item.get("type") != "agent_message":
+                return
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                final_messages.append(text)
+            return
+
+        if event_type == "item.delta":
+            item = payload.get("item")
+            if not isinstance(item, dict):
+                return
+            if item.get("type") != "agent_message":
+                return
+            delta = item.get("delta") or item.get("text")
+            if isinstance(delta, str) and delta:
+                streamed_any_delta = True
+                if on_event:
+                    on_event("delta", delta)
+            return
+
+    stderr_lines: list[str] = []
+
+    def handle_stderr_line(line: str) -> None:
+        stripped = line.strip()
+        if stripped:
+            stderr_lines.append(stripped)
+            if on_event:
+                on_event("status", stripped)
+
+    await _run_streaming_process(cmd, env=env, timeout_s=timeout_s, on_stdout_line=handle_stdout_line, on_stderr_line=handle_stderr_line)
+
+    combined = "\n\n".join(msg.strip() for msg in final_messages if msg.strip())
+    if not combined:
+        detail = "; ".join(stderr_lines[-5:]) if stderr_lines else "no agent_message item received"
+        raise RuntimeError(f"codex inference returned no agent_message output: {detail}")
+
+    if not streamed_any_delta:
+        await _simulate_stream(combined, on_event=on_event)
+    return combined
+
+
+async def _run_streaming_process(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    timeout_s: float,
+    on_stdout_line: Callable[[str], None],
+    on_stderr_line: Callable[[str], None],
+) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    async def pump(stream: asyncio.StreamReader, handler: Callable[[str], None]) -> None:
+        while True:
+            raw = await stream.readline()
+            if not raw:
+                return
+            handler(raw.decode("utf-8", errors="replace").rstrip("\n"))
+
+    stdout_task = asyncio.create_task(pump(proc.stdout, on_stdout_line))
+    stderr_task = asyncio.create_task(pump(proc.stderr, on_stderr_line))
+
+    try:
+        await asyncio.wait_for(asyncio.gather(stdout_task, stderr_task, proc.wait()), timeout=timeout_s)
+    except asyncio.TimeoutError as exc:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        raise RuntimeError(f"inference subprocess timed out after {timeout_s:.0f}s") from exc
+    finally:
+        if proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"inference subprocess failed: exit={proc.returncode}")
 
 
 def _summarize_error_text(text: str) -> str:

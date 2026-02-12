@@ -78,6 +78,7 @@
   - Runs XMTP daemon loop as a background task when paired.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Includes an activity panel with inference/tool/runtime trace lines.
+  - Streams in-progress inference output into a scrollable "bubble stream" panel above the input box (Cursor/Claude style).
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Shows an animated top-right ASCII octopus level panel in the sidebar.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
@@ -98,6 +99,7 @@
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.
   - [x] Activity panel shows inference/tool/runtime actions.
+  - [x] Terminal chat inference streams output to the bubble-stream panel while generating.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
   - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).
 

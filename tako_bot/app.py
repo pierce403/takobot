@@ -22,7 +22,7 @@ from typing import Any
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Input, RichLog, Static
+from textual.widgets import Footer, Input, RichLog, Static, TextArea
 
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
@@ -35,6 +35,7 @@ from .inference import (
     format_runtime_lines,
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
+    stream_inference_prompt_with_fallback,
 )
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
@@ -53,6 +54,8 @@ LOCAL_CHAT_TIMEOUT_S = 75.0
 LOCAL_CHAT_MAX_CHARS = 700
 ACTIVITY_LOG_MAX = 80
 TRANSCRIPT_LOG_MAX = 2000
+STREAM_BOX_MAX_CHARS = 8000
+STREAM_BOX_MAX_STATUS_LINES = 40
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -132,7 +135,15 @@ class TakoTerminalApp(App[None]):
 
     #input-box {
         dock: bottom;
+        margin: 0;
+    }
+
+    #stream-box {
+        dock: bottom;
+        height: 7;
+        border: solid $secondary;
         margin: 1 0 0 0;
+        padding: 0 1;
     }
     """
 
@@ -219,9 +230,15 @@ class TakoTerminalApp(App[None]):
 
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
+        self.stream_provider = "none"
+        self.stream_status_lines: list[str] = []
+        self.stream_reply = ""
+        self.stream_active = False
+        self.stream_last_render_at = 0.0
 
         self.status_bar: Static
         self.transcript: RichLog
+        self.stream_box: TextArea
         self.input_box: Input
         self.octo_panel: Static
         self.tasks_panel: Static
@@ -239,12 +256,22 @@ class TakoTerminalApp(App[None]):
                 yield Static("", id="panel-memory", classes="panel")
                 yield Static("", id="panel-sensors", classes="panel")
                 yield Static("", id="panel-activity", classes="panel")
+        yield TextArea(
+            "",
+            id="stream-box",
+            read_only=True,
+            show_cursor=False,
+            highlight_cursor_line=False,
+            show_line_numbers=False,
+            placeholder="bubble stream: inference + tools will appear here while I'm working",
+        )
         yield Input(id="input-box", placeholder="Type here. During onboarding, answer the current question.")
         yield Footer()
 
     def on_mount(self) -> None:
         self.status_bar = self.query_one("#status-bar", Static)
         self.transcript = self.query_one("#transcript", RichLog)
+        self.stream_box = self.query_one("#stream-box", TextArea)
         self.input_box = self.query_one("#input-box", Input)
         self.octo_panel = self.query_one("#panel-octo", Static)
         self.tasks_panel = self.query_one("#panel-tasks", Static)
@@ -1582,6 +1609,66 @@ class TakoTerminalApp(App[None]):
 
         self._write_tako("unknown local command. type `help`. plain text chat always works here.")
 
+    def _stream_clear(self) -> None:
+        self.stream_active = False
+        self.stream_provider = "none"
+        self.stream_status_lines = []
+        self.stream_reply = ""
+        self.stream_last_render_at = 0.0
+        if hasattr(self, "stream_box"):
+            self.stream_box.load_text("")
+
+    def _stream_begin(self) -> None:
+        self.stream_active = True
+        self.stream_provider = "starting"
+        self.stream_status_lines = []
+        self.stream_reply = ""
+        self.stream_last_render_at = 0.0
+        self._stream_render(force=True)
+
+    def _on_inference_stream_event(self, kind: str, payload: str) -> None:
+        if kind == "provider":
+            self.stream_provider = payload.strip() or self.stream_provider
+            self._stream_render(force=True)
+            return
+
+        if kind == "status":
+            line = _sanitize_for_display(payload).strip()
+            if not line:
+                return
+            self.stream_status_lines.append(line)
+            if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
+                self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
+            self._stream_render()
+            return
+
+        if kind == "delta":
+            delta = _sanitize_for_display(payload)
+            if not delta:
+                return
+            self.stream_reply += delta
+            if len(self.stream_reply) > STREAM_BOX_MAX_CHARS:
+                self.stream_reply = self.stream_reply[-STREAM_BOX_MAX_CHARS :]
+            self._stream_render()
+            return
+
+    def _stream_render(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self.stream_last_render_at) < 0.05:
+            return
+        self.stream_last_render_at = now
+
+        header = f"bubble stream: provider={self.stream_provider}\n"
+        status = ""
+        if self.stream_status_lines:
+            status = "\n".join(self.stream_status_lines) + "\n\n"
+
+        caret = "|" if self.stream_active else ""
+        body = self.stream_reply + caret
+
+        self.stream_box.load_text(header + status + body)
+        self.stream_box.scroll_end(animate=False)
+
     async def _local_chat_reply(self, text: str) -> str:
         if self.operator_paired:
             fallback = (
@@ -1601,13 +1688,14 @@ class TakoTerminalApp(App[None]):
             operator_paired=self.operator_paired,
         )
         self._add_activity("inference", "terminal chat inference requested")
+        self._stream_begin()
 
         try:
-            provider, reply = await asyncio.to_thread(
-                run_inference_prompt_with_fallback,
+            provider, reply = await stream_inference_prompt_with_fallback(
                 self.inference_runtime,
                 prompt,
                 timeout_s=LOCAL_CHAT_TIMEOUT_S,
+                on_event=self._on_inference_stream_event,
             )
         except Exception as exc:  # noqa: BLE001
             self.inference_last_error = _summarize_error(exc)
@@ -1618,7 +1706,11 @@ class TakoTerminalApp(App[None]):
                 source="inference",
             )
             self._add_activity("inference", f"chat inference fallback: {self.inference_last_error}")
+            self._stream_clear()
             return fallback
+        finally:
+            self.stream_active = False
+            self._stream_render(force=True)
 
         cleaned = _clean_chat_reply(reply)
         if not cleaned:

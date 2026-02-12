@@ -6,8 +6,8 @@
 - **Stability**: stable
 - **Description**: The repo documents identity, invariants, onboarding, and durable memory as first-class artifacts.
 - **Properties**:
-  - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `ONBOARDING.md`.
-  - Memory docs live under `memory/` with canonical `memory/MEMORY.md`.
+  - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`.
+  - Committed knowledge lives under `memory/` (daily logs + world notes); `memory/MEMORY.md` is a compatibility pointer.
   - Feature state is tracked in `FEATURES.md`.
   - Website copy lives in `index.html`.
 - **Test Criteria**:
@@ -120,6 +120,29 @@
   - [ ] After calm heartbeats, DOSE decays back toward baseline.
   - [ ] Type 1 → Type 2 escalation threshold changes measurably with DOSE (critical/error still escalate).
   - [ ] `.tako/state/dose.json` persists across restarts and is never committed.
+
+### Productivity engine v1 (GTD + PARA + progressive summarization)
+- **Stability**: in-progress
+- **Description**: A committed execution structure (PARA) plus GTD capture/clarify/next-actions, with daily outcomes and progressive summaries.
+- **Properties**:
+  - PARA directories exist (committed): `projects/`, `areas/`, `resources/`, `archives/`, `tasks/` (each with a README).
+  - Tasks live under `tasks/*.md` with YAML frontmatter (`id`, `title`, `status`, `project`, `area`, `created`, `updated`, `due`, `tags`, `energy`).
+  - Terminal app exposes productivity commands even when XMTP is connected: `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`.
+  - XMTP operator commands support the same core flows for remote control.
+  - Daily outcomes ("3 for today") live in `memory/dailies/YYYY-MM-DD.md` and are editable via commands.
+  - Runtime-only open loops index lives at `.tako/state/open_loops.json` and is surfaced in the TUI sidebar.
+  - `compress` appends/updates a structured progressive summary block in today’s daily log (Type2 with inference when available; heuristic fallback).
+  - `weekly` review surfaces stale tasks and projects missing a next action, and prompts for archive + promote.
+  - DOSE biases planning hints (e.g., stressed tides reduce churn; high D suggests exploration).
+- **Test Criteria**:
+  - [ ] Running `tako` on a new day creates today’s daily log and offers `morning` if outcomes are blank.
+  - [ ] Sidebar shows open tasks + open loops count and oldest age.
+  - [ ] `task <title>` creates a file under `tasks/` and appends a daily log note.
+  - [ ] `tasks` lists open tasks and filters by project/area/due.
+  - [ ] `done <id>` marks a task complete and appends a daily log note.
+  - [ ] `weekly` surfaces stale tasks and projects missing next actions and prompts for archive + promote.
+  - [ ] `compress` adds a progressive summary block to today’s daily log.
+  - [ ] `promote <note>` appends an operator-approved durable note to `MEMORY.md`.
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable

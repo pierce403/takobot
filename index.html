@@ -7,14 +7,14 @@
     <link rel="canonical" href="https://tako.bot/" />
     <meta
       name="description"
-      content="Tako is a highly autonomous, operator-imprinted agent built in Python with memory, Type 1/Type 2 cognition, and a simulated DOSE (D/O/S/E) model, grounded in web3-native XMTP and Ethereum rails."
+      content="Tako is a highly autonomous, operator-imprinted agent built in Python with memory, Type 1/Type 2 cognition, a simulated DOSE (D/O/S/E) model, and a GTD+PARA productivity engine, grounded in web3-native XMTP and Ethereum rails."
     />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="tako-bot" />
     <meta property="og:title" content="tako-bot — highly autonomous octopus friend" />
     <meta
       property="og:description"
-      content="Operator-imprinted in Python with memory, Type 1/2 thinking, simulated DOSE balance (D/O/S/E), and web3-native XMTP and Ethereum rails."
+      content="Operator-imprinted in Python with memory, Type 1/2 thinking, simulated DOSE balance (D/O/S/E), GTD+PARA workflows, and web3-native XMTP and Ethereum rails."
     />
     <meta property="og:url" content="https://tako.bot/" />
     <meta property="og:image" content="https://tako.bot/og-card.png" />
@@ -30,7 +30,7 @@
     <meta name="twitter:title" content="tako-bot — highly autonomous octopus friend" />
     <meta
       name="twitter:description"
-      content="Operator-imprinted in Python with memory, Type 1/2 thinking, simulated DOSE balance (D/O/S/E), and web3-native XMTP and Ethereum rails."
+      content="Operator-imprinted in Python with memory, Type 1/2 thinking, simulated DOSE balance (D/O/S/E), GTD+PARA workflows, and web3-native XMTP and Ethereum rails."
     />
     <meta name="twitter:image" content="https://tako.bot/og-card.png" />
     <meta
@@ -513,7 +513,7 @@
               <h1>A highly autonomous octopus friend, imprinted to you.</h1>
               <p class="subtitle">
                 <b>tako-bot</b> is built in <b>Python</b> with a docs-first <b>memory system</b> and deliberate
-                <b>Type 1 / Type 2 thinking</b>, plus a simulated <b>DOSE</b> balance (D/O/S/E) that biases risk tolerance and exploration. It can
+                <b>Type 1 / Type 2 thinking</b>, plus a simulated <b>DOSE</b> balance (D/O/S/E) and a <b>GTD + PARA</b> productivity engine. It can
                 chat broadly, but only the operator can change identity, tools, permissions, and routines.
                 It is web3-native via <b>XMTP</b> and <b>Ethereum</b>, with <b>Farcaster</b> support on the roadmap.
               </p>
@@ -521,6 +521,9 @@
                 <span class="chip"><b>Python</b> runtime</span>
                 <span class="chip"><b>Memory</b> + Type 1/2</span>
                 <span class="chip"><b>DOSE</b> neurotransmitters</span>
+                <span class="chip"><b>GTD</b> + PARA</span>
+                <span class="chip"><b>Daily</b> + Weekly review</span>
+                <span class="chip"><b>Progressive</b> summaries</span>
                 <span class="chip"><b>Operator</b> imprint</span>
                 <span class="chip"><b>Web3</b> XMTP + Ethereum</span>
                 <span class="chip"><b>Farcaster</b> roadmap</span>
@@ -670,10 +673,11 @@
             <ul>
               <li><b>Autonomous core</b>: Python runtime with memory-first workflows and Type 1 / Type 2 cognition.</li>
               <li><b>DOSE balance</b>: runtime-only simulated D/O/S/E that biases risk tolerance, verbosity, and exploration vs stability (never overrides SOUL/operator rules).</li>
+              <li><b>Productivity engine</b>: GTD capture → clarify → next actions, backed by PARA structure (Projects/Areas/Resources/Archives).</li>
               <li><b>Operator imprint</b>: only the operator can change identity, tools, permissions, and routines.</li>
               <li><b>Web3-native rails</b>: XMTP control plane today, Ethereum identity support, Farcaster integration path.</li>
               <li><b>Multi-instance safety</b>: locks prevent shared-state corruption.</li>
-              <li><b>Git-first docs</b>: SOUL/VISION/memory/MEMORY/FEATURES stay authoritative.</li>
+              <li><b>Git-first docs</b>: SOUL/VISION/MEMORY/memory/FEATURES stay authoritative.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               The current build still includes a tiny one-off DM sender — the long-term direction is a safe, extensible agent.
@@ -685,11 +689,13 @@
             <div class="card panel">
             <h2>Features</h2>
             <ul>
-              <li><b>Docs-first</b>: <code>SOUL.md</code>, <code>VISION.md</code>, <code>memory/MEMORY.md</code>, <code>FEATURES.md</code>.</li>
+              <li><b>Docs-first</b>: <code>SOUL.md</code>, <code>VISION.md</code>, <code>MEMORY.md</code>, <code>FEATURES.md</code>.</li>
               <li><b>Operator imprint</b>: controller-only changes to identity, tools, and permissions.</li>
               <li><b>One-off DM</b>: <code>tako hi</code> sends to <code>0x…</code> or resolves <code>.eth</code>.</li>
               <li><b>State hygiene</b>: runtime in <code>.tako/</code>; daily logs in <code>memory/dailies/</code>.</li>
               <li><b>DOSE model</b>: runtime-only state in <code>.tako/state/dose.json</code> biases escalation, verbosity, and exploration.</li>
+              <li><b>GTD + PARA</b>: committed execution structure in <code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.</li>
+              <li><b>Reviews + summaries</b>: daily outcomes, weekly review, and progressive summaries (<code>morning</code>, <code>weekly</code>, <code>compress</code>).</li>
             </ul>
               <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
                 The canonical spec lives in <code>FEATURES.md</code> (with stability + test criteria).
@@ -736,6 +742,9 @@
                 Initializes runtime-only DOSE state in <code>.tako/state/dose.json</code> and shows it live in the TUI.
               </li>
               <li>
+                Uses a committed GTD + PARA execution structure: <code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.
+              </li>
+              <li>
                 Launches the interactive terminal app and runs onboarding as explicit states.
               </li>
               <li>
@@ -746,7 +755,13 @@
                 Delays identity/goals/routine prompts until inference has actually run (or until manually triggered).
               </li>
               <li>
+                Offers a <code>morning</code> prompt to set 3 outcomes for today (stored in <code>memory/dailies/</code>).
+              </li>
+              <li>
                 Starts heartbeat + event-log ingestion with Type 1 triage and Type 2 escalation for serious events.
+              </li>
+              <li>
+                Maintains an open-loops index at <code>.tako/state/open_loops.json</code> (unfinished tasks + onboarding prompts) and shows it in the sidebar.
               </li>
               <li>
                 Shows a live activity panel (inference/tool/runtime) plus a top-right ASCII octopus level panel.
@@ -763,7 +778,13 @@
             <ul>
               <li>Before pairing: terminal app is primary onboarding/control loop.</li>
               <li>After pairing: XMTP is primary for identity/config/tools/routines.</li>
-              <li>After pairing, operator commands include: <code>help</code>, <code>status</code>, <code>doctor</code>, <code>update</code>, <code>web</code>, <code>run</code>, <code>reimprint</code>.</li>
+              <li>
+                After pairing, operator commands include:
+                <code>help</code>, <code>status</code>, <code>doctor</code>,
+                <code>task</code>/<code>tasks</code>/<code>done</code>,
+                <code>morning</code>/<code>outcomes</code>/<code>compress</code>/<code>weekly</code>/<code>promote</code>,
+                <code>update</code>, <code>web</code>, <code>run</code>, <code>reimprint</code>.
+              </li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, and plain-text chat stays available there.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>
@@ -827,7 +848,7 @@
                 <a href="https://github.com/pierce403/tako-bot/blob/main/AGENTS.md">AGENTS</a>,
                 <a href="https://github.com/pierce403/tako-bot/blob/main/SOUL.md">SOUL</a>,
                 <a href="https://github.com/pierce403/tako-bot/blob/main/VISION.md">VISION</a>,
-                <a href="https://github.com/pierce403/tako-bot/blob/main/memory/MEMORY.md">MEMORY</a>,
+                <a href="https://github.com/pierce403/tako-bot/blob/main/MEMORY.md">MEMORY</a>,
                 <a href="https://github.com/pierce403/tako-bot/blob/main/ONBOARDING.md">ONBOARDING</a>
               </li>
               <li>

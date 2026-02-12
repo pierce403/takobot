@@ -11,7 +11,9 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] If pairing is attempted: outbound pairing DM is sent and operator imprint is stored without manual code copyback.
 - [ ] `memory/dailies/YYYY-MM-DD.md` exists for today.
 - [ ] DOSE engine initialized at `.tako/state/dose.json`, shown in UI, and biases Type 1 → Type 2 escalation sensitivity.
-- [ ] `SOUL.md`, `memory/MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
+- [ ] PARA execution structure exists (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`) with README conventions.
+- [ ] Open loops index exists at `.tako/state/open_loops.json` and is surfaced in the UI sidebar.
+- [ ] `SOUL.md`, `MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
 
 ## Steps
 
@@ -57,7 +59,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 5) **Pairing / handshake**
 
 - Pairing is auto-completed in-app after successful outbound DM + inbox resolution.
-- After imprint, management moves to XMTP only (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`).
+- After imprint, management moves to XMTP for operator changes and commands (`help`, `status`, `doctor`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`).
 - Re-imprinting is still operator-only over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs the next operator.
 
 6) **Initialize today’s daily log**
@@ -75,7 +77,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - After pairing, Tako keeps terminal as local cockpit (status/logs/chat/safe mode) while XMTP is the control plane.
 - TUI exposes an activity panel (inference/tool/runtime traces) and clipboard helpers (`Ctrl+Shift+C`, `Ctrl+Shift+L`).
 - The operator can request status via XMTP commands:
-  - `help`, `status`, `doctor`, `update`, `web`, `run`
+  - `help`, `status`, `doctor`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`
 
 Notes:
 

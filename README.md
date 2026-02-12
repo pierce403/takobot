@@ -11,7 +11,8 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated leveling ASCII octopus panel
-- Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
+- Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
+- Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs
 
@@ -45,14 +46,25 @@ Pairing flow:
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
 - After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`).
 
+Productivity (GTD + PARA):
+
+- `morning` sets today’s 3 outcomes (stored in `memory/dailies/YYYY-MM-DD.md`).
+- `task <title>` creates a committed task file under `tasks/`.
+- `tasks` lists open tasks (filters: `project`, `area`, `due`).
+- `done <task-id>` completes a task.
+- `compress` writes a progressive summary block into today’s daily log.
+- `weekly` runs a weekly review report.
+- `promote <note>` appends an operator-approved durable note into `MEMORY.md`.
+
 ## Architecture (minimal)
 
 Committed (git-tracked):
 
-- `SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`
+- `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`
 - `FEATURES.md` (feature tracker)
 - `memory/dailies/YYYY-MM-DD.md` (daily logs)
 - `memory/people/`, `memory/places/`, `memory/things/` (world notes)
+- `tasks/`, `projects/`, `areas/`, `resources/`, `archives/` (execution structure)
 - `tools/` (tool implementations)
 
 Runtime-only (ignored):
@@ -83,7 +95,7 @@ Runtime-only (ignored):
 
 There is **no user-facing configuration via environment variables or CLI flags**.
 
-Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `memory/MEMORY.md`, etc).
+Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
 
 ## Developer utilities (optional)
 

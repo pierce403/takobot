@@ -62,6 +62,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-12 — GTD + PARA productivity engine
+
+- What happened: execution planning (tasks/projects/areas) was mixing with the committed memory wiki structure.
+- Fix: added PARA folders at repo root and a minimal task/outcomes/review workflow with an open-loops index.
+- Prevention: keep `memory/` for durable knowledge + reflections; keep execution artifacts in `tasks/` + PARA folders; promote to `MEMORY.md` only by operator intent.
+
 ### 2026-02-12 — TUI activity visibility + auto-pair startup
 
 - What happened: onboarding still required manual pairing code copyback and identity prompts could fire before the agent had performed live inference.

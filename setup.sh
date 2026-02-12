@@ -1,132 +1,194 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/pierce403/tako-bot.git"
-CALLER_DIR="$(pwd -P)"
-DEFAULT_TARGET="$CALLER_DIR/tako-bot"
-LOCAL_TRACKING_BRANCH="local"
+# Tako workspace bootstrap (curl | bash friendly).
+#
+# Creates a local .venv, installs the engine (`pip install tako` with a fallback),
+# materializes workspace templates, initializes git (if available), then launches
+# the interactive TUI main loop.
 
-usage() {
-  cat <<'EOF'
-Usage:
-  ./setup.sh
+ENGINE_PYPI_NAME="tako"
+ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/tako-bot.git"
 
-Behavior:
-  - If already inside the Tako git repo, runs ./start.sh.
-  - Otherwise bootstraps tako-bot into ./tako-bot from your current directory
-    (or a timestamped fallback in the same directory)
-    and then runs ./start.sh from there.
-  - Fresh checkouts are created on a local branch (`local`) tracking `origin/main`.
+WORKDIR="$(pwd -P)"
+VENV_DIR="$WORKDIR/.venv"
+PYTHON="${PYTHON:-python3}"
+
+log() {
+  printf "%s\n" "$*" >&2
+}
+
+die() {
+  printf "Error: %s\n" "$*" >&2
+  exit 1
+}
+
+is_workspace() {
+  [[ -f "$WORKDIR/SOUL.md" && -f "$WORKDIR/AGENTS.md" && -f "$WORKDIR/MEMORY.md" && -f "$WORKDIR/tako.toml" ]]
+}
+
+has_non_runtime_entries() {
+  local entry base
+  while IFS= read -r entry; do
+    base="$(basename "$entry")"
+    case "$base" in
+      .|..|.tako|.venv) continue ;;
+    esac
+    return 0
+  done < <(find "$WORKDIR" -mindepth 1 -maxdepth 1 -print)
+  return 1
+}
+
+preflight() {
+  if is_workspace; then
+    log "workspace: existing (templates will only fill missing files)"
+    return 0
+  fi
+
+  if has_non_runtime_entries; then
+    cat >&2 <<'EOF'
+Error: refusing to bootstrap here: directory is not empty and does not look like a Tako workspace.
+
+Expected (workspace): SOUL.md, AGENTS.md, MEMORY.md, tako.toml
+
+Tip: run in an empty directory, or cd into an existing Tako workspace.
 EOF
-}
-
-is_tako_repo() {
-  local root="$1"
-  [[ -f "$root/AGENTS.md" && -f "$root/ONBOARDING.md" && -f "$root/SOUL.md" && -f "$root/tako.sh" && -f "$root/start.sh" ]]
-}
-
-clone_target() {
-  local target="$DEFAULT_TARGET"
-
-  if [[ -d "$target/.git" ]]; then
-    printf "%s\n" "$target"
-    return 0
-  fi
-
-  if [[ -e "$target" ]]; then
-    target="$CALLER_DIR/tako-bot-$(date +%Y%m%d-%H%M%S)"
-  fi
-
-  printf "%s\n" "$target"
-}
-
-set_repo_tmpdir() {
-  local root="$1"
-  mkdir -p "$root/.tako/tmp"
-  export TMPDIR="$root/.tako/tmp"
-}
-
-bootstrap_checkout() {
-  local target="$1"
-  local branch="$LOCAL_TRACKING_BRANCH"
-
-  mkdir -p "$target"
-  set_repo_tmpdir "$target"
-
-  git -C "$target" init --quiet
-  git -C "$target" remote add origin "$REPO_URL"
-  git -C "$target" fetch --depth 1 origin main
-  git -C "$target" checkout -b "$branch" FETCH_HEAD >/dev/null 2>&1
-  git -C "$target" branch --set-upstream-to=origin/main "$branch" >/dev/null 2>&1 || true
-  echo "Initialized local branch '$branch' (tracks origin/main)." >&2
-}
-
-ensure_local_tracking_branch() {
-  local branch="$LOCAL_TRACKING_BRANCH"
-
-  if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
-    if ! git fetch origin main >/dev/null 2>&1; then
-      echo "Warning: could not fetch origin/main; leaving current branch unchanged." >&2
-      return 0
-    fi
-  fi
-
-  if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
-    echo "Warning: origin/main is unavailable; leaving current branch unchanged." >&2
-    return 0
-  fi
-
-  if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
-    if ! git checkout "$branch" >/dev/null 2>&1; then
-      echo "Warning: failed to switch to branch '$branch'; continuing on current branch." >&2
-      return 0
-    fi
-  else
-    if ! git checkout -b "$branch" origin/main >/dev/null 2>&1; then
-      echo "Warning: failed to create branch '$branch' from origin/main; continuing on current branch." >&2
-      return 0
-    fi
-    echo "Initialized local branch '$branch' (tracks origin/main)." >&2
-  fi
-
-  git branch --set-upstream-to=origin/main "$branch" >/dev/null 2>&1 || true
-}
-
-main() {
-  case "${1:-}" in
-    -h|--help|help)
-      usage
-      exit 0
-      ;;
-  esac
-
-  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    repo_root="$(git rev-parse --show-toplevel)"
-    if is_tako_repo "$repo_root"; then
-      cd "$repo_root"
-      exec ./start.sh
-    fi
-  fi
-
-  if ! command -v git >/dev/null 2>&1; then
-    echo "Error: git is required for setup.sh." >&2
     exit 1
   fi
 
-  target="$(clone_target)"
-  if [[ -d "$target/.git" ]]; then
-    set_repo_tmpdir "$target"
-    cd "$target"
-    ensure_local_tracking_branch
-    if ! git pull --ff-only; then
-      echo "Warning: git pull failed; continuing with existing local checkout." >&2
-    fi
-  else
-    bootstrap_checkout "$target"
-    cd "$target"
+  log "workspace: empty (fresh bootstrap)"
+}
+
+ensure_venv() {
+  if [[ -x "$VENV_DIR/bin/python" ]]; then
+    return 0
+  fi
+  command -v "$PYTHON" >/dev/null 2>&1 || die "python not found: $PYTHON"
+  "$PYTHON" -m venv "$VENV_DIR"
+}
+
+upgrade_pip() {
+  "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null
+}
+
+engine_installed() {
+  "$VENV_DIR/bin/python" - <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+
+sys.exit(0 if importlib.util.find_spec("tako_bot") else 1)
+PY
+}
+
+install_engine() {
+  if engine_installed; then
+    log "engine: already installed"
+    return 0
   fi
 
-  exec ./start.sh
+  log "engine: installing from PyPI ($ENGINE_PYPI_NAME)"
+  if "$VENV_DIR/bin/python" -m pip install "$ENGINE_PYPI_NAME" >/dev/null; then
+    if engine_installed; then
+      return 0
+    fi
+    log "engine: PyPI package installed but did not provide tako_bot; falling back"
+  fi
+
+  log "engine: PyPI install failed; falling back to source clone"
+  command -v git >/dev/null 2>&1 || die "git is required for fallback source install"
+
+  mkdir -p "$WORKDIR/.tako/tmp"
+  local src_dir="$WORKDIR/.tako/tmp/src"
+  if [[ ! -d "$src_dir/.git" ]]; then
+    rm -rf "$src_dir" >/dev/null 2>&1 || true
+    git clone --depth 1 "$ENGINE_FALLBACK_REPO_URL" "$src_dir" >/dev/null 2>&1 || die "git clone failed"
+  fi
+
+  "$VENV_DIR/bin/python" -m pip install "$src_dir" >/dev/null || die "engine install from source failed"
+}
+
+materialize_templates() {
+  log "workspace: materializing templates (no overwrite)"
+  "$VENV_DIR/bin/python" - <<'PY' || die "template materialization failed"
+from pathlib import Path
+from tako_bot.workspace import materialize_workspace
+
+root = Path.cwd()
+result = materialize_workspace(root)
+if result.warning:
+    print(result.warning)
+PY
+}
+
+ensure_git() {
+  if ! command -v git >/dev/null 2>&1; then
+    log "git: missing (workspace will still run, but versioning is disabled)"
+    return 0
+  fi
+
+  if [[ -d "$WORKDIR/.git" ]]; then
+    return 0
+  fi
+
+  log "git: init"
+  git init >/dev/null
+
+  if [[ ! -f "$WORKDIR/.gitignore" ]]; then
+    cat >"$WORKDIR/.gitignore" <<'EOF'
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state (never commit)
+.tako/
+
+# Local databases (e.g., XMTP)
+*.db3
+*.db3-wal
+*.db3-shm
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+EOF
+  fi
+
+  git add -A >/dev/null
+  if git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then
+    log "git: committed initial workspace"
+  else
+    log "git: commit skipped (configure user.name/user.email to enable commits)"
+  fi
+}
+
+ensure_tty_stdin() {
+  if [[ -t 0 ]]; then
+    return 0
+  fi
+  if [[ -e /dev/tty ]] && ( : </dev/tty ) 2>/dev/null; then
+    exec </dev/tty
+  fi
+  die "interactive launch requires a TTY (try running from a real terminal)"
+}
+
+launch() {
+  ensure_tty_stdin
+  exec "$VENV_DIR/bin/tako"
+}
+
+main() {
+  preflight
+  ensure_venv
+  upgrade_pip
+  install_engine
+  materialize_templates
+  ensure_git
+  launch
 }
 
 main "$@"

@@ -5,7 +5,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 ## Done When
 
 - [ ] `.tako/` runtime structure exists (`locks/`, `logs/`, `state/`, `xmtp-db/`) and `.tako/keys.json` exists.
-- [ ] `uv` is installed for virtualenv + dependency management.
+- [ ] `.venv/` exists and the engine is installed (`.venv/bin/tako` runs).
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally, or local-only mode is explicitly chosen.
 - [ ] If pairing is attempted: outbound pairing DM is sent and operator imprint is stored without manual code copyback.
@@ -13,7 +13,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] DOSE engine initialized at `.tako/state/dose.json`, shown in UI, and biases Type 1 → Type 2 escalation sensitivity.
 - [ ] PARA execution structure exists (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`) with README conventions.
 - [ ] Open loops index exists at `.tako/state/open_loops.json` and is surfaced in the UI sidebar.
-- [ ] `SOUL.md`, `MEMORY.md`, and `FEATURES.md` exist and are consistent with current behavior.
+- [ ] Skill/tool install pipeline works (quarantine → analyze → install disabled → enable requires operator approval).
+- [ ] `SOUL.md`, `MEMORY.md`, `tako.toml`, and `FEATURES.md` exist and are consistent with current behavior.
 
 ## Steps
 
@@ -25,9 +26,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 - Preferred bootstrap flow:
   - `curl -fsSL https://tako.bot/setup.sh | bash`
-  - or (from an existing checkout) `./start.sh`
-- `setup.sh` bootstraps into your current directory and initializes a local working branch (`local`) that tracks `origin/main`.
-- `start.sh` verifies repo/runtime prerequisites and launches `tako` (interactive app main loop).
+- Next runs: `.venv/bin/tako`
+- `setup.sh` creates `.venv/`, installs the engine, and materializes the workspace from engine templates.
 - `tako` onboarding runs as explicit states inside the app UI:
   - `BOOTING`
   - `ASK_XMTP_HANDLE`
@@ -42,7 +42,6 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
 - During `RUNNING`, Tako keeps a small runtime-only DOSE model (D/O/S/E) ticking on heartbeat and reflecting mode in the UI.
-- If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` automatically.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**
 

@@ -1,0 +1,12 @@
+[tool]
+name = "memory_append"
+version = "0.1.0"
+entry = "tool.py"
+description = "Append a note to today’s daily log (no secrets)."
+
+[permissions]
+network = false
+shell = false
+xmtp = false
+filesystem = true
+

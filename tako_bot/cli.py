@@ -108,7 +108,7 @@ def cmd_app(args: argparse.Namespace) -> int:
     except ModuleNotFoundError as exc:
         if exc.name == "textual":
             print(
-                "Interactive app requires `textual`. Run `./tako.sh` so dependencies install via uv.",
+                "Interactive app requires `textual`. Re-run workspace bootstrap (setup.sh) so dependencies install into .venv, then retry.",
                 file=sys.stderr,
             )
             return 1
@@ -193,7 +193,7 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
 
     lines = [
         "tako doctor",
-        f"- repo: {root}",
+        f"- workspace: {root}",
         f"- runtime: {paths.root} (ignored)",
         f"- memory dailies: {daily_root()} (committed)",
         f"- env: {env}",
@@ -483,8 +483,8 @@ async def _handle_incoming_message(
         if _looks_like_command(text):
             await convo.send(
                 "This Tako instance is not paired yet.\n\n"
-                "Pairing is terminal-first now: run `tako` (or `./start.sh`) in the local repo, "
-                "enter your XMTP handle, and confirm the outbound DM code there."
+                "Pairing is terminal-first: run `.venv/bin/tako` in the workspace (or bootstrap with `setup.sh`), "
+                "enter your XMTP handle, and I'll send an outbound DM and imprint the operator channel."
             )
         else:
             reply = await _chat_reply(
@@ -817,13 +817,13 @@ async def _handle_incoming_message(
             await convo.send(
                 "Re-imprint is operator-only and destructive.\n\n"
                 "Reply: `reimprint CONFIRM` to clear the current operator. "
-                "Then re-run terminal onboarding (`tako` or `./start.sh`) to pair again."
+                "Then re-run terminal onboarding (`.venv/bin/tako`) to pair again."
             )
             return
         clear_operator(paths.operator_json)
         clear_pending(paths.state_dir / "pairing.json")
         append_daily_note(daily_root(), date.today(), "Operator cleared imprint (reimprint CONFIRM).")
-        await convo.send("Operator imprint cleared. Run `tako` (or `./start.sh`) in the local terminal to pair a new operator.")
+        await convo.send("Operator imprint cleared. Run `.venv/bin/tako` in the local terminal to pair a new operator.")
         return
 
     await convo.send("Unknown command. Reply 'help'. For normal chat, send plain text.")
@@ -1136,7 +1136,7 @@ def _fallback_chat_reply(*, is_operator: bool, operator_paired: bool) -> str:
         return "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
     if operator_paired:
         return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
-    return "Happy to chat. This instance is not paired yet; run `tako` (or `./start.sh`) locally to set the operator channel."
+    return "Happy to chat. This instance is not paired yet; run `.venv/bin/tako` locally to set the operator channel."
 
 
 def _clean_chat_reply(text: str) -> str:

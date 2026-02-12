@@ -141,7 +141,7 @@ async def _run_terminal_pairing(
     operator_inbox_id = await _resolve_operator_inbox_id(client, resolved, dm)
     if not operator_inbox_id:
         tty.say("Tako: DM sent, but I couldn't resolve the operator inbox id for imprinting.")
-        tty.say("Tako: Verify that handle is XMTP-enabled, then retry `./start.sh`.")
+        tty.say("Tako: Verify that handle is XMTP-enabled, then retry `.venv/bin/tako`.")
         return False
 
     tty.say(f"Tako: Outbound DM sent to {operator_handle} ({resolved}).")
@@ -164,7 +164,7 @@ async def _run_terminal_pairing(
             return True
         tty.say("Tako: That code doesn't match. Please copy the exact code from the DM.")
 
-    tty.say("Tako: Pairing was not confirmed. Re-run `./start.sh` to try again.")
+    tty.say("Tako: Pairing was not confirmed. Re-run `.venv/bin/tako` to try again.")
     return False
 
 

@@ -13,35 +13,30 @@
 - **Test Criteria**:
   - [x] Root contract docs exist and are coherent.
 
-### One-command runner (`tako.sh`)
-- **Stability**: stable
-- **Description**: Bootstraps a local Python environment and starts the interactive terminal app.
+### Legacy repo runner (`tako.sh`)
+- **Stability**: deprecated (dev only)
+- **Description**: Repo-local launcher used during engine development.
 - **Properties**:
-  - Uses `uv` to create/manage a virtualenv at `.venv/`.
+  - Uses `uv` to create/manage a virtualenv at `.venv/` (repo-local).
   - Installs dependencies from `requirements.txt` via `uv pip` when needed.
-  - Ensures terminal UI dependency (`textual`) is installed before launching app mode.
-  - Installs `xmtp` via `uv pip` from PyPI when available; otherwise clones `xmtp-py` into `.tako/xmtp-py` and installs from source.
-  - Defaults to `tako app` when invoked with no arguments.
-  - Supports `start` as an alias for `app`.
-  - Exposes developer utilities (`doctor`, `hi`) for debugging/backwards compatibility.
+  - Defaults to `python -m tako_bot app`.
+  - Exposes developer utilities (`doctor`, `hi`).
 - **Test Criteria**:
-  - [x] `./tako.sh` starts the interactive app.
-  - [x] `./tako.sh start` starts the interactive app.
-  - [x] `./tako.sh doctor` runs without requiring a recipient.
+  - [x] `./tako.sh` starts the interactive app (dev path).
 
-### Setup + start bootstrap (`setup.sh`, `start.sh`)
+### Workspace bootstrap (`setup.sh`)
 - **Stability**: in-progress
-- **Description**: First-wake bootstrap from current directory, then launch interactive terminal app onboarding.
+- **Description**: Safe bootstrap for a new workspace via `curl | bash`, ending in the interactive terminal app.
 - **Properties**:
-  - `setup.sh` bootstraps (or reuses) the repo in the caller's current directory, then runs `start.sh`.
-  - `setup.sh` ensures a local working branch (`local`) tracks `origin/main` for local-first changes with upstream sync.
-  - `start.sh` checks repo layout/home sanity, ensures local `uv`, then runs `tako` (interactive app default path).
-  - If `uv` is missing, `start.sh` attempts a repo-local install at `.tako/bin/uv` before handing off to `tako.sh`.
-  - Site and README expose a `curl -fsSL https://tako.bot/setup.sh | bash` path.
+  - Refuses to run unless the directory is empty, or already looks like a Tako workspace (`SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
+  - Creates `.venv/` in the workspace directory.
+  - Installs the engine with `pip install tako`. If PyPI install fails, clones source into `.tako/tmp/src/` and installs from there.
+  - Materializes workspace templates from the installed engine (`tako_bot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
+  - Initializes git + `.gitignore` + first commit if git is available; warns if git is missing.
+  - Launches `.venv/bin/tako` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
 - **Test Criteria**:
-  - [x] `./setup.sh` targets current directory semantics (not hardcoded `$HOME`).
-  - [x] `./setup.sh` creates/switches to a local branch (`local`) that tracks `origin/main`.
-  - [x] `./start.sh` exists and launches Tako through `tako.sh`.
+  - [ ] In an empty dir, `curl -fsSL https://tako.bot/setup.sh | bash` creates `.venv/`, materializes workspace files, initializes git, and launches the TUI.
+  - [ ] Re-running `setup.sh` is idempotent and does not overwrite edited files.
 
 ### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)
 - **Stability**: in-progress
@@ -143,6 +138,22 @@
   - [ ] `weekly` surfaces stale tasks and projects missing next actions and prompts for archive + promote.
   - [ ] `compress` adds a progressive summary block to today’s daily log.
   - [ ] `promote <note>` appends an operator-approved durable note to `MEMORY.md`.
+
+### Skills / tools install pipeline (quarantine + analysis + enablement gate)
+- **Stability**: in-progress
+- **Description**: Install workspace extensions from URLs with a quarantine-first pipeline and a default-deny enablement gate.
+- **Properties**:
+  - `install skill <url>` and `install tool <url>` download into `.tako/quarantine/<id>/` (no execution).
+  - Static analysis produces a report (provenance, hashes, risky API scan, permission diff vs `tako.toml`).
+  - Operator chooses to accept/reject the quarantine item.
+  - Accepted installs land in `skills/<name>/` or `tools/<name>/` but remain disabled by default.
+  - `enable skill <name>` / `enable tool <name>` re-check hashes and permissions before enabling.
+  - If files change after install (hash mismatch), enablement refuses until re-reviewed.
+- **Test Criteria**:
+  - [ ] `install skill <url>` creates a quarantine entry and prints a security report.
+  - [ ] `install accept <id>` installs the skill disabled and records a daily log note.
+  - [ ] Modifying an installed file causes `enable ...` to refuse due to hash mismatch.
+  - [ ] `draft skill <name>` / `draft tool <name>` create disabled extension skeletons in the workspace.
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable

@@ -664,23 +664,21 @@
           <div class="card panel">
             <h2>Quickstart</h2>
             <p>
-              Bootstrap from your current directory (clone if needed), then launch Tako's interactive terminal app:
+              Bootstrap a new workspace in an empty directory (or an existing Tako workspace), then launch Tako's interactive terminal app:
             </p>
-            <pre><code>curl -fsSL https://tako.bot/setup.sh | bash
+            <pre><code>mkdir tako-workspace
+cd tako-workspace
+curl -fsSL https://tako.bot/setup.sh | bash
 
-# If you already have the repo:
-./start.sh
+# Next runs:
+.venv/bin/tako
 
 # In app: XMTP setup prompt appears first
 # Startup: health check (instance + resources + lock)
 # Then: onboarding questions (name/purpose/routines)
 # After pairing: XMTP controls identity/config/tools/routines</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              Setup also initializes a local <code>local</code> branch that tracks <code>origin/main</code> for
-              local changes + upstream pulls.
-            </p>
-            <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              Developer utilities: <code>./tako.sh doctor</code> and <code>./tako.sh hi &lt;to&gt; ["message"]</code>.
+              Developer utilities: <code>.venv/bin/tako doctor</code> and <code>.venv/bin/tako hi --to &lt;to&gt; [--message ...]</code>.
             </p>
           </div>
 
@@ -690,7 +688,7 @@
               <li><b>Memory system</b>: durable knowledge in git-tracked Markdown (<code>memory/</code> + promotions into <code>MEMORY.md</code>).</li>
               <li><b>Emotion system</b>: deterministic DOSE state (<code>.tako/state/dose.json</code>) that biases escalation sensitivity and tone.</li>
               <li><b>Productivity system</b>: GTD + PARA execution structure (<code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>) plus open loops (<code>.tako/state/open_loops.json</code>).</li>
-              <li><b>Safety boundary</b>: operator imprint + XMTP control plane for identity/tools/permissions/routines changes.</li>
+              <li><b>Safety boundary</b>: operator imprint + quarantine-first skill/tool installs (analyze → install disabled → enable).</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Tako stays git-first: memory and productivity artifacts are reviewable; runtime state lives under <code>.tako/</code> and is never committed.
@@ -758,12 +756,9 @@
             <div class="card panel">
               <h2>What happens on first run</h2>
             <ul>
-              <li>Creates a Python virtual environment in <code>.venv/</code> via <code>uv</code>.</li>
-              <li>Installs dependencies from <code>requirements.txt</code> via <code>uv pip</code>.</li>
-              <li>
-                Installs the XMTP Python SDK (<code>xmtp</code>) via <code>uv pip</code> — if it’s not available on PyPI,
-                it clones <code>xmtp-py</code> and installs from source.
-              </li>
+              <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
+              <li>Installs the engine with <code>pip install tako</code> (PyPI). If that fails, it falls back to a source clone install.</li>
+              <li>Materializes the workspace from engine templates (<code>tako_bot/templates/**</code>) without overwriting existing files, then initializes git if available.</li>
               <li>
                 Generates <code>.tako/keys.json</code> with a wallet key and DB encryption key (unencrypted; file-perms only).
               </li>
@@ -862,10 +857,7 @@
                 XMTP client initialization disables history sync by default for compatibility.
               </li>
               <li>
-                Ensure <code>uv</code> is installed locally; bootstrap and dependency management run through it.
-              </li>
-              <li>
-                If <code>uv</code> is missing, <code>start.sh</code> installs a repo-local copy at <code>.tako/bin/uv</code>.
+                Workspace bootstrap is <code>venv + pip</code>. No <code>uv</code> required.
               </li>
               <li>
                 If you see DB errors (e.g., “file is not a database”), delete <code>.tako/xmtp-db</code>
@@ -899,11 +891,11 @@
               </li>
               <li>
                 Entrypoint:
-                <code>setup.sh</code> / <code>start.sh</code> / <code>tako.sh</code>
+                <code>setup.sh</code> then <code>.venv/bin/tako</code>
               </li>
               <li>
                 CLI:
-                <code>./tako</code> or <code>python -m tako_bot</code>
+                <code>.venv/bin/tako</code> or <code>python -m tako_bot</code>
               </li>
             </ul>
             <p style="margin-top: 12px">

@@ -22,19 +22,21 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 
 ## Quickstart
 
-Bootstrap from your current directory (clone if needed), run first-wake onboarding, and start Tako:
+Bootstrap a new workspace in an empty directory, then launch Tako's interactive terminal app:
 
 ```bash
+mkdir tako-workspace
+cd tako-workspace
 curl -fsSL https://tako.bot/setup.sh | bash
 ```
 
-If you already have this repo cloned:
+Next runs:
 
 ```bash
-./start.sh
+.venv/bin/tako
 ```
 
-`setup.sh` creates or switches to a local branch named `local` that tracks `origin/main`, so local changes stay isolated while upstream updates remain pullable.
+Bootstrap refuses to run in a non-empty directory unless it already looks like a Tako workspace (has `SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
 
 Pairing flow:
 
@@ -60,12 +62,13 @@ Productivity (GTD + PARA):
 
 Committed (git-tracked):
 
-- `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`
+- `SOUL.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`, `tako.toml`
 - `FEATURES.md` (feature tracker)
 - `memory/dailies/YYYY-MM-DD.md` (daily logs)
 - `memory/people/`, `memory/places/`, `memory/things/` (world notes)
 - `tasks/`, `projects/`, `areas/`, `resources/`, `archives/` (execution structure)
-- `tools/` (tool implementations)
+- `tools/` (workspace tools; installed but disabled by default)
+- `skills/` (workspace skills; installed but disabled by default)
 
 Runtime-only (ignored):
 
@@ -73,16 +76,18 @@ Runtime-only (ignored):
 - `.tako/operator.json` (operator imprint metadata)
 - `.tako/xmtp-db/` (local XMTP DB)
 - `.tako/state/**` (runtime state: heartbeat/cognition/etc)
-- `.venv/` (uv-managed virtualenv)
+- `.tako/quarantine/**` (download quarantine for skills/tools)
+- `.venv/` (local virtualenv with the engine installed)
 
 ## What happens on first run
 
-- Creates a local Python virtual environment in `.venv/` using `uv`.
-- Installs dependencies from `requirements.txt` via `uv pip`.
-- Installs the XMTP Python SDK (`xmtp`) via `uv pip`. If it is not yet on PyPI, it clones `xmtp-py` and installs from source.
+- Creates a local Python virtual environment in `.venv/`.
+- Installs the engine with `pip install tako` (PyPI). If that fails, it clones source into `.tako/tmp/src/` and installs from there.
+- Materializes the workspace from engine templates (`tako_bot/templates/**`) without overwriting existing files.
+- Initializes git (if available) and commits the initial workspace.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
-- Launches the interactive terminal app main loop (`tako app`, default `tako`).
+- Launches the interactive terminal app main loop (`tako`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
@@ -95,23 +100,23 @@ Runtime-only (ignored):
 
 There is **no user-facing configuration via environment variables or CLI flags**.
 
+Workspace configuration lives in `tako.toml` (no secrets).
+
 Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
 
 ## Developer utilities (optional)
 
-- Local checks: `./tako.sh doctor`
-- One-off DM send: `./tako.sh hi <xmtp_address_or_ens> ["message"]`
-- Direct daemon (dev): `./tako.sh run`
+- Local checks: `.venv/bin/tako doctor`
+- One-off DM send: `.venv/bin/tako hi --to <xmtp_address_or_ens> [--message ...]`
+- Direct daemon (dev): `.venv/bin/tako run`
 
 ## Notes
 
-- The terminal app flow requires `uv` to manage the project virtualenv and Python dependencies.
-- `setup.sh` / `start.sh` will attempt a repo-local `uv` install automatically at `.tako/bin/uv` if `uv` is missing.
-- `start.sh` now delegates onboarding to the in-app terminal UX; it no longer runs shell prompts for identity setup.
+- Workspaces are git-first, but git is optional. If git is missing, Tako runs and warns that versioning is disabled.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
 - XMTP client initialization disables history sync by default for compatibility.
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
-- App launcher (`tako.sh`) rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` startup can still run interactive TUI input correctly.
+- The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.

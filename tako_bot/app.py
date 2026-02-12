@@ -26,6 +26,7 @@ from textual.widgets import Footer, Input, RichLog, Static, TextArea
 
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
+from .config import TakoConfig, load_tako_toml
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
@@ -54,6 +55,23 @@ from .productivity import promote as prod_promote
 from .productivity import summarize as prod_summarize
 from .productivity import tasks as prod_tasks
 from .productivity import weekly_review as prod_weekly
+from .extensions.analyze import ManifestError, analyze_quarantine, file_hashes as ext_file_hashes
+from .extensions.enable import permissions_ok as ext_permissions_ok
+from .extensions.enable import verify_integrity as ext_verify_integrity
+from .extensions.install import InstallError, install_from_quarantine
+from .extensions.model import PermissionSet as ExtPermissionSet
+from .extensions.model import QuarantineProvenance
+from .extensions.quarantine import QuarantineError, fetch_to_quarantine
+from .extensions.registry import (
+    drop_pending as ext_drop_pending,
+    get_installed as ext_get_installed,
+    get_pending as ext_get_pending,
+    list_installed as ext_list_installed,
+    list_pending as ext_list_pending,
+    record_installed as ext_record_installed,
+    record_pending as ext_record_pending,
+    set_enabled as ext_set_enabled,
+)
 
 
 HEARTBEAT_JITTER = 0.2
@@ -184,6 +202,8 @@ class TakoTerminalApp(App[None]):
         self.wallet_key = ""
         self.db_encryption_key = ""
         self.address = ""
+        self.config: TakoConfig = TakoConfig()
+        self.config_warning = ""
 
         self.identity_name = DEFAULT_SOUL_NAME
         self.identity_role = DEFAULT_SOUL_ROLE
@@ -251,6 +271,9 @@ class TakoTerminalApp(App[None]):
         self.open_loops_summary: dict[str, Any] = {"count": 0, "oldest_age_s": 0.0, "top": []}
         self.open_tasks_count = 0
         self.signal_loops: deque[prod_open_loops.OpenLoop] = deque(maxlen=25)
+
+        self.extensions_registry_path: Path | None = None
+        self.quarantine_root: Path | None = None
 
         self.prompt_mode: str | None = None
         self.prompt_step = 0
@@ -397,9 +420,32 @@ class TakoTerminalApp(App[None]):
             self.paths = ensure_runtime_dirs(runtime_paths())
             root = repo_root()
 
+            cfg, warn = load_tako_toml(root / "tako.toml")
+            self.config = cfg
+            self.config_warning = warn
+            if warn:
+                self._write_system(warn)
+                self._add_activity("config", f"warning: {warn}")
+                self._record_event(
+                    "config.load.warning",
+                    warn,
+                    severity="warn",
+                    source="config",
+                )
+            else:
+                self._add_activity("config", "tako.toml loaded")
+
             self.dose_path = self.paths.state_dir / "dose.json"
             try:
-                self.dose = dose.load_or_create(self.dose_path)
+                self.dose = dose.load_or_create(
+                    self.dose_path,
+                    baseline=(
+                        self.config.dose_baseline.d,
+                        self.config.dose_baseline.o,
+                        self.config.dose_baseline.s,
+                        self.config.dose_baseline.e,
+                    ),
+                )
                 # Catch up for downtime (capped inside tick).
                 now = time.time()
                 dt = now - float(self.dose.last_updated_ts)
@@ -443,6 +489,10 @@ class TakoTerminalApp(App[None]):
 
             self.open_loops_path = self.paths.state_dir / "open_loops.json"
             self._refresh_open_loops(save=True)
+
+            self.extensions_registry_path = self.paths.state_dir / "extensions.json"
+            self.quarantine_root = self.paths.root / "quarantine"
+            self.quarantine_root.mkdir(parents=True, exist_ok=True)
 
             self.identity_name, self.identity_role = read_identity()
             self.instance_kind = (
@@ -628,7 +678,7 @@ class TakoTerminalApp(App[None]):
         self.health_summary = {
             "instance_kind": self.instance_kind,
             "lock": "ok" if self.lock_acquired else "missing",
-            "repo_writable": _yes_no(os.access(repo_root(), os.W_OK)),
+            "workspace_writable": _yes_no(os.access(repo_root(), os.W_OK)),
             "runtime_writable": _yes_no(os.access(self.paths.root, os.W_OK)),
             "disk_free_mb": str(disk_free_mb),
             "keys_preexisting": _yes_no(keys_preexisting),
@@ -656,7 +706,7 @@ class TakoTerminalApp(App[None]):
         if not self.lock_acquired:
             issues.append(("critical", "Instance lock is not held."))
         if not os.access(repo_root(), os.W_OK):
-            issues.append(("error", "Repo directory is not writable."))
+            issues.append(("error", "Workspace directory is not writable."))
         if disk_free_mb < 256:
             issues.append(("warn", f"Low disk space under .tako: {disk_free_mb} MB free."))
         if not xmtp_import_ok:
@@ -1621,7 +1671,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1976,8 +2026,26 @@ class TakoTerminalApp(App[None]):
 
         if cmd in {"weekly", "review"}:
             action = rest.strip().lower()
-            if cmd == "review" and action not in {"weekly", "week"}:
-                self._write_tako("usage: `weekly` or `review weekly`")
+            if cmd == "review" and action == "pending":
+                if self.extensions_registry_path is None:
+                    self._write_tako("review pending unavailable: runtime paths missing.")
+                    return
+                pending = ext_list_pending(self.extensions_registry_path)
+                if not pending:
+                    self._write_tako("pending installs: none")
+                    return
+                lines = ["pending installs:"]
+                for item in pending[:12]:
+                    lines.append(
+                        f"- {item.get('id')} {item.get('kind')} {item.get('name')} risk={item.get('risk')} url={item.get('final_url') or item.get('source_url')}"
+                    )
+                if len(pending) > 12:
+                    lines.append(f"- ... (+{len(pending) - 12} more)")
+                self._write_tako("\n".join(lines))
+                return
+
+            if cmd == "review" and action not in {"weekly", "week", ""}:
+                self._write_tako("usage: `weekly` or `review weekly` or `review pending`")
                 return
             root = repo_root()
             today = date.today()
@@ -2135,6 +2203,406 @@ class TakoTerminalApp(App[None]):
                 source="terminal",
                 metadata={"changed": result.changed, "apply": apply_update},
             )
+            return
+
+        if cmd == "extensions":
+            if self.extensions_registry_path is None:
+                self._write_tako("extensions unavailable: runtime paths missing.")
+                return
+            tail = rest.strip().lower()
+            kind = None
+            if tail in {"skill", "skills"}:
+                kind = "skill"
+            elif tail in {"tool", "tools"}:
+                kind = "tool"
+            installed = ext_list_installed(self.extensions_registry_path, kind=kind)
+            if not installed:
+                self._write_tako("extensions: none installed yet.")
+                return
+            lines = ["extensions:"]
+            for item in installed[:18]:
+                lines.append(
+                    f"- {item.get('kind')} {item.get('name')} enabled={_yes_no(bool(item.get('enabled')))} risk={item.get('risk')}"
+                )
+            if len(installed) > 18:
+                lines.append(f"- ... (+{len(installed) - 18} more)")
+            self._write_tako("\n".join(lines))
+            return
+
+        if cmd == "install":
+            if self.paths is None or self.extensions_registry_path is None or self.quarantine_root is None:
+                self._write_tako("install unavailable: runtime paths missing.")
+                return
+
+            parts = rest.strip().split()
+            if not parts:
+                self._write_tako(
+                    "usage:\n"
+                    "- `install skill <url>`\n"
+                    "- `install tool <url>`\n"
+                    "- `install accept <quarantine_id> [enable]`\n"
+                    "- `install reject <quarantine_id>`"
+                )
+                return
+
+            action = parts[0].strip().lower()
+            if action in {"skill", "tool"}:
+                if len(parts) < 2:
+                    self._write_tako(f"usage: `install {action} <url>`")
+                    return
+                url = rest.strip().split(maxsplit=1)[1]
+                kind = "skill" if action == "skill" else "tool"
+                defaults = self.config.security.default_permissions
+                policy_defaults = ExtPermissionSet(
+                    network=defaults.network,
+                    shell=defaults.shell,
+                    xmtp=defaults.xmtp,
+                    filesystem=defaults.filesystem,
+                )
+
+                self._add_activity("ext:quarantine", f"fetching {kind} from {url}")
+                previous_indicator = self.indicator
+                self._set_indicator("acting")
+                try:
+                    qdir, provenance = await asyncio.to_thread(
+                        fetch_to_quarantine,
+                        url,
+                        quarantine_root=self.quarantine_root,
+                        max_bytes=int(self.config.security.download.max_bytes),
+                        allow_non_https=bool(self.config.security.download.allow_non_https),
+                        allowlist_domains=list(self.config.security.download.allowlist_domains),
+                    )
+                    qid = qdir.name
+                    report = await asyncio.to_thread(
+                        analyze_quarantine,
+                        quarantine_id=qid,
+                        qdir=qdir,
+                        kind=kind,
+                        provenance=provenance,
+                        policy_defaults=policy_defaults,
+                    )
+                except (QuarantineError, ManifestError) as exc:
+                    summary = _summarize_error(exc)
+                    self._write_tako(f"install failed: {summary}")
+                    self._add_activity("ext:quarantine", f"failed: {summary}")
+                    return
+                finally:
+                    if self.indicator == "acting":
+                        self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
+
+                ext_record_pending(self.extensions_registry_path, report, qdir=qdir)
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"Quarantined {kind} install: {provenance.final_url} (id={qid}, sha256={provenance.sha256[:12]}..., risk={report.risk})",
+                )
+                self._record_event(
+                    "extensions.install.pending",
+                    f"Extension install pending: {kind} {report.manifest.name}",
+                    source="terminal",
+                    metadata={"kind": kind, "id": qid, "name": report.manifest.name, "risk": report.risk},
+                )
+                self._add_activity("ext:install", f"pending {kind} {report.manifest.name} ({qid}) risk={report.risk}")
+
+                perms = report.manifest.requested_permissions.to_dict()
+                lines = [
+                    f"install pending: {qid}",
+                    f"kind: {kind}",
+                    f"name: {report.manifest.name}",
+                    f"version: {report.manifest.version}",
+                    f"risk: {report.risk}",
+                    f"requested_permissions: {perms}",
+                    f"source: {provenance.final_url}",
+                    f"sha256: {provenance.sha256}",
+                    f"recommendation: {report.recommendation}",
+                ]
+                if report.risky_hits:
+                    lines.append("risky_hits:")
+                    for hit in report.risky_hits[:8]:
+                        lines.append(f"- {hit.path}: {hit.pattern}")
+                    if len(report.risky_hits) > 8:
+                        lines.append(f"- ... (+{len(report.risky_hits) - 8} more)")
+                lines.append("next: `install accept <id>` (disabled), `install accept <id> enable`, or `install reject <id>`.")
+                self._write_tako("\n".join(lines))
+                return
+
+            if action in {"accept", "approve"}:
+                if len(parts) < 2:
+                    self._write_tako("usage: `install accept <quarantine_id> [enable]`")
+                    return
+                qid = parts[1].strip()
+                want_enable = len(parts) >= 3 and parts[2].strip().lower() in {"enable", "enabled", "on", "true", "1"}
+                pending = ext_get_pending(self.extensions_registry_path, qid)
+                if pending is None:
+                    self._write_tako(f"unknown quarantine id: {qid} (try `review pending`)")
+                    return
+
+                qdir = Path(str(pending.get("quarantine_dir") or "")).expanduser()
+                if not qdir.exists():
+                    self._write_tako(f"quarantine directory missing: {qdir}")
+                    return
+                kind = str(pending.get("kind") or "").strip().lower()
+                if kind not in {"skill", "tool"}:
+                    self._write_tako(f"invalid pending kind for {qid}: {kind}")
+                    return
+
+                prov = QuarantineProvenance(
+                    source_url=str(pending.get("source_url") or ""),
+                    fetched_at=QuarantineProvenance.now_iso(),
+                    final_url=str(pending.get("final_url") or pending.get("source_url") or ""),
+                    content_type="",
+                    sha256=str(pending.get("sha256") or ""),
+                    bytes=int(pending.get("bytes") or 0),
+                )
+                defaults = self.config.security.default_permissions
+                policy_defaults = ExtPermissionSet(
+                    network=defaults.network,
+                    shell=defaults.shell,
+                    xmtp=defaults.xmtp,
+                    filesystem=defaults.filesystem,
+                )
+
+                try:
+                    report = await asyncio.to_thread(
+                        analyze_quarantine,
+                        quarantine_id=qid,
+                        qdir=qdir,
+                        kind=kind,
+                        provenance=prov,
+                        policy_defaults=policy_defaults,
+                    )
+                    installed = await asyncio.to_thread(
+                        install_from_quarantine,
+                        report=report,
+                        workspace_root=repo_root(),
+                    )
+                except (ManifestError, InstallError) as exc:
+                    summary = _summarize_error(exc)
+                    self._write_tako(f"install accept failed: {summary}")
+                    self._add_activity("ext:install", f"accept failed: {summary}")
+                    return
+
+                ext_record_installed(self.extensions_registry_path, installed.record)
+                ext_drop_pending(self.extensions_registry_path, qid)
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"Installed {kind} `{installed.name}` from quarantine {qid} (disabled, sha256={installed.record.get('sha256','')[:12]}...).",
+                )
+                self._record_event(
+                    "extensions.install.installed",
+                    f"Extension installed: {kind} {installed.name}",
+                    source="terminal",
+                    metadata={"kind": kind, "id": qid, "name": installed.name},
+                )
+                self._add_activity("ext:install", f"installed {kind} {installed.name} enabled=no")
+                self._write_tako(
+                    f"installed {kind} into {installed.dest_dir.relative_to(repo_root())} (disabled).\n"
+                    f"next: `enable {kind} {installed.name}`"
+                )
+                # Helpful nudge: suggest committing workspace changes if git is available.
+                try:
+                    status = await asyncio.to_thread(run_local_command, "git status --porcelain")
+                    if status.ok and status.output.strip() and status.output.strip() != "(no output)":
+                        self._write_tako(
+                            "git changes detected:\n"
+                            f"{status.output}\n\n"
+                            f"suggestion: `git add -A && git commit -m \"Install {kind} {installed.name}\"`"
+                        )
+                except Exception:
+                    pass
+
+                if want_enable:
+                    await self._handle_running_input(f"enable {kind} {installed.name}")
+                return
+
+            if action == "reject":
+                if len(parts) < 2:
+                    self._write_tako("usage: `install reject <quarantine_id>`")
+                    return
+                qid = parts[1].strip()
+                pending = ext_get_pending(self.extensions_registry_path, qid)
+                if pending is not None:
+                    qdir = Path(str(pending.get("quarantine_dir") or ""))
+                    with contextlib.suppress(Exception):
+                        shutil.rmtree(qdir)
+                    ext_drop_pending(self.extensions_registry_path, qid)
+                self._add_activity("ext:install", f"rejected {qid}")
+                append_daily_note(daily_root(), date.today(), f"Rejected extension install {qid}.")
+                self._write_tako(f"rejected {qid}.")
+                return
+
+            self._write_tako(
+                "usage:\n"
+                "- `install skill <url>`\n"
+                "- `install tool <url>`\n"
+                "- `install accept <quarantine_id> [enable]`\n"
+                "- `install reject <quarantine_id>`"
+            )
+            return
+
+        if cmd == "enable":
+            if self.extensions_registry_path is None:
+                self._write_tako("enable unavailable: runtime paths missing.")
+                return
+            parts = rest.strip().split(maxsplit=1)
+            if len(parts) < 2:
+                self._write_tako("usage: `enable skill <name>` or `enable tool <name>`")
+                return
+            kind = parts[0].strip().lower()
+            name = parts[1].strip()
+            if kind not in {"skill", "tool"} or not name:
+                self._write_tako("usage: `enable skill <name>` or `enable tool <name>`")
+                return
+
+            record = ext_get_installed(self.extensions_registry_path, kind=kind, name=name)
+            if record is None:
+                self._write_tako(f"not installed: {kind} {name}")
+                return
+
+            ok, err = ext_verify_integrity(record, workspace_root=repo_root())
+            if not ok:
+                self._write_tako(f"enable blocked: {err}")
+                self._add_activity("ext:enable", f"blocked {kind} {name}: {err}")
+                return
+
+            defaults = self.config.security.default_permissions
+            policy_defaults = ExtPermissionSet(
+                network=defaults.network,
+                shell=defaults.shell,
+                xmtp=defaults.xmtp,
+                filesystem=defaults.filesystem,
+            )
+            ok, err = ext_permissions_ok(record, policy_defaults=policy_defaults)
+            if not ok:
+                self._write_tako(f"enable blocked: {err}")
+                self._add_activity("ext:enable", f"blocked {kind} {name}: {err}")
+                return
+
+            ext_set_enabled(self.extensions_registry_path, kind=kind, name=name, enabled=True)
+            append_daily_note(daily_root(), date.today(), f"Enabled {kind} `{name}`.")
+            self._record_event(
+                "extensions.enabled",
+                f"Extension enabled: {kind} {name}",
+                source="terminal",
+                metadata={"kind": kind, "name": name},
+            )
+            self._add_activity("ext:enable", f"enabled {kind} {name}")
+            self._write_tako(f"enabled {kind} {name}.")
+            return
+
+        if cmd == "draft":
+            if self.extensions_registry_path is None:
+                self._write_tako("draft unavailable: runtime paths missing.")
+                return
+            parts = rest.strip().split(maxsplit=1)
+            if len(parts) < 2:
+                self._write_tako("usage: `draft skill <name>` or `draft tool <name>`")
+                return
+            kind = parts[0].strip().lower()
+            name_raw = parts[1].strip()
+            if kind not in {"skill", "tool"} or not name_raw:
+                self._write_tako("usage: `draft skill <name>` or `draft tool <name>`")
+                return
+
+            def _safe(name: str) -> str:
+                out = []
+                for ch in name.strip():
+                    if ch.isalnum() or ch in {"-", "_"}:
+                        out.append(ch.lower())
+                    elif ch.isspace():
+                        out.append("-")
+                value = "".join(out).strip("-_")
+                return value or "unnamed"
+
+            name = _safe(name_raw)
+            root = repo_root()
+            dest = root / ("skills" if kind == "skill" else "tools") / name
+            if dest.exists():
+                self._write_tako(f"draft blocked: already exists: {dest.relative_to(root)}")
+                return
+            dest.mkdir(parents=True, exist_ok=True)
+
+            if kind == "skill":
+                (dest / "playbook.md").write_text(
+                    f"# {name_raw}\n\n"
+                    "Describe the workflow and constraints here.\n",
+                    encoding="utf-8",
+                )
+                (dest / "policy.toml").write_text(
+                    "[skill]\n"
+                    f"name = \"{name_raw}\"\n"
+                    "version = \"0.1.0\"\n"
+                    "entry = \"playbook.md\"\n\n"
+                    "[permissions]\n"
+                    "network = false\n"
+                    "shell = false\n"
+                    "xmtp = false\n"
+                    "filesystem = false\n",
+                    encoding="utf-8",
+                )
+                (dest / "README.md").write_text(
+                    f"# {name_raw}\n\n"
+                    "Status: drafted (disabled)\n",
+                    encoding="utf-8",
+                )
+            else:
+                (dest / "tool.py").write_text(
+                    "def run(input: dict, ctx: dict) -> dict:\n"
+                    "    \"\"\"Tool entrypoint.\n\n"
+                    "    Keep tools deterministic and safe. Return structured data.\n"
+                    "    \"\"\"\n"
+                    "    return {\"ok\": True, \"echo\": input}\n",
+                    encoding="utf-8",
+                )
+                (dest / "manifest.toml").write_text(
+                    "[tool]\n"
+                    f"name = \"{name_raw}\"\n"
+                    "version = \"0.1.0\"\n"
+                    "entry = \"tool.py\"\n\n"
+                    "[permissions]\n"
+                    "network = false\n"
+                    "shell = false\n"
+                    "xmtp = false\n"
+                    "filesystem = false\n",
+                    encoding="utf-8",
+                )
+                (dest / "README.md").write_text(
+                    f"# {name_raw}\n\n"
+                    "Status: drafted (disabled)\n",
+                    encoding="utf-8",
+                )
+
+            # Register as installed-but-disabled (runtime-only registry; folder itself is committed).
+            hashes = await asyncio.to_thread(ext_file_hashes, dest)
+            record = {
+                "kind": kind,
+                "name": name,
+                "display_name": name_raw,
+                "version": "0.1.0",
+                "enabled": False,
+                "installed_at": _utc_now_iso(),
+                "source_url": "local:draft",
+                "final_url": "local:draft",
+                "sha256": "",
+                "bytes": 0,
+                "risk": "low",
+                "recommendation": "Drafted locally (disabled).",
+                "requested_permissions": {"network": False, "shell": False, "xmtp": False, "filesystem": False},
+                "granted_permissions": {"network": False, "shell": False, "xmtp": False, "filesystem": False},
+                "path": str(dest.relative_to(root)),
+                "hashes": hashes,
+            }
+            ext_record_installed(self.extensions_registry_path, record)
+            append_daily_note(daily_root(), date.today(), f"Drafted {kind} `{name}` (disabled).")
+            self._record_event(
+                "extensions.drafted",
+                f"Extension drafted: {kind} {name}",
+                source="terminal",
+                metadata={"kind": kind, "name": name},
+            )
+            self._add_activity("ext:draft", f"drafted {kind} {name} (disabled)")
+            self._write_tako(f"drafted {kind} {name} (disabled).")
             return
 
         if cmd == "web":
@@ -2736,7 +3204,7 @@ def _looks_like_local_command(text: str) -> bool:
     if cmd == "weekly":
         return tail == ""
     if cmd == "review":
-        return tail in {"weekly", "week"}
+        return tail in {"weekly", "week", "pending"}
     if cmd == "promote":
         return True
     if cmd == "inference":
@@ -2751,6 +3219,14 @@ def _looks_like_local_command(text: str) -> bool:
         return tail in {"last", "transcript"}
     if cmd == "safe":
         return tail in {"", "on", "off", "enable", "enabled", "disable", "disabled", "true", "false", "1", "0"}
+    if cmd == "install":
+        return True
+    if cmd == "enable":
+        return tail != ""
+    if cmd == "draft":
+        return tail != ""
+    if cmd == "extensions":
+        return True
     return False
 
 
@@ -2882,7 +3358,7 @@ def _type2_recommendation(event_type: str, message: str) -> str:
     if "another tako instance" in text or "instance lock" in text:
         return "Another Tako instance may be active here. Stop the duplicate process before continuing."
     if "xmtp import unavailable" in text or "no module named 'xmtp'" in text:
-        return "Install dependencies via `./tako.sh` and retry XMTP pairing/runtime startup."
+        return "XMTP dependency is missing. Install `xmtp` into `.venv` (or re-run `setup.sh`), then retry pairing/runtime startup."
     if "dns lookup for xmtp" in text:
         return "Check network/DNS egress for XMTP hosts, then retry pairing or runtime startup."
     if "runtime crashed" in text or "runtime.crash" in kind:

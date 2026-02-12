@@ -11,6 +11,8 @@ Required files (must exist):
 - `AGENTS.md` (this file)
 - `SOUL.md` (identity + boundaries; not memory)
 - `MEMORY.md` (canonical durable memory; long-lived facts only)
+- `DEPLOYMENT.md` (engine/workspace/runtime model)
+- `SECURITY_MODEL.md` (operator gates + extension security)
 - `VISION.md` (1-page invariants)
 - `ONBOARDING.md` (first wake checklist)
 - `FEATURES.md` (feature tracker + stability + test criteria)
@@ -19,6 +21,7 @@ Required files (must exist):
 Root directories (must exist):
 
 - `tools/` (tool implementations + manifests)
+- `skills/` (skills/playbooks + policies; installed but disabled by default)
 - `memory/` (committed knowledge tree: `dailies/`, `people/`, `places/`, `things/`)
 - `tasks/` (GTD next actions; committed)
 - `projects/` (PARA projects; committed)
@@ -34,6 +37,7 @@ Root directories (must exist):
 - **Keys live unencrypted on disk** under `.tako/` with OS file permissions as the protection.
 - **Refuse unsafe states** (e.g., if a key file is tracked by git).
 - **XMTP Operator Channel is the ONLY control plane.** No user-facing configuration via CLI flags or environment variables.
+- Workspace config is file-based (`tako.toml`) and must never contain secrets.
 
 ## Operator Imprint (control plane)
 
@@ -61,6 +65,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-12 — Engine/workspace separation + quarantine installs
+
+- What happened: repo-as-workspace bootstrap made installs and extension loading hard to secure and hard to make idempotent.
+- Fix: defined Engine (pip), Workspace (git-tracked), Runtime (`.tako/`) and added a quarantine-first install pipeline for skills/tools (install disabled; enable requires hash check).
+- Prevention: keep bootstrap deterministic and default-deny; treat all downloaded code as untrusted until operator review.
 
 ### 2026-02-12 — GTD + PARA productivity engine
 

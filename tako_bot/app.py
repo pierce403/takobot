@@ -867,9 +867,23 @@ class TakoTerminalApp(App[None]):
             return
 
         if self.identity_step == 0:
-            self.identity_name = text or self.identity_name
+            if lowered in {"keep", "same", "default"}:
+                self._write_tako(f"okay, I'll keep `{self.identity_name}` for now.")
+                self.identity_step = 1
+                self._write_tako("cute. and what should my purpose be? one sentence is perfect.")
+                return
+
+            parsed_name = _extract_name_candidate(text, fallback=self.identity_name)
+            if not parsed_name:
+                self._write_tako(
+                    "tiny clarification bubble: I couldn't isolate the name. "
+                    "you can type just the name, like `SILLYTAKO`."
+                )
+                return
+
+            self.identity_name = parsed_name
             self.identity_step = 1
-            self._write_tako("cute. and what should my purpose be? one sentence is perfect.")
+            self._write_tako(f"adorable. `{self.identity_name}` it is. and what should my purpose be? one sentence is perfect.")
             return
 
         self.identity_role = text or self.identity_role
@@ -1155,7 +1169,17 @@ class TakoTerminalApp(App[None]):
         self.identity_onboarding_pending = False
         self._add_activity("identity", "interactive identity setup started")
         self._record_event("onboarding.identity.begin", "Identity prompt phase started.", source="onboarding")
-        self._write_tako("next tiny question: what should I be called? (or `skip`)")
+        if self.identity_name.strip() == DEFAULT_SOUL_NAME:
+            self._write_tako(
+                "next tiny question: I'm still on my default name (`Tako`). "
+                "what name would you like me to use? you can type just the name, or say "
+                "`your name can be SILLYTAKO`."
+            )
+            return
+        self._write_tako(
+            f"next tiny question: should I keep `{self.identity_name}`, or do you want a new name? "
+            "you can type just the name or `keep`."
+        )
 
     def _schedule_identity_onboarding_after_awake(self) -> None:
         self.identity_onboarding_pending = True
@@ -1809,6 +1833,66 @@ def _clean_paste_text(value: str) -> str:
     lines = [line.strip() for line in cleaned.split("\n")]
     parts = [line for line in lines if line]
     return " ".join(parts)
+
+
+def _extract_name_candidate(value: str, *, fallback: str) -> str:
+    text = _sanitize_for_display(value).strip()
+    if not text:
+        return ""
+
+    # Quoted text takes precedence, e.g. "call yourself 'SILLYTAKO'".
+    quoted = re.search(r"[\"'`“”]([^\"'`“”]{1,64})[\"'`“”]", text)
+    if quoted:
+        candidate = quoted.group(1)
+    else:
+        candidate = text
+        patterns = [
+            r"\b(?:your|you|ur|u)\s*name\s+(?:can(?:\s+be)?|could(?:\s+be)?|should(?:\s+be)?|is|be|=)\s+(?P<name>.+)$",
+            r"\b(?:call|name)\s+(?:you|it|yourself)?\s*(?P<name>.+)$",
+            r"\b(?:be|is)\s+(?P<name>[A-Za-z0-9][A-Za-z0-9 _\-'`]{0,63})$",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                candidate = match.group("name")
+                break
+
+    candidate = _normalize_name_candidate(candidate)
+    if not candidate:
+        return ""
+
+    lowered = candidate.lower()
+    if lowered in {"you", "it", "me", "myself", "yourself"}:
+        return ""
+
+    if len(candidate) > 48:
+        candidate = candidate[:48].rstrip()
+    return candidate or _sanitize_for_display(fallback).strip()
+
+
+def _normalize_name_candidate(value: str) -> str:
+    text = _sanitize_for_display(value).strip()
+    if not text:
+        return ""
+
+    text = re.sub(r"^[,;:.\-_\s]+|[,;:.\-_\s]+$", "", text)
+    text = re.sub(r"^(?:called|named|name)\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(?:can|could|should)\s+be\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(?:be|is)\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+(?:please|thanks|thank you)$", "", text, flags=re.IGNORECASE)
+
+    split_patterns = [
+        r"\s+(?:and|then)\s+(?:my|the|your)\b",
+        r"\s+(?:because|so|while)\b",
+        r"[,;.!?]",
+    ]
+    for pattern in split_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            text = text[: match.start()]
+            break
+
+    return " ".join(text.strip().split())
 
 
 def _parse_yes_no(value: str) -> bool | None:

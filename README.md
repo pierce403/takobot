@@ -42,6 +42,7 @@ Pairing flow:
   - yes: outbound DM pairing (`.eth` or `0x...`) and assumes the recipient is ready
   - no: continue onboarding locally and allow later pairing from terminal
 - Identity/purpose/routine prompts are delayed until inference has actually run (or can be started manually with `setup`).
+- Identity naming accepts freeform input and extracts a clean name (for example, “your name can be SILLYTAKO”).
 - After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`).
 
 ## Architecture (minimal)

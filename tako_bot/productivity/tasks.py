@@ -66,7 +66,7 @@ def _parse_frontmatter_minimal(lines: list[str]) -> dict[str, Any]:
         if line.lstrip().startswith("#"):
             continue
 
-        if re.match(r"^[A-Za-z0-9_-]+\\s*:", line):
+        if re.match(r"^[A-Za-z0-9_-]+\s*:", line):
             if key and list_acc is not None:
                 data[key] = list(list_acc)
             list_acc = None
@@ -374,5 +374,3 @@ def format_task_line(task: Task, *, today: date | None = None) -> str:
     proj = f" project={task.project}" if task.project else ""
     area = f" area={task.area}" if task.area else ""
     return f"{task.id} [{task.status}] {task.title}{due}{proj}{area}"
-
-

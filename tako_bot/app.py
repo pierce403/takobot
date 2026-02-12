@@ -97,7 +97,6 @@ class TakoTerminalApp(App[None]):
     }
 
     #status-bar {
-        dock: top;
         height: 1;
         padding: 0 1;
         background: $boost;
@@ -135,16 +134,23 @@ class TakoTerminalApp(App[None]):
     }
 
     #input-box {
-        dock: bottom;
         margin: 0;
+        border: solid $border-blurred;
+    }
+
+    #input-box:focus {
+        border: solid $border;
     }
 
     #stream-box {
-        dock: bottom;
         height: 7;
         border: solid $secondary;
         margin: 1 0 0 0;
         padding: 0 1;
+    }
+
+    Footer {
+        dock: none;
     }
     """
 

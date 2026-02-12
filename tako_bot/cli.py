@@ -6,6 +6,7 @@ import contextlib
 from collections import deque
 from dataclasses import dataclass
 import random
+import re
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -26,6 +27,12 @@ from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
 from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
+from .productivity import open_loops as prod_open_loops
+from .productivity import outcomes as prod_outcomes
+from .productivity import promote as prod_promote
+from .productivity import summarize as prod_summarize
+from .productivity import tasks as prod_tasks
+from .productivity import weekly_review as prod_weekly
 
 
 DEFAULT_ENV = "production"
@@ -540,6 +547,219 @@ async def _handle_incoming_message(
             report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
         await convo.send(report)
         return
+    if cmd == "task":
+        spec = rest.strip()
+        if not spec:
+            await convo.send("Usage: `task <title>` (optional: `| project=... | area=... | due=YYYY-MM-DD`)")
+            return
+        parts = [part.strip() for part in spec.split("|") if part.strip()]
+        title = parts[0]
+        project = None
+        area = None
+        due_value = None
+        tags: list[str] = []
+        energy = None
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if key == "project":
+                project = value or None
+            elif key == "area":
+                area = value or None
+            elif key == "due":
+                due_value = value or None
+            elif key == "tags":
+                tags = [item.strip() for item in value.split(",") if item.strip()]
+            elif key == "energy":
+                energy = value or None
+        due = None
+        if due_value:
+            try:
+                due = datetime.strptime(due_value, "%Y-%m-%d").date()
+            except Exception:
+                await convo.send("`due` must be YYYY-MM-DD.")
+                return
+        try:
+            task = prod_tasks.create_task(
+                repo_root(),
+                title=title,
+                project=project,
+                area=area,
+                due=due,
+                tags=tags,
+                energy=energy,
+            )
+        except Exception as exc:  # noqa: BLE001
+            await convo.send(f"task create failed: {_summarize_stream_error(exc)}")
+            return
+        append_daily_note(daily_root(), date.today(), f"Created task {task.id}: {task.title}")
+        _refresh_open_loops_index(paths, operator_paired=True, inference_ready=inference_runtime.ready)
+        await convo.send(f"task created: {task.id}\n{task.title}")
+        return
+    if cmd == "tasks":
+        raw = rest.strip()
+        root = repo_root()
+        all_tasks = prod_tasks.list_tasks(root)
+        status = "open"
+        project = None
+        area = None
+        due_before = None
+        if raw.lower() in {"all", "everything"}:
+            status = None
+        elif raw.lower().startswith("project "):
+            project = raw[8:].strip() or None
+        elif raw.lower().startswith("area "):
+            area = raw[5:].strip() or None
+        elif raw.lower().startswith("due "):
+            due_raw = raw[4:].strip()
+            try:
+                due_before = datetime.strptime(due_raw, "%Y-%m-%d").date()
+            except Exception:
+                await convo.send("Usage: `tasks due YYYY-MM-DD`")
+                return
+        filtered = prod_tasks.filter_tasks(all_tasks, status=status, project=project, area=area, due_on_or_before=due_before)
+        open_count = sum(1 for t in all_tasks if t.is_open)
+        done_count = sum(1 for t in all_tasks if t.is_done)
+        lines = [f"tasks: open={open_count} done={done_count}"]
+        if project:
+            lines.append(f"filter project={project}")
+        if area:
+            lines.append(f"filter area={area}")
+        if due_before:
+            lines.append(f"filter due<= {due_before.isoformat()}")
+        if not filtered:
+            lines.append("(none)")
+            await convo.send("\n".join(lines))
+            return
+        lines.append("")
+        for task in filtered[:25]:
+            lines.append("- " + prod_tasks.format_task_line(task))
+        if len(filtered) > 25:
+            lines.append(f"... and {len(filtered) - 25} more")
+        await convo.send("\n".join(lines))
+        return
+    if cmd == "done":
+        task_id = rest.strip()
+        if not task_id:
+            await convo.send("Usage: `done <task-id>`")
+            return
+        task = prod_tasks.mark_done(repo_root(), task_id)
+        if task is None:
+            await convo.send(f"unknown task id: {task_id}")
+            return
+        append_daily_note(daily_root(), date.today(), f"Completed task {task.id}: {task.title}")
+        _refresh_open_loops_index(paths, operator_paired=True, inference_ready=inference_runtime.ready)
+        await convo.send(f"done: {task.id} ({task.title})")
+        return
+    if cmd in {"morning", "outcomes"}:
+        daily_path = ensure_daily_log(daily_root(), date.today())
+        prod_outcomes.ensure_outcomes_section(daily_path)
+        action = rest.strip()
+        if cmd == "morning":
+            if not action:
+                await convo.send("Usage: `morning outcome1 ; outcome2 ; outcome3`")
+                return
+            values = [part.strip() for part in re.split(r"[;\n]+", action) if part.strip()]
+            prod_outcomes.set_outcomes(daily_path, values)
+            append_daily_note(daily_root(), date.today(), "Set 3 outcomes for today via XMTP `morning`.")
+            _refresh_open_loops_index(paths, operator_paired=True, inference_ready=inference_runtime.ready)
+            await convo.send("outcomes set. use `outcomes` to view, `outcomes done 1` to mark complete.")
+            return
+
+        lowered = action.lower()
+        if lowered.startswith("set "):
+            values = [part.strip() for part in re.split(r"[;\n]+", action[4:]) if part.strip()]
+            if not values:
+                await convo.send("Usage: `outcomes set a ; b ; c`")
+                return
+            prod_outcomes.set_outcomes(daily_path, values)
+            append_daily_note(daily_root(), date.today(), "Set 3 outcomes for today via XMTP `outcomes set`.")
+            _refresh_open_loops_index(paths, operator_paired=True, inference_ready=inference_runtime.ready)
+            await convo.send("outcomes set.")
+            return
+        if lowered.startswith("done ") or lowered.startswith("undo "):
+            verb, _, tail = lowered.partition(" ")
+            try:
+                idx = int(tail.strip())
+            except Exception:
+                await convo.send("Usage: `outcomes done 1` (or `outcomes undo 1`)")
+                return
+            updated = prod_outcomes.mark_outcome(daily_path, idx, done=(verb == "done"))
+            done_count, total = prod_outcomes.outcomes_completion(updated)
+            append_daily_note(daily_root(), date.today(), f"Outcome {idx} marked {verb} via XMTP ({done_count}/{total}).")
+            _refresh_open_loops_index(paths, operator_paired=True, inference_ready=inference_runtime.ready)
+            await convo.send(f"outcomes: {done_count}/{total} done")
+            return
+
+        outcomes = prod_outcomes.get_outcomes(daily_path)
+        done_count, total = prod_outcomes.outcomes_completion(outcomes)
+        lines = [f"outcomes ({done_count}/{total} done):"]
+        for idx, item in enumerate(outcomes, start=1):
+            if not item.text.strip():
+                continue
+            box = "x" if item.done else " "
+            lines.append(f"- {idx}. [{box}] {item.text}")
+        if len(lines) == 1:
+            lines.append("(none)")
+        await convo.send("\n".join(lines))
+        return
+    if cmd == "compress":
+        day = date.today()
+        daily_path = ensure_daily_log(daily_root(), day)
+        root = repo_root()
+        tasks = prod_tasks.list_tasks(root)
+        prod_outcomes.ensure_outcomes_section(daily_path)
+        outcomes = prod_outcomes.get_outcomes(daily_path)
+
+        infer = None
+        if inference_runtime.ready:
+            def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
+                return run_inference_prompt_with_fallback(inference_runtime, prompt, timeout_s=timeout_s)
+            infer = _infer
+        result = await asyncio.to_thread(
+            prod_summarize.compress_daily_log,
+            daily_path,
+            day=day,
+            tasks=tasks,
+            outcomes=outcomes,
+            infer=infer,
+        )
+        append_daily_note(daily_root(), day, f"Compressed summary updated via XMTP (provider={result.provider}).")
+        await convo.send(f"compressed summary updated (provider={result.provider}).")
+        return
+    if cmd in {"weekly", "review"}:
+        action = rest.strip().lower()
+        if cmd == "review" and action not in {"weekly", "week"}:
+            await convo.send("Usage: `weekly` or `review weekly`")
+            return
+        root = repo_root()
+        today = date.today()
+        review = prod_weekly.build_weekly_review(root, today=today)
+        infer = None
+        if inference_runtime.ready:
+            def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
+                return run_inference_prompt_with_fallback(inference_runtime, prompt, timeout_s=timeout_s)
+            infer = _infer
+        report, provider, _err = prod_weekly.weekly_review_with_inference(review, infer=infer)
+        append_daily_note(daily_root(), today, "Weekly review run via XMTP.")
+        await convo.send(report)
+        return
+    if cmd == "promote":
+        note = rest.strip()
+        if not note:
+            await convo.send("Usage: `promote <durable note>`")
+            return
+        try:
+            prod_promote.promote(repo_root() / "MEMORY.md", day=date.today(), note=note)
+        except Exception as exc:  # noqa: BLE001
+            await convo.send(f"promote failed: {_summarize_stream_error(exc)}")
+            return
+        append_daily_note(daily_root(), date.today(), "Promoted a durable note into MEMORY.md via XMTP.")
+        await convo.send("inked into MEMORY.md.")
+        return
     if cmd == "update":
         action = rest.strip().lower()
         if action in {"help", "?"}:
@@ -767,6 +987,29 @@ async def _heartbeat_loop(args: argparse.Namespace) -> None:
         await asyncio.sleep(interval + random.uniform(-0.2 * interval, 0.2 * interval))
 
 
+def _refresh_open_loops_index(paths, *, operator_paired: bool, inference_ready: bool) -> None:
+    try:
+        root = repo_root()
+        tasks = prod_tasks.list_tasks(root)
+        daily_path = ensure_daily_log(daily_root(), date.today())
+        with contextlib.suppress(Exception):
+            prod_outcomes.ensure_outcomes_section(daily_path)
+        outcomes = []
+        with contextlib.suppress(Exception):
+            outcomes = prod_outcomes.get_outcomes(daily_path)
+        session = {
+            "state": "RUNNING",
+            "operator_paired": operator_paired,
+            "awaiting_xmtp_handle": False,
+            "safe_mode": False,
+            "inference_ready": inference_ready,
+        }
+        loops = prod_open_loops.compute_open_loops(tasks=tasks, outcomes=outcomes, session=session)
+        prod_open_loops.save_open_loops(paths.state_dir / "open_loops.json", loops)
+    except Exception:
+        return
+
+
 def _parse_command(text: str) -> tuple[str, str]:
     value = text.strip()
     if value.lower().startswith("tako "):
@@ -787,6 +1030,14 @@ def _help_text() -> str:
         "- help\n"
         "- status\n"
         "- doctor\n"
+        "- task <title> (optional: | project=... | area=... | due=YYYY-MM-DD)\n"
+        "- tasks (or `tasks project <name>` / `tasks area <name>` / `tasks due YYYY-MM-DD`)\n"
+        "- done <task-id>\n"
+        "- outcomes (or `outcomes set a ; b ; c`, `outcomes done 1`, `outcomes undo 1`)\n"
+        "- morning a ; b ; c\n"
+        "- compress\n"
+        "- weekly (or `review weekly`)\n"
+        "- promote <durable note>\n"
         "- update (or `update check`)\n"
         "- web <https://...>\n"
         "- run <shell command>\n"
@@ -807,6 +1058,24 @@ def _looks_like_command(text: str) -> bool:
     tail_lower = tail.lower()
     if cmd in {"help", "h", "?", "status", "doctor"}:
         return tail == ""
+    if cmd == "task":
+        return True
+    if cmd == "tasks":
+        return True
+    if cmd == "done":
+        return tail != ""
+    if cmd == "outcomes":
+        return True
+    if cmd == "morning":
+        return True
+    if cmd == "compress":
+        return tail_lower in {"", "today"}
+    if cmd == "weekly":
+        return tail == ""
+    if cmd == "review":
+        return tail_lower in {"weekly", "week"}
+    if cmd == "promote":
+        return True
     if cmd == "update":
         return tail_lower in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
     if cmd in {"web", "run"}:

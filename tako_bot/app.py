@@ -48,6 +48,12 @@ from .self_update import run_self_update
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, hint_for_xmtp_error
+from .productivity import open_loops as prod_open_loops
+from .productivity import outcomes as prod_outcomes
+from .productivity import promote as prod_promote
+from .productivity import summarize as prod_summarize
+from .productivity import tasks as prod_tasks
+from .productivity import weekly_review as prod_weekly
 
 
 HEARTBEAT_JITTER = 0.2
@@ -241,6 +247,15 @@ class TakoTerminalApp(App[None]):
         self.dose_label = "unknown"
         self.dose_last_emitted_label = "unknown"
 
+        self.open_loops_path: Path | None = None
+        self.open_loops_summary: dict[str, Any] = {"count": 0, "oldest_age_s": 0.0, "top": []}
+        self.open_tasks_count = 0
+        self.signal_loops: deque[prod_open_loops.OpenLoop] = deque(maxlen=25)
+
+        self.prompt_mode: str | None = None
+        self.prompt_step = 0
+        self.prompt_values: list[str] = []
+
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
         self.stream_provider = "none"
@@ -426,6 +441,9 @@ class TakoTerminalApp(App[None]):
             ensure_daily_log(daily_root(), date.today())
             append_daily_note(daily_root(), date.today(), "Interactive terminal app session started.")
 
+            self.open_loops_path = self.paths.state_dir / "open_loops.json"
+            self._refresh_open_loops(save=True)
+
             self.identity_name, self.identity_role = read_identity()
             self.instance_kind = (
                 "established"
@@ -459,6 +477,8 @@ class TakoTerminalApp(App[None]):
                 await self._start_xmtp_runtime()
                 self._set_state(SessionState.RUNNING)
                 self._write_tako("terminal is now your local cockpit. chat works here too. type `help`.")
+                if self._today_outcomes_blank():
+                    self._write_tako("tiny morning bubble: type `morning` to set 3 outcomes that make today a win.")
                 return
 
             self.operator_paired = False
@@ -470,6 +490,8 @@ class TakoTerminalApp(App[None]):
                 "do you have an XMTP handle? (yes/no)\n"
                 "we'll do identity/goals after inference currents are awake."
             )
+            if self._today_outcomes_blank():
+                self._write_tako("also: type `morning` any time to set 3 outcomes for today.")
         except Exception as exc:  # noqa: BLE001
             self._error_card(
                 "startup blocked",
@@ -482,6 +504,15 @@ class TakoTerminalApp(App[None]):
             self.input_box.disabled = True
         finally:
             self._set_indicator("idle")
+
+    def _today_outcomes_blank(self) -> bool:
+        try:
+            daily_path = ensure_daily_log(daily_root(), date.today())
+            prod_outcomes.ensure_outcomes_section(daily_path)
+            outcomes = prod_outcomes.get_outcomes(daily_path)
+            return not any(item.text.strip() for item in outcomes)
+        except Exception:
+            return False
 
     async def _initialize_reasoning_runtime(self) -> None:
         if self.paths is None:
@@ -701,12 +732,50 @@ class TakoTerminalApp(App[None]):
             except Exception as exc:  # noqa: BLE001
                 self._write_system(f"dose update warning: {_summarize_error(exc)}")
 
+        self._maybe_capture_signal_loop(event)
+
         if self.event_log_path is None:
             self.pending_events.append(event)
         else:
             self._append_event_to_log(event)
 
         self._enqueue_type1_event(event)
+
+    def _maybe_capture_signal_loop(self, event: dict[str, Any]) -> None:
+        severity = str(event.get("severity", "info")).lower()
+        if severity not in {"warn", "error", "critical"}:
+            return
+        source = str(event.get("source", "")).lower()
+        if source in {"type1", "type2", "dose"}:
+            return
+        event_type = str(event.get("type", "")).lower()
+        if event_type.startswith(("heartbeat.", "inference.chat.", "xmtp.inbound.message", "productivity.")):
+            return
+
+        capture_prefixes = (
+            "health.check.issue",
+            "runtime.",
+            "pairing.outbound.send_failed",
+            "pairing.outbound.resolve_failed",
+            "inference.runtime.error",
+            "inference.error",
+            "ui.error_card",
+        )
+        if not event_type.startswith(capture_prefixes):
+            return
+
+        title = f"{event.get('type', 'signal')}: {event.get('message', '')}"
+        now = time.time()
+        self.signal_loops.appendleft(
+            prod_open_loops.OpenLoop(
+                id=f"signal:{event.get('id', '')}",
+                kind="signal",
+                title=_summarize_text(_sanitize_for_display(str(title))),
+                created_ts=now,
+                updated_ts=now,
+                source=source or "system",
+            )
+        )
 
     async def _flush_pending_events(self) -> None:
         if self.event_log_path is None or not self.pending_events:
@@ -936,6 +1005,10 @@ class TakoTerminalApp(App[None]):
             self._write_tako("still booting. give me a moment.")
             return
 
+        if self.prompt_mode is not None:
+            await self._handle_prompt_input(text)
+            return
+
         self._maybe_open_inference_gate_for_turn(text)
 
         if self.state == SessionState.ONBOARDING_IDENTITY:
@@ -956,6 +1029,63 @@ class TakoTerminalApp(App[None]):
 
         await self._handle_running_input(text)
         await self._maybe_start_delayed_identity_onboarding()
+
+    async def _handle_prompt_input(self, text: str) -> None:
+        mode = self.prompt_mode
+        if mode == "morning_outcomes":
+            lowered = text.strip().lower()
+            if lowered in {"skip", "later", "cancel", "stop"}:
+                self.prompt_mode = None
+                self.prompt_step = 0
+                self.prompt_values = []
+                self._write_tako("okie. whenever you're ready: type `morning` to set today's 3 outcomes.")
+                self._refresh_open_loops(save=True)
+                return
+
+            # Allow sending multiple outcomes in one message.
+            parts = [part.strip() for part in re.split(r"[;\n]+", text) if part.strip()]
+            if not parts:
+                self._write_tako("tiny bubble: send an outcome (or `skip`).")
+                return
+            self.prompt_values.extend(parts)
+            self.prompt_values = self.prompt_values[:3]
+            self.prompt_step = len(self.prompt_values)
+
+            if self.paths is None:
+                self._write_tako("can't write outcomes yet: runtime paths missing.")
+                return
+
+            if self.prompt_step >= 3:
+                daily_path = ensure_daily_log(daily_root(), date.today())
+                prod_outcomes.set_outcomes(daily_path, self.prompt_values)
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    "Set 3 outcomes for today via `morning`.",
+                )
+                self._record_event(
+                    "outcomes.set",
+                    "Daily outcomes set.",
+                    source="terminal",
+                    metadata={"count": 3},
+                )
+                self._add_activity("outcomes", "set 3 outcomes")
+                self._write_tako("splashy. outcomes set. you can check them with `outcomes` and mark done with `outcomes done 1`.")
+                self.prompt_mode = None
+                self.prompt_step = 0
+                self.prompt_values = []
+                self._refresh_open_loops(save=True)
+                return
+
+            next_idx = self.prompt_step + 1
+            self._write_tako(f"cute. outcome {next_idx}? (or send multiple separated by `;`)")
+            self._refresh_open_loops(save=True)
+            return
+
+        # Unknown prompt mode: clear it defensively.
+        self.prompt_mode = None
+        self.prompt_step = 0
+        self.prompt_values = []
 
     async def _handle_identity_onboarding(self, text: str) -> None:
         lowered = text.strip().lower()
@@ -1454,6 +1584,7 @@ class TakoTerminalApp(App[None]):
                             dose.save(self.dose_path, self.dose)
                         except Exception as exc:  # noqa: BLE001
                             self._write_system(f"dose save warning: {_summarize_error(exc)}")
+                self._refresh_open_loops(save=True)
             await asyncio.sleep(
                 self.interval
                 + random.uniform(-HEARTBEAT_JITTER * self.interval, HEARTBEAT_JITTER * self.interval)
@@ -1490,7 +1621,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, dose, inference, doctor, pair, setup, update, web, run, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1573,6 +1704,321 @@ class TakoTerminalApp(App[None]):
                 f"label={self.dose_label}\n"
                 f"bias: verbosity={bias['verbosity']:.2f} confirm={bias['confirm_level']:.2f} explore={bias['explore_bias']:.2f} patience={bias['patience']:.2f}"
             )
+            return
+
+        if cmd == "task":
+            spec = rest.strip()
+            if not spec:
+                self._write_tako("usage: `task <title>` (optionally: `| project=... | area=... | due=YYYY-MM-DD`)")
+                return
+            parts = [part.strip() for part in spec.split("|") if part.strip()]
+            title = parts[0]
+            project = None
+            area = None
+            due_value = None
+            tags: list[str] = []
+            energy = None
+            for part in parts[1:]:
+                if "=" not in part:
+                    continue
+                key, value = part.split("=", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                if key == "project":
+                    project = value or None
+                elif key == "area":
+                    area = value or None
+                elif key == "due":
+                    due_value = value or None
+                elif key == "tags":
+                    tags = [item.strip() for item in value.split(",") if item.strip()]
+                elif key == "energy":
+                    energy = value or None
+
+            due = None
+            if due_value:
+                try:
+                    due = datetime.strptime(due_value, "%Y-%m-%d").date()
+                except Exception:
+                    self._write_tako("tiny bubble: `due` must be YYYY-MM-DD.")
+                    return
+
+            try:
+                task = prod_tasks.create_task(
+                    repo_root(),
+                    title=title,
+                    project=project,
+                    area=area,
+                    due=due,
+                    tags=tags,
+                    energy=energy,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._write_tako(f"task create failed: {_summarize_error(exc)}")
+                return
+
+            append_daily_note(daily_root(), date.today(), f"Created task {task.id}: {task.title}")
+            self._record_event(
+                "productivity.task.created",
+                f"Task created: {task.id}",
+                source="terminal",
+                metadata={"id": task.id, "title": task.title, "project": project or "", "area": area or ""},
+            )
+            self._add_activity("tasks", f"created {task.id}")
+            self._refresh_open_loops(save=True)
+            self._write_tako(f"task created: {task.id}\n{task.title}\nfile: {task.path.relative_to(repo_root())}")
+            return
+
+        if cmd == "tasks":
+            raw = rest.strip()
+            root = repo_root()
+            all_tasks = prod_tasks.list_tasks(root)
+            status = "open"
+            project = None
+            area = None
+            due_before = None
+            if raw.lower() in {"all", "everything"}:
+                status = None
+            elif raw.lower().startswith("project "):
+                project = raw[8:].strip() or None
+            elif raw.lower().startswith("area "):
+                area = raw[5:].strip() or None
+            elif raw.lower().startswith("due "):
+                due_raw = raw[4:].strip()
+                try:
+                    due_before = datetime.strptime(due_raw, "%Y-%m-%d").date()
+                except Exception:
+                    self._write_tako("usage: `tasks due YYYY-MM-DD`")
+                    return
+            elif raw:
+                # Support `tasks project=... | area=... | due=...`
+                parts = [part.strip() for part in raw.split("|") if part.strip()]
+                for part in parts:
+                    if "=" not in part:
+                        continue
+                    key, value = part.split("=", 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    if key == "project":
+                        project = value or None
+                    elif key == "area":
+                        area = value or None
+                    elif key == "due":
+                        try:
+                            due_before = datetime.strptime(value, "%Y-%m-%d").date()
+                        except Exception:
+                            self._write_tako("tiny bubble: `due` must be YYYY-MM-DD.")
+                            return
+                    elif key == "status":
+                        status = value.strip().lower() or status
+
+            filtered = prod_tasks.filter_tasks(all_tasks, status=status, project=project, area=area, due_on_or_before=due_before)
+            open_count = sum(1 for task in all_tasks if task.is_open)
+            done_count = sum(1 for task in all_tasks if task.is_done)
+            lines = [f"tasks: open={open_count} done={done_count}"]
+            if project:
+                lines.append(f"filter project={project}")
+            if area:
+                lines.append(f"filter area={area}")
+            if due_before:
+                lines.append(f"filter due<= {due_before.isoformat()}")
+            if not filtered:
+                lines.append("(none)")
+                self._write_tako("\n".join(lines))
+                return
+            lines.append("")
+            for task in filtered[:25]:
+                lines.append("- " + prod_tasks.format_task_line(task))
+            if len(filtered) > 25:
+                lines.append(f"... and {len(filtered) - 25} more")
+
+            # DOSE-biased focus hint (light touch).
+            if self.dose is not None:
+                hint = _dose_productivity_hint(self.dose)
+                if hint:
+                    lines.append("")
+                    lines.append("dose hint: " + hint)
+
+            self._write_tako("\n".join(lines))
+            return
+
+        if cmd == "done":
+            task_id = rest.strip()
+            if not task_id:
+                self._write_tako("usage: `done <task-id>`")
+                return
+            task = prod_tasks.mark_done(repo_root(), task_id)
+            if task is None:
+                self._write_tako(f"unknown task id: {task_id}")
+                return
+            append_daily_note(daily_root(), date.today(), f"Completed task {task.id}: {task.title}")
+            self._record_event(
+                "productivity.task.done",
+                f"Task completed: {task.id}",
+                source="terminal",
+                metadata={"id": task.id, "title": task.title},
+            )
+            self._add_activity("tasks", f"done {task.id}")
+            self._refresh_open_loops(save=True)
+            self._write_tako(f"done: {task.id} ({task.title})")
+            return
+
+        if cmd == "morning":
+            self.prompt_mode = "morning_outcomes"
+            self.prompt_step = 0
+            self.prompt_values = []
+            self._add_activity("outcomes", "morning prompt started")
+            self._write_tako("morning tide! what are the 3 outcomes that make today a win?\noutcome 1? (or `skip`)")
+            self._refresh_open_loops(save=True)
+            return
+
+        if cmd == "outcomes":
+            action = rest.strip().lower()
+            daily_path = ensure_daily_log(daily_root(), date.today())
+            prod_outcomes.ensure_outcomes_section(daily_path)
+            if action in {"set", "morning"}:
+                self.prompt_mode = "morning_outcomes"
+                self.prompt_step = 0
+                self.prompt_values = []
+                self._add_activity("outcomes", "prompt started via outcomes set")
+                self._write_tako("okie. outcome 1? (or `skip`)")
+                return
+            if action.startswith("done ") or action.startswith("undo "):
+                verb, _, tail = action.partition(" ")
+                try:
+                    idx = int(tail.strip())
+                except Exception:
+                    self._write_tako("usage: `outcomes done 1` (or `outcomes undo 1`)")
+                    return
+                try:
+                    updated = prod_outcomes.mark_outcome(daily_path, idx, done=(verb == "done"))
+                except Exception as exc:  # noqa: BLE001
+                    self._write_tako(f"outcomes update failed: {_summarize_error(exc)}")
+                    return
+                done_count, total = prod_outcomes.outcomes_completion(updated)
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"Outcome {idx} marked {'done' if verb == 'done' else 'not done'} ({done_count}/{total}).",
+                )
+                event_type = "outcome.completed" if verb == "done" else "outcome.reopened"
+                self._record_event(
+                    event_type,
+                    f"Outcome {idx} marked {verb}.",
+                    source="terminal",
+                    metadata={"index": idx},
+                )
+                self._add_activity("outcomes", f"{verb} {idx}")
+                self._refresh_open_loops(save=True)
+                self._write_tako(f"outcomes: {done_count}/{total} done")
+                return
+
+            outcomes = prod_outcomes.get_outcomes(daily_path)
+            done_count, total = prod_outcomes.outcomes_completion(outcomes)
+            lines = [f"outcomes ({done_count}/{total} done):"]
+            if not outcomes:
+                lines.append("(none)")
+                self._write_tako("\n".join(lines))
+                return
+            for idx, item in enumerate(outcomes, start=1):
+                if not item.text.strip():
+                    continue
+                box = "x" if item.done else " "
+                lines.append(f"- {idx}. [{box}] {item.text}")
+            lines.append("")
+            lines.append("commands: `morning` to set, `outcomes done 1`, `outcomes undo 1`")
+            self._write_tako("\n".join(lines))
+            return
+
+        if cmd == "compress":
+            if self.paths is None:
+                self._write_tako("compress unavailable: runtime paths missing.")
+                return
+            day = date.today()
+            daily_path = ensure_daily_log(daily_root(), day)
+            root = repo_root()
+            tasks = prod_tasks.list_tasks(root)
+            prod_outcomes.ensure_outcomes_section(daily_path)
+            outcomes = prod_outcomes.get_outcomes(daily_path)
+
+            infer = None
+            if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
+                def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
+                    return run_inference_prompt_with_fallback(self.inference_runtime, prompt, timeout_s=timeout_s)
+                infer = _infer
+
+            self._add_activity("inference", "compress daily log (Type2)")
+            previous_indicator = self.indicator
+            self._set_indicator("acting")
+            try:
+                result = await asyncio.to_thread(
+                    prod_summarize.compress_daily_log,
+                    daily_path,
+                    day=day,
+                    tasks=tasks,
+                    outcomes=outcomes,
+                    infer=infer,
+                )
+            finally:
+                if self.indicator == "acting":
+                    self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
+
+            append_daily_note(daily_root(), day, f"Compressed summary updated (provider={result.provider}).")
+            self._record_event(
+                "daily.compress.completed",
+                "Daily log compressed summary updated.",
+                source="terminal",
+                metadata={"provider": result.provider},
+            )
+            self._add_activity("daily", f"compressed summary ({result.provider})")
+            self._write_tako(f"compressed summary updated (provider={result.provider}).")
+            return
+
+        if cmd in {"weekly", "review"}:
+            action = rest.strip().lower()
+            if cmd == "review" and action not in {"weekly", "week"}:
+                self._write_tako("usage: `weekly` or `review weekly`")
+                return
+            root = repo_root()
+            today = date.today()
+            review = prod_weekly.build_weekly_review(root, today=today)
+
+            infer = None
+            if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
+                def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
+                    return run_inference_prompt_with_fallback(self.inference_runtime, prompt, timeout_s=timeout_s)
+                infer = _infer
+            report, provider, err = prod_weekly.weekly_review_with_inference(review, infer=infer)
+
+            append_daily_note(daily_root(), today, "Weekly review run.")
+            self._record_event(
+                "review.weekly.completed",
+                "Weekly review completed.",
+                source="terminal",
+                metadata={"provider": provider, "error": err},
+            )
+            self._add_activity("review", f"weekly ({provider})")
+            self._write_tako(report)
+            return
+
+        if cmd == "promote":
+            note = rest.strip()
+            if not note:
+                self._write_tako("usage: `promote <durable note to add to MEMORY.md>`")
+                return
+            try:
+                prod_promote.promote(repo_root() / "MEMORY.md", day=date.today(), note=note)
+            except Exception as exc:  # noqa: BLE001
+                self._write_tako(f"promote failed: {_summarize_error(exc)}")
+                return
+            append_daily_note(daily_root(), date.today(), "Promoted a durable note into MEMORY.md.")
+            self._record_event(
+                "memory.promote",
+                "Operator promoted a note into MEMORY.md.",
+                source="terminal",
+            )
+            self._add_activity("memory", "promotion added")
+            self._write_tako("inked into MEMORY.md.")
             return
 
         if cmd == "inference":
@@ -2045,6 +2491,36 @@ class TakoTerminalApp(App[None]):
         )
         self._refresh_panels()
 
+    def _refresh_open_loops(self, *, save: bool) -> None:
+        if self.paths is None:
+            return
+
+        root = repo_root()
+        tasks = prod_tasks.list_tasks(root)
+        self.open_tasks_count = sum(1 for task in tasks if task.is_open)
+
+        daily_path = ensure_daily_log(daily_root(), date.today())
+        with contextlib.suppress(Exception):
+            prod_outcomes.ensure_outcomes_section(daily_path)
+        outcomes = []
+        with contextlib.suppress(Exception):
+            outcomes = prod_outcomes.get_outcomes(daily_path)
+
+        session = {
+            "state": self.state.value,
+            "operator_paired": self.operator_paired,
+            "awaiting_xmtp_handle": self.awaiting_xmtp_handle,
+            "safe_mode": self.safe_mode,
+            "inference_ready": bool(self.inference_runtime is not None and self.inference_runtime.ready),
+        }
+        loops = prod_open_loops.compute_open_loops(tasks=tasks, outcomes=outcomes, session=session)
+        loops.extend(list(self.signal_loops))
+        self.open_loops_summary = prod_open_loops.summarize_open_loops(loops)
+
+        if save and self.open_loops_path is not None:
+            with contextlib.suppress(Exception):
+                prod_open_loops.save_open_loops(self.open_loops_path, loops)
+
     def _refresh_panels(self) -> None:
         pair_next = "establish XMTP pairing" if not self.operator_paired else "process operator commands via XMTP"
         heartbeat_age = (
@@ -2052,6 +2528,9 @@ class TakoTerminalApp(App[None]):
             if self.last_heartbeat_at is not None
             else "n/a"
         )
+        loops_count = int(self.open_loops_summary.get("count") or 0)
+        loops_age_s = float(self.open_loops_summary.get("oldest_age_s") or 0.0)
+        loops_age = f"{int(loops_age_s // 3600)}h" if loops_age_s >= 3600 else f"{int(loops_age_s)}s"
         tasks = (
             "Tasks\n"
             f"- state: {self.state.value}\n"
@@ -2060,6 +2539,8 @@ class TakoTerminalApp(App[None]):
             f"- runtime: {self.runtime_mode}\n"
             f"- safe mode: {'on' if self.safe_mode else 'off'}\n"
             f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
+            f"- open tasks: {self.open_tasks_count}\n"
+            f"- open loops: {loops_count} (oldest {loops_age})\n"
             f"- heartbeat ticks: {self.heartbeat_ticks}\n"
             f"- last heartbeat: {heartbeat_age}"
         )
@@ -2234,6 +2715,24 @@ def _looks_like_local_command(text: str) -> bool:
         return tail == ""
     if cmd == "dose":
         return tail in {"", "show", "status", "calm", "explore", "help", "?"}
+    if cmd == "morning":
+        return tail == ""
+    if cmd == "task":
+        return True
+    if cmd == "tasks":
+        return True
+    if cmd == "done":
+        return tail != ""
+    if cmd == "outcomes":
+        return True
+    if cmd == "compress":
+        return tail in {"", "today"}
+    if cmd == "weekly":
+        return tail == ""
+    if cmd == "review":
+        return tail in {"weekly", "week"}
+    if cmd == "promote":
+        return True
     if cmd == "inference":
         return tail in {"", "refresh", "rescan", "scan", "reload"}
     if cmd == "update":
@@ -2394,6 +2893,21 @@ def _activity_text(entries: list[str]) -> str:
     for entry in entries[:10]:
         lines.append(f"- {entry}")
     return "\n".join(lines)
+
+
+def _dose_productivity_hint(state: dose.DoseState) -> str:
+    # Light-touch hint for operator planning. This should never override policy or force actions.
+    if state.label() == "stressed":
+        return "stressed tide: reduce churn, pick 1 tiny next action, and consider a summary pass (`compress`)."
+    if state.e < 0.42:
+        return "low E: keep tasks small, prefer quick wins + summaries over big context switches."
+    if state.s >= 0.78:
+        return "high S: great for cleanup, maintenance, and finishing open loops."
+    if state.d >= 0.78:
+        return "high D: good time for exploration, drafting, and new threads."
+    if state.o >= 0.78:
+        return "high O: good time for check-ins, alignment, and writing down intent."
+    return ""
 
 
 def _octopus_level(*, heartbeat_ticks: int, type2_escalations: int, operator_paired: bool) -> int:

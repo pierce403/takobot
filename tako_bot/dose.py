@@ -147,6 +147,25 @@ class DoseState:
         elif et.startswith("identity.name.updated") or et.startswith("onboarding.identity.saved"):
             delta_o += 0.02
             delta_s += 0.01
+        elif et.startswith("productivity.task.created"):
+            delta_d += 0.03
+            delta_s += 0.01
+        elif et.startswith("productivity.task.done"):
+            delta_d += 0.06
+            delta_s += 0.04
+            delta_e += 0.04
+        elif et.startswith("outcomes.set"):
+            delta_s += 0.02
+        elif et.startswith("outcome.completed"):
+            delta_d += 0.05
+            delta_s += 0.04
+            delta_e += 0.04
+        elif et.startswith("daily.compress.completed"):
+            delta_s += 0.03
+            delta_e += 0.03
+        elif et.startswith("review.weekly.completed"):
+            delta_s += 0.06
+            delta_e += 0.06
         elif et.startswith("dose.operator.calm"):
             delta_s += 0.08
             delta_e += 0.08
@@ -261,4 +280,3 @@ def load_or_create(path: Path) -> DoseState:
     state = load(path)
     save(path, state)
     return state
-

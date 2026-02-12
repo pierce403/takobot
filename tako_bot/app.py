@@ -2149,49 +2149,45 @@ def _octopus_level(*, heartbeat_ticks: int, type2_escalations: int, operator_pai
 
 def _octopus_panel_text(level: int, frame: int) -> str:
     art = _octopus_art(level, frame)
-    mood = "sleepy" if frame % 12 == 0 else "swim"
-    return f"Octopus\nlevel: {level} | {mood}\n{art}"
+    mood = "zzz" if frame % 12 == 0 else "~"
+    return f"Tako L{level} {mood}\n{art}"
 
 
 def _octopus_art(level: int, frame: int) -> str:
     phase = frame % 4
     blink = frame % 12 == 0
     eyes = "- -" if blink else ("O O" if level >= 4 else "o o")
-    body_band = ".-~~~~-." if level >= 3 else ".-\"\"\"-."
-    cheek_line = "| |  ^^  | |" if level >= 2 else "| |      | |"
-    crown = "    .-^-.-^-." if level >= 4 else ""
+    beak = "><" if level >= 2 else "^"
+
+    band = ".-~~~~-." if level >= 3 else ".-\"\"\"-."
+
+    bubble_offsets = [5, 3, 7, 4]
+    bubble_chars = ["o", "o", ("O" if level >= 4 else "o"), "o"]
+    bubble = " " * bubble_offsets[phase] + bubble_chars[phase]
+    crown = "  ^-^" if level >= 4 else ""
+
+    tentacles = [
+        ("_/~~\\__/~~\\_", "/__/~~\\__/~~\\__\\", "\\__\\__/~~\\__/__/_"),
+        ("_/~~\\_/~~\\__", "/__/~~\\__/~~\\__\\", "\\__\\__/~~\\__/__/_"),
+        ("__/~~\\__/~~\\_", "/__/~~\\_/~~\\__\\", "\\__\\__/~~\\__/__/_"),
+        ("_/~~\\__/~~\\__", "/__/~~\\__/~~\\__\\", "\\__\\__/~~\\__/__/_"),
+    ]
+    t1, t2, t3 = tentacles[phase]
 
     lines = [
-        "      " + body_band,
-        f"    .'  {eyes}  '.",
-        "   /    \\_/    \\",
-        "  |  .-.__.-.  |",
-        "  | /  .--.  \\ |",
-        f"  {cheek_line}",
+        f"{bubble}{crown}".rstrip(),
+        band,
+        f"/  {eyes}  \\",
+        f"|    {beak}    |",
+        r"|  \____/  |",
+        r"\________/",
+        t1,
+        t2,
+        t3,
     ]
-
-    tentacle_pairs = [
-        (r"  \_/\_/\_/\_/\_/", r"  /_/ /_/ /_/ /_/"),
-        (r"   \_/\_/\_/\_/\_/", r"   /_/ /_/ /_/ /_/"),
-        (r"  \_/\_/\_/\_/\_/", r" /_/ /_/ /_/ /_/"),
-        (r" \_/\_/\_/\_/\_/", r"  /_/ /_/ /_/ /_/"),
-    ]
-    t1, t2 = tentacle_pairs[phase]
-    lines.extend([t1, t2])
-
-    if level >= 3:
-        extra_tentacles = [
-            "    /_/       \\_\\",
-            "     /_/     \\_\\",
-            "    /_/       \\_\\",
-            "   /_/         \\_\\",
-        ]
-        lines.append(extra_tentacles[phase])
-    if crown:
-        lines.insert(0, crown)
 
     drift = [0, 1, 2, 1][phase]
-    prefix = " " * drift
+    prefix = " " * (2 + drift)
     return "\n".join(prefix + line for line in lines)
 
 

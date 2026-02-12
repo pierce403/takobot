@@ -71,6 +71,7 @@
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
   - Prompts for XMTP control-channel setup first (ASAP), and delays identity/routine prompts until inference has actually run.
   - Name capture in identity onboarding accepts freeform phrases and uses inference to extract a clean name token (not entire sentence).
+  - In running chat, the operator can rename Tako inline with a natural message (e.g. “call yourself SILLYTAKO”) and the app persists the parsed name into `SOUL.md`.
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
@@ -92,6 +93,7 @@
   - [x] XMTP setup prompt appears first in-chat on unpaired startup.
   - [x] Identity + routine onboarding prompts are delayed until inference is active (or manually triggered).
   - [x] Freeform naming inputs (e.g. “your name can be SILLYTAKO”) persist only the parsed name in `SOUL.md`.
+  - [x] In running chat, “call yourself SILLYTAKO” updates `SOUL.md` without entering a special setup mode.
   - [x] Outbound XMTP pairing can auto-complete without code copyback confirmation.
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
   - [x] Runtime can report Codex/Claude/Gemini CLI+auth discovery status via `inference` command.

@@ -37,6 +37,7 @@ from .inference import (
     run_inference_prompt_with_fallback,
     stream_inference_prompt_with_fallback,
 )
+from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
@@ -888,7 +889,7 @@ class TakoTerminalApp(App[None]):
     async def _handle_identity_onboarding(self, text: str) -> None:
         lowered = text.strip().lower()
         if lowered in {"skip", "later"}:
-            self._write_tako("copy that. we can tune identity/goals later with `setup`.")
+            self._write_tako("copy that. whenever you want, just tell me what to call myself and what my purpose is.")
             self.identity_onboarding_pending = False
             self._set_state(SessionState.RUNNING)
             return
@@ -1367,6 +1368,8 @@ class TakoTerminalApp(App[None]):
 
     async def _handle_running_input(self, text: str) -> None:
         if not _looks_like_local_command(text):
+            if await self._maybe_handle_inline_name_change(text):
+                return
             reply = await self._local_chat_reply(text)
             self._write_tako(reply)
             return
@@ -1732,7 +1735,7 @@ class TakoTerminalApp(App[None]):
             self._add_activity("identity", "name extraction blocked: inference unavailable")
             return ""
 
-        prompt = _build_identity_name_prompt(text=text, current_name=self.identity_name)
+        prompt = build_identity_name_prompt(text=text, current_name=self.identity_name)
         self._add_activity("inference", "identity name extraction requested")
         try:
             provider, output = await asyncio.to_thread(
@@ -1755,7 +1758,7 @@ class TakoTerminalApp(App[None]):
         self.inference_ever_used = True
         self.inference_last_provider = provider
         self.inference_last_error = ""
-        name = _extract_name_from_model_output(output)
+        name = extract_name_from_model_output(_sanitize_for_display(output))
         if name:
             self._add_activity("inference", f"identity name extracted via provider={provider}")
         else:
@@ -1767,6 +1770,41 @@ class TakoTerminalApp(App[None]):
             metadata={"provider": provider, "has_name": _yes_no(bool(name))},
         )
         return name
+
+    async def _maybe_handle_inline_name_change(self, text: str) -> bool:
+        if not looks_like_name_change_request(text):
+            return False
+        if self.paths is None:
+            return False
+        if self.inference_runtime is None or not self.inference_runtime.ready:
+            self._write_tako("I can do that once inference is awake. try again in a moment, little captain.")
+            return True
+
+        previous = self.identity_name
+        parsed_name = await self._infer_identity_name(text)
+        if not parsed_name:
+            self._write_tako("tiny clarification bubble: I couldn't isolate the name. try like: `call yourself SILLYTAKO`.")
+            return True
+        if parsed_name == previous:
+            self._write_tako(f"already swimming under the name `{parsed_name}`.")
+            return True
+
+        self.identity_name = parsed_name
+        self.identity_name, self.identity_role = update_identity(self.identity_name, self.identity_role)
+        append_daily_note(
+            daily_root(),
+            date.today(),
+            f"Identity updated in terminal chat: name {previous} -> {self.identity_name}",
+        )
+        self._record_event(
+            "identity.name.updated",
+            f"Identity name updated from {previous} to {self.identity_name}.",
+            source="terminal",
+            metadata={"old": previous, "new": self.identity_name},
+        )
+        self._add_activity("identity", f"name updated {previous} -> {self.identity_name}")
+        self._write_tako(f"ink dried. I'll go by `{self.identity_name}` now.")
+        return True
 
     def _on_runtime_log(self, level: str, message: str) -> None:
         lowered = message.lower()
@@ -1995,68 +2033,6 @@ def _clean_paste_text(value: str) -> str:
     lines = [line.strip() for line in cleaned.split("\n")]
     parts = [line for line in lines if line]
     return " ".join(parts)
-
-
-def _build_identity_name_prompt(*, text: str, current_name: str) -> str:
-    return (
-        "Extract the intended display name from the user message.\n"
-        "Return exactly one JSON object with one key: {\"name\":\"...\"}\n"
-        "If no clear name is provided, return {\"name\":\"\"}.\n"
-        "Do not include any prose, markdown, or extra keys.\n"
-        "Prefer concise names and ignore unrelated clauses.\n"
-        f"current_name={current_name}\n"
-        f"user_message={text}\n"
-    )
-
-
-def _extract_name_from_model_output(value: str) -> str:
-    raw = _sanitize_for_display(value).strip()
-    if not raw:
-        return ""
-
-    # Accept fenced output while still preferring strict JSON.
-    if raw.startswith("```"):
-        lines = raw.splitlines()
-        if len(lines) >= 3 and lines[-1].strip().startswith("```"):
-            raw = "\n".join(lines[1:-1]).strip()
-
-    candidate = ""
-    parsed_name_found = False
-    if raw.startswith("{") and raw.endswith("}"):
-        try:
-            parsed = json.loads(raw)
-        except Exception:  # noqa: BLE001
-            parsed = None
-        if isinstance(parsed, dict):
-            maybe = parsed.get("name")
-            if isinstance(maybe, str):
-                candidate = maybe
-                parsed_name_found = True
-
-    if not candidate and not parsed_name_found:
-        line = raw.splitlines()[0].strip()
-        lowered = line.lower()
-        prefixes = ["name:", "candidate:", "- name:", "\"name\":"]
-        for prefix in prefixes:
-            if lowered.startswith(prefix):
-                line = line[len(prefix) :].strip()
-                break
-        candidate = line
-
-    candidate = candidate.strip().strip("`\"' ")
-    candidate = candidate.strip(" .,:;!?-_")
-    candidate = " ".join(candidate.split())
-    if not candidate:
-        return ""
-
-    lowered = candidate.lower()
-    blocked = {"none", "null", "n/a", "unknown", "you", "me", "it", "myself", "yourself"}
-    if lowered in blocked:
-        return ""
-
-    if len(candidate) > 48:
-        candidate = candidate[:48].rstrip()
-    return candidate
 
 
 def _parse_yes_no(value: str) -> bool | None:

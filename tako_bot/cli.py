@@ -22,8 +22,10 @@ from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .pairing import clear_pending
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
+from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
+from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
 
 
 DEFAULT_ENV = "production"
@@ -503,6 +505,8 @@ async def _handle_incoming_message(
         return
 
     if not _looks_like_command(text):
+        if await _maybe_handle_operator_identity_update(text, inference_runtime, paths, convo, hooks=hooks):
+            return
         reply = await _chat_reply(
             text,
             inference_runtime,
@@ -603,6 +607,48 @@ async def _handle_incoming_message(
         return
 
     await convo.send("Unknown command. Reply 'help'. For normal chat, send plain text.")
+
+
+async def _maybe_handle_operator_identity_update(
+    text: str,
+    inference_runtime: InferenceRuntime,
+    paths,
+    convo,
+    *,
+    hooks: RuntimeHooks | None,
+) -> bool:
+    if not looks_like_name_change_request(text):
+        return False
+    if not inference_runtime.ready:
+        await convo.send("I can rename myself once inference is awake. (inference is unavailable right now.)")
+        return True
+
+    current_name, current_role = read_identity()
+    prompt = build_identity_name_prompt(text=text, current_name=current_name)
+    try:
+        _, output = await asyncio.to_thread(
+            run_inference_prompt_with_fallback,
+            inference_runtime,
+            prompt,
+            timeout_s=45.0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _emit_runtime_log(f"identity name extraction failed: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
+        await convo.send("little ink blot: I couldn't extract a clean name right now. try again in a moment.")
+        return True
+
+    parsed = extract_name_from_model_output(output)
+    if not parsed:
+        await convo.send("tiny clarification bubble: I couldn't isolate the name. try: `call yourself SILLYTAKO`.")
+        return True
+    if parsed == current_name:
+        await convo.send(f"already swimming under `{parsed}`.")
+        return True
+
+    update_identity(parsed, current_role)
+    append_daily_note(daily_root(), date.today(), f"Operator renamed via XMTP: {current_name} -> {parsed}")
+    await convo.send(f"ink dried. I'll go by `{parsed}` now.")
+    return True
 
 
 def _maybe_print_xmtp_hint(

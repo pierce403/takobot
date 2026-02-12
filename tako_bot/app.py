@@ -2618,6 +2618,12 @@ class TakoTerminalApp(App[None]):
         for step in next_steps:
             self._write_system(f"- {step}")
         severity = "critical" if summary == "startup blocked" else "error"
+        with contextlib.suppress(Exception):
+            append_daily_note(
+                daily_root(),
+                date.today(),
+                f"Error card: {summary}: {_summarize_text(_sanitize_for_display(detail))}",
+            )
         self._record_event(
             "ui.error_card",
             f"{summary}: {_summarize_text(detail)}",

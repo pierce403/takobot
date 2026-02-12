@@ -79,7 +79,7 @@
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Includes an activity panel with inference/tool/runtime trace lines.
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
-  - Shows a top-right ASCII octopus level panel in the sidebar.
+  - Shows an animated top-right ASCII octopus level panel in the sidebar.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.
   - Filters terminal control-sequence noise from input/transcript rendering.

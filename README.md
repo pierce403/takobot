@@ -10,7 +10,7 @@ Tako is a **highly autonomous, operator-imprinted agent** built in **Python** wi
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
-- TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a leveling ASCII octopus panel
+- TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated leveling ASCII octopus panel
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `memory/MEMORY.md`, `ONBOARDING.md`)
 
 ## Docs

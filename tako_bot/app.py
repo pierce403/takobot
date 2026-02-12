@@ -38,7 +38,7 @@ from .inference import (
 )
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
-from .operator import get_operator_inbox_id, imprint_operator, load_operator
+from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
 from .pairing import clear_pending
 from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
@@ -1347,7 +1347,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, inference, doctor, pair, setup, update, web, run, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, inference, doctor, pair, setup, update, web, run, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1422,7 +1422,7 @@ class TakoTerminalApp(App[None]):
 
         if cmd == "pair":
             if self.operator_paired:
-                self._write_tako("already paired. re-imprint is operator-only over XMTP (`reimprint CONFIRM`).")
+                self._write_tako("already paired. if you need to clear the operator channel: `reimprint CONFIRM`.")
                 return
             self._set_state(SessionState.ASK_XMTP_HANDLE)
             self.awaiting_xmtp_handle = True
@@ -1433,13 +1433,41 @@ class TakoTerminalApp(App[None]):
             self._begin_identity_onboarding()
             return
 
+        if cmd == "reimprint":
+            if self.paths is None:
+                self._write_tako("reimprint unavailable: runtime paths missing.")
+                return
+
+            if rest.strip().lower() != "confirm":
+                self._write_tako(
+                    "reimprint is a big ink cloud: it clears the current operator channel.\n\n"
+                    "if you're sure, type: `reimprint CONFIRM`"
+                )
+                return
+
+            clear_operator(self.paths.operator_json)
+            clear_pending(self.paths.state_dir / "pairing.json")
+            append_daily_note(daily_root(), date.today(), "Operator cleared imprint locally (reimprint CONFIRM).")
+            self._record_event(
+                "operator.reimprint.cleared",
+                "Operator imprint cleared from terminal app.",
+                source="terminal",
+            )
+            self._add_activity("operator", "operator imprint cleared via terminal")
+
+            self.operator_paired = False
+            self.operator_inbox_id = None
+            self.operator_address = None
+            await self._stop_xmtp_runtime()
+            self.mode = "local-only"
+            self.runtime_mode = "local"
+            self._write_tako("whoosh. operator imprint cleared. when you're ready, type `pair` to set a new XMTP control channel.")
+            return
+
         if cmd == "update":
             action = rest.strip().lower()
             if action in {"help", "?"}:
                 self._write_tako("usage: `update` (apply fast-forward) or `update check` (check only).")
-                return
-            if self.operator_paired:
-                self._write_tako("paired mode: run `update` over the operator XMTP channel.")
                 return
 
             apply_update = action not in {"check", "status", "dry-run", "dryrun"}
@@ -1978,6 +2006,8 @@ def _looks_like_local_command(text: str) -> bool:
         return tail in {"", "refresh", "rescan", "scan", "reload"}
     if cmd == "update":
         return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
+    if cmd == "reimprint":
+        return True
     if cmd in {"web", "run"}:
         return tail != ""
     if cmd == "copy":

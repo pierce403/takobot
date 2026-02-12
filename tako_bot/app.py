@@ -27,6 +27,7 @@ from textual.widgets import Footer, Input, RichLog, Static, TextArea
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
 from .daily import append_daily_note, ensure_daily_log
+from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, panic_check_runtime_secrets
 from .inference import (
@@ -235,6 +236,11 @@ class TakoTerminalApp(App[None]):
         self.inference_gate_block_noted = False
         self.inference_ever_used = False
 
+        self.dose: dose.DoseState | None = None
+        self.dose_path: Path | None = None
+        self.dose_label = "unknown"
+        self.dose_last_emitted_label = "unknown"
+
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
         self.stream_provider = "none"
@@ -375,6 +381,30 @@ class TakoTerminalApp(App[None]):
         try:
             self.paths = ensure_runtime_dirs(runtime_paths())
             root = repo_root()
+
+            self.dose_path = self.paths.state_dir / "dose.json"
+            try:
+                self.dose = dose.load_or_create(self.dose_path)
+                # Catch up for downtime (capped inside tick).
+                now = time.time()
+                dt = now - float(self.dose.last_updated_ts)
+                if dt > 0.0:
+                    self.dose.tick(now, dt)
+                    dose.save(self.dose_path, self.dose)
+                self.dose_label = self.dose.label()
+                self.dose_last_emitted_label = self.dose_label
+                self._add_activity("dose", f"initialized (label={self.dose_label})")
+                self._record_event(
+                    "dose.started",
+                    "DOSE engine initialized.",
+                    source="dose",
+                    metadata={"path": str(self.dose_path), "label": self.dose_label},
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.dose = dose.default_state()
+                self.dose_label = self.dose.label()
+                self.dose_last_emitted_label = self.dose_label
+                self._write_system(f"dose init warning: {_summarize_error(exc)}")
 
             keys_preexisting = self.paths.keys_json.exists()
             operator_preexisting = self.paths.operator_json.exists()
@@ -657,6 +687,20 @@ class TakoTerminalApp(App[None]):
             "message": safe_message,
             "metadata": metadata or {},
         }
+
+        if self.dose is not None:
+            try:
+                self.dose.apply_event(
+                    str(event.get("type", "")),
+                    str(event.get("severity", "info")),
+                    str(event.get("source", "system")),
+                    str(event.get("message", "")),
+                    event.get("metadata") if isinstance(event.get("metadata"), dict) else {},
+                )
+                self.dose_label = self.dose.label()
+            except Exception as exc:  # noqa: BLE001
+                self._write_system(f"dose update warning: {_summarize_error(exc)}")
+
         if self.event_log_path is None:
             self.pending_events.append(event)
         else:
@@ -849,6 +893,12 @@ class TakoTerminalApp(App[None]):
         event_type = str(event.get("type", "")).lower()
         message = str(event.get("message", "")).lower()
 
+        stability = None
+        if self.dose is not None:
+            stability = (float(self.dose.s) + float(self.dose.e)) / 2.0
+        cautious = stability is not None and stability < 0.45
+        calm = stability is not None and stability > 0.75
+
         if severity in {"critical", "error"}:
             depth = _depth_for_severity(severity)
             return True, depth, f"severity={severity}"
@@ -857,12 +907,27 @@ class TakoTerminalApp(App[None]):
             return True, "deep", "duplicate-instance risk"
 
         if event_type.startswith("health.check.issue"):
-            return True, "medium", "startup health issue"
+            if severity == "warn" and calm:
+                return False, "light", "startup health issue (tolerated)"
+            reason = "startup health issue"
+            if severity == "warn" and cautious:
+                reason += " (cautious)"
+            return True, "medium", reason
 
-        if event_type.startswith("runtime.") and severity == "warn" and (
-            "crash" in message or "unstable" in message or "polling fallback" in message
-        ):
-            return True, "medium", "runtime instability"
+        if event_type.startswith("runtime.") and severity == "warn":
+            if event_type.startswith("runtime.crash") or "crash" in message:
+                return True, "medium", "runtime crash"
+            if "unstable" in message:
+                return True, "medium", "runtime instability"
+            if event_type.startswith("runtime.polling") or "polling fallback" in message or "switching to polling" in message:
+                if calm:
+                    return False, "light", "runtime polling tolerated"
+                return True, "medium", "runtime polling fallback"
+            if cautious and (event_type.startswith("runtime.reconnect") or "reconnecting" in message or "retrying" in message):
+                return True, "light", "runtime reconnect churn (cautious)"
+
+        if event_type.startswith("runtime.polling") and severity == "info" and cautious:
+            return True, "light", "runtime polling (cautious)"
 
         return False, "light", "type1 handled"
 
@@ -1046,10 +1111,18 @@ class TakoTerminalApp(App[None]):
                 raise RuntimeError("DM sent but operator inbox id could not be resolved.")
         except Exception as exc:  # noqa: BLE001
             hint = hint_for_xmtp_error(exc)
-            next_steps = [
-                "Type `retry` to attempt pairing again.",
-                "Type `local-only` to continue without XMTP pairing.",
-            ]
+            stressed = self.dose is not None and self.dose_label == "stressed"
+            if stressed:
+                next_steps = [
+                    "Type `local-only` to keep working without XMTP pairing.",
+                    "Type `retry` to attempt pairing again.",
+                    "If the network feels wobbly: check DNS/egress, then try again later.",
+                ]
+            else:
+                next_steps = [
+                    "Type `retry` to attempt pairing again.",
+                    "Type `local-only` to continue without XMTP pairing.",
+                ]
             if hint:
                 next_steps.append(hint)
             self._error_card("pairing DM failed", str(exc), next_steps)
@@ -1336,6 +1409,14 @@ class TakoTerminalApp(App[None]):
             if not self.safe_mode:
                 ensure_daily_log(daily_root(), date.today())
                 self.heartbeat_ticks += 1
+                now = time.time()
+                if self.dose is not None:
+                    try:
+                        dt = now - float(self.dose.last_updated_ts)
+                        self.dose.tick(now, dt)
+                        self.dose_label = self.dose.label()
+                    except Exception as exc:  # noqa: BLE001
+                        self._write_system(f"dose tick warning: {_summarize_error(exc)}")
                 self.last_heartbeat_at = time.monotonic()
                 self._record_event(
                     "heartbeat.tick",
@@ -1347,6 +1428,32 @@ class TakoTerminalApp(App[None]):
                         "runtime_mode": self.runtime_mode,
                     },
                 )
+                label_changed = self.dose is not None and self.dose_label != self.dose_last_emitted_label
+                if label_changed:
+                    before = self.dose_last_emitted_label
+                    after = self.dose_label
+                    self.dose_last_emitted_label = after
+                    self._add_activity("dose", f"mode {before} -> {after}")
+                    self._record_event(
+                        "dose.mode.changed",
+                        f"DOSE mode changed: {before} -> {after}.",
+                        source="dose",
+                        metadata={"from": before, "to": after},
+                    )
+                    if "stressed" in {before, after}:
+                        append_daily_note(
+                            daily_root(),
+                            date.today(),
+                            f"DOSE mode changed: {before} -> {after}",
+                        )
+
+                if self.dose is not None and self.dose_path is not None:
+                    should_save = label_changed or (self.heartbeat_ticks % 5 == 0)
+                    if should_save:
+                        try:
+                            dose.save(self.dose_path, self.dose)
+                        except Exception as exc:  # noqa: BLE001
+                            self._write_system(f"dose save warning: {_summarize_error(exc)}")
             await asyncio.sleep(
                 self.interval
                 + random.uniform(-HEARTBEAT_JITTER * self.interval, HEARTBEAT_JITTER * self.interval)
@@ -1383,7 +1490,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, inference, doctor, pair, setup, update, web, run, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, dose, inference, doctor, pair, setup, update, web, run, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
             )
             return
 
@@ -1411,6 +1518,7 @@ class TakoTerminalApp(App[None]):
                 f"inference_ready: {('yes' if self.inference_runtime and self.inference_runtime.ready else 'no')}\n"
                 f"inference_gate: {('open' if self.inference_gate_open else 'closed')}\n"
                 f"inference_gate_state: {self.inference_gate_opened_state}\n"
+                f"dose_label: {self.dose_label}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
                 f"tako_address: {self.address}"
@@ -1425,6 +1533,46 @@ class TakoTerminalApp(App[None]):
             for key in sorted(self.health_summary):
                 lines.append(f"{key}: {self.health_summary[key]}")
             self._write_tako("\n".join(lines))
+            return
+
+        if cmd == "dose":
+            action = rest.strip().lower()
+            if self.dose is None:
+                self._write_tako("dose engine isn't awake yet. give me a moment.")
+                return
+            if action in {"help", "?"}:
+                self._write_tako("usage: `dose` (show), `dose calm`, `dose explore`")
+                return
+            if action in {"calm", "explore"}:
+                if self.operator_paired and not self.safe_mode:
+                    self._write_tako(
+                        "dose tuning is operator-only over XMTP when paired. "
+                        "if you need an emergency local nudge, enable safe mode first (`safe on`)."
+                    )
+                    return
+                event_type = "dose.operator.calm" if action == "calm" else "dose.operator.explore"
+                self._record_event(
+                    event_type,
+                    f"Operator requested DOSE `{action}` nudge.",
+                    source="terminal",
+                    metadata={"action": action},
+                )
+                self._add_activity("dose", f"operator nudge: {action}")
+                if self.dose_path is not None:
+                    with contextlib.suppress(Exception):
+                        dose.save(self.dose_path, self.dose)
+                self._write_tako(f"okie! current dose: D={self.dose.d:.2f} O={self.dose.o:.2f} S={self.dose.s:.2f} E={self.dose.e:.2f} ({self.dose_label})")
+                return
+            if action not in {"", "show", "status"}:
+                self._write_tako("usage: `dose` (show), `dose calm`, `dose explore`")
+                return
+            bias = self.dose.behavior_bias()
+            self._write_tako(
+                "dose status:\n"
+                f"D={self.dose.d:.2f} O={self.dose.o:.2f} S={self.dose.s:.2f} E={self.dose.e:.2f}\n"
+                f"label={self.dose_label}\n"
+                f"bias: verbosity={bias['verbosity']:.2f} confirm={bias['confirm_level']:.2f} explore={bias['explore_bias']:.2f} patience={bias['patience']:.2f}"
+            )
             return
 
         if cmd == "inference":
@@ -1893,7 +2041,7 @@ class TakoTerminalApp(App[None]):
         safe = "on" if self.safe_mode else "off"
         self.status_bar.update(
             f"state={self.state.value} | mode={self.mode} | runtime={self.runtime_mode} | "
-            f"indicator={self.indicator} | safe={safe} | uptime={uptime_s}s"
+            f"dose={self.dose_label} | indicator={self.indicator} | safe={safe} | uptime={uptime_s}s"
         )
         self._refresh_panels()
 
@@ -1939,12 +2087,20 @@ class TakoTerminalApp(App[None]):
         inference_provider = self.inference_runtime.selected_provider if self.inference_runtime else "none"
         inference_ready = "yes" if self.inference_runtime and self.inference_runtime.ready else "no"
         inference_source = self.inference_runtime.selected_key_source if self.inference_runtime else None
+        if self.dose is None:
+            dose_line = "- dose: not ready"
+        else:
+            dose_line = (
+                f"- dose: D={self.dose.d:.2f} O={self.dose.o:.2f} S={self.dose.s:.2f} "
+                f"E={self.dose.e:.2f} (label={self.dose_label})"
+            )
         sensors = (
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"
             f"- type2 last: {self.type2_last}\n"
+            f"{dose_line}\n"
             f"- inference: {inference_provider} (ready={inference_ready})\n"
             f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
             f"- inference source: {inference_source or 'none'}\n"
@@ -2076,6 +2232,8 @@ def _looks_like_local_command(text: str) -> bool:
     tail = rest.strip().lower()
     if cmd in {"help", "h", "?", "status", "health", "doctor", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
         return tail == ""
+    if cmd == "dose":
+        return tail in {"", "show", "status", "calm", "explore", "help", "?"}
     if cmd == "inference":
         return tail in {"", "refresh", "rescan", "scan", "reload"}
     if cmd == "update":

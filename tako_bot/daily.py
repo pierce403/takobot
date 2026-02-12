@@ -16,14 +16,18 @@ def ensure_daily_log(daily_root: Path, day: date) -> Path:
     content = (
         f"# Daily Log — {day.isoformat()}\n\n"
         "No secrets. No private keys. No tokens. Summaries only.\n\n"
+        "## Outcomes (3 for today)\n\n"
+        "- [ ] \n"
+        "- [ ] \n"
+        "- [ ] \n\n"
         "## Intent\n\n"
         "- \n\n"
         "## Notes\n\n"
         "- \n\n"
         "## Decisions\n\n"
         "- \n\n"
-        "## Promote to memory/MEMORY.md (if durable)\n\n"
-        "- [ ] Promote long-lived decisions into `memory/MEMORY.md`.\n"
+        "## Promote to MEMORY.md (if durable)\n\n"
+        "- [ ] Promote long-lived decisions into repo-root `MEMORY.md`.\n"
     )
     path.write_text(content, encoding="utf-8")
     return path

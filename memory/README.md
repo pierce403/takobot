@@ -6,13 +6,13 @@ This directory is Tako's committed memory workspace. It captures what the agent 
 
 - Keep memory text-first and git-tracked.
 - Write daily activity in `dailies/`.
-- Promote durable conclusions into `MEMORY.md`.
+- Promote durable conclusions into repo-root `MEMORY.md`.
 - Organize world knowledge by entity type (`people/`, `places/`, `things/`).
 - Never store secrets, credentials, private keys, or tokens.
 
 ## Memory Files
 
-- `MEMORY.md`: canonical durable memory index with frontmatter.
+- `MEMORY.md`: compatibility pointer to repo-root canonical memory.
 - `dailies/`: one file per day (`YYYY-MM-DD.md`) for observations and decisions.
 - `people/`: notes about people the agent has encountered.
 - `places/`: notes about places and operating contexts.

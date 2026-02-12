@@ -10,8 +10,8 @@ Required files (must exist):
 
 - `AGENTS.md` (this file)
 - `SOUL.md` (identity + boundaries; not memory)
+- `MEMORY.md` (canonical durable memory; long-lived facts only)
 - `VISION.md` (1-page invariants)
-- `memory/MEMORY.md` (canonical durable memory; long-lived facts only)
 - `ONBOARDING.md` (first wake checklist)
 - `FEATURES.md` (feature tracker + stability + test criteria)
 - `index.html` (project website)
@@ -19,7 +19,12 @@ Required files (must exist):
 Root directories (must exist):
 
 - `tools/` (tool implementations + manifests)
-- `memory/` (committed memory tree: `MEMORY.md`, `dailies/`, `people/`, `places/`, `things/`)
+- `memory/` (committed knowledge tree: `dailies/`, `people/`, `places/`, `things/`)
+- `tasks/` (GTD next actions; committed)
+- `projects/` (PARA projects; committed)
+- `areas/` (PARA areas; committed)
+- `resources/` (PARA resources; committed)
+- `archives/` (PARA archives; committed)
 - `.tako/` (runtime only; never committed)
 
 ## Safety Rules (non-negotiable)

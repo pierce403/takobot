@@ -873,11 +873,11 @@ class TakoTerminalApp(App[None]):
                 self._write_tako("cute. and what should my purpose be? one sentence is perfect.")
                 return
 
-            parsed_name = _extract_name_candidate(text, fallback=self.identity_name)
+            parsed_name = await self._infer_identity_name(text)
             if not parsed_name:
                 self._write_tako(
-                    "tiny clarification bubble: I couldn't isolate the name. "
-                    "you can type just the name, like `SILLYTAKO`."
+                    "tiny clarification bubble: inference couldn't isolate a confident name yet. "
+                    "you can retry with just the name, like `SILLYTAKO`."
                 )
                 return
 
@@ -1607,6 +1607,47 @@ class TakoTerminalApp(App[None]):
         )
         return cleaned
 
+    async def _infer_identity_name(self, text: str) -> str:
+        if self.inference_runtime is None or not self.inference_runtime.ready:
+            self._add_activity("identity", "name extraction blocked: inference unavailable")
+            return ""
+
+        prompt = _build_identity_name_prompt(text=text, current_name=self.identity_name)
+        self._add_activity("inference", "identity name extraction requested")
+        try:
+            provider, output = await asyncio.to_thread(
+                run_inference_prompt_with_fallback,
+                self.inference_runtime,
+                prompt,
+                timeout_s=45.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.inference_last_error = _summarize_error(exc)
+            self._add_activity("inference", f"identity name extraction failed: {self.inference_last_error}")
+            self._record_event(
+                "inference.identity_name.error",
+                f"Identity name extraction failed: {exc}",
+                severity="warn",
+                source="inference",
+            )
+            return ""
+
+        self.inference_ever_used = True
+        self.inference_last_provider = provider
+        self.inference_last_error = ""
+        name = _extract_name_from_model_output(output)
+        if name:
+            self._add_activity("inference", f"identity name extracted via provider={provider}")
+        else:
+            self._add_activity("inference", f"identity name extraction returned empty via provider={provider}")
+        self._record_event(
+            "inference.identity_name.result",
+            "Identity name extraction completed.",
+            source="inference",
+            metadata={"provider": provider, "has_name": _yes_no(bool(name))},
+        )
+        return name
+
     def _on_runtime_log(self, level: str, message: str) -> None:
         lowered = message.lower()
         if "switching to polling" in lowered:
@@ -1835,64 +1876,66 @@ def _clean_paste_text(value: str) -> str:
     return " ".join(parts)
 
 
-def _extract_name_candidate(value: str, *, fallback: str) -> str:
-    text = _sanitize_for_display(value).strip()
-    if not text:
+def _build_identity_name_prompt(*, text: str, current_name: str) -> str:
+    return (
+        "Extract the intended display name from the user message.\n"
+        "Return exactly one JSON object with one key: {\"name\":\"...\"}\n"
+        "If no clear name is provided, return {\"name\":\"\"}.\n"
+        "Do not include any prose, markdown, or extra keys.\n"
+        "Prefer concise names and ignore unrelated clauses.\n"
+        f"current_name={current_name}\n"
+        f"user_message={text}\n"
+    )
+
+
+def _extract_name_from_model_output(value: str) -> str:
+    raw = _sanitize_for_display(value).strip()
+    if not raw:
         return ""
 
-    # Quoted text takes precedence, e.g. "call yourself 'SILLYTAKO'".
-    quoted = re.search(r"[\"'`“”]([^\"'`“”]{1,64})[\"'`“”]", text)
-    if quoted:
-        candidate = quoted.group(1)
-    else:
-        candidate = text
-        patterns = [
-            r"\b(?:your|you|ur|u)\s*name\s+(?:can(?:\s+be)?|could(?:\s+be)?|should(?:\s+be)?|is|be|=)\s+(?P<name>.+)$",
-            r"\b(?:call|name)\s+(?:you|it|yourself)?\s*(?P<name>.+)$",
-            r"\b(?:be|is)\s+(?P<name>[A-Za-z0-9][A-Za-z0-9 _\-'`]{0,63})$",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
-            if match:
-                candidate = match.group("name")
-                break
+    # Accept fenced output while still preferring strict JSON.
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if len(lines) >= 3 and lines[-1].strip().startswith("```"):
+            raw = "\n".join(lines[1:-1]).strip()
 
-    candidate = _normalize_name_candidate(candidate)
+    candidate = ""
+    parsed_name_found = False
+    if raw.startswith("{") and raw.endswith("}"):
+        try:
+            parsed = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            parsed = None
+        if isinstance(parsed, dict):
+            maybe = parsed.get("name")
+            if isinstance(maybe, str):
+                candidate = maybe
+                parsed_name_found = True
+
+    if not candidate and not parsed_name_found:
+        line = raw.splitlines()[0].strip()
+        lowered = line.lower()
+        prefixes = ["name:", "candidate:", "- name:", "\"name\":"]
+        for prefix in prefixes:
+            if lowered.startswith(prefix):
+                line = line[len(prefix) :].strip()
+                break
+        candidate = line
+
+    candidate = candidate.strip().strip("`\"' ")
+    candidate = candidate.strip(" .,:;!?-_")
+    candidate = " ".join(candidate.split())
     if not candidate:
         return ""
 
     lowered = candidate.lower()
-    if lowered in {"you", "it", "me", "myself", "yourself"}:
+    blocked = {"none", "null", "n/a", "unknown", "you", "me", "it", "myself", "yourself"}
+    if lowered in blocked:
         return ""
 
     if len(candidate) > 48:
         candidate = candidate[:48].rstrip()
-    return candidate or _sanitize_for_display(fallback).strip()
-
-
-def _normalize_name_candidate(value: str) -> str:
-    text = _sanitize_for_display(value).strip()
-    if not text:
-        return ""
-
-    text = re.sub(r"^[,;:.\-_\s]+|[,;:.\-_\s]+$", "", text)
-    text = re.sub(r"^(?:called|named|name)\s+", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"^(?:can|could|should)\s+be\s+", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"^(?:be|is)\s+", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+(?:please|thanks|thank you)$", "", text, flags=re.IGNORECASE)
-
-    split_patterns = [
-        r"\s+(?:and|then)\s+(?:my|the|your)\b",
-        r"\s+(?:because|so|while)\b",
-        r"[,;.!?]",
-    ]
-    for pattern in split_patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            text = text[: match.start()]
-            break
-
-    return " ".join(text.strip().split())
+    return candidate
 
 
 def _parse_yes_no(value: str) -> bool | None:

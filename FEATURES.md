@@ -70,7 +70,7 @@
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
   - Prompts for XMTP control-channel setup first (ASAP), and delays identity/routine prompts until inference has actually run.
-  - Name capture in identity onboarding accepts freeform phrases and extracts a clean name token (not entire sentence).
+  - Name capture in identity onboarding accepts freeform phrases and uses inference to extract a clean name token (not entire sentence).
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
   - Escalates serious events into Type 2 tasks with depth-aware handling.

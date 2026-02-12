@@ -7,14 +7,14 @@
     <link rel="canonical" href="https://tako.bot/" />
     <meta
       name="description"
-      content="Tako is a highly autonomous, operator-imprinted agent built in Python with memory, Type 1/Type 2 cognition, a simulated DOSE (D/O/S/E) model, and a GTD+PARA productivity engine, grounded in web3-native XMTP and Ethereum rails."
+      content="Tako is an operator-imprinted octopus agent built in Python with three internal systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), grounded in web3-native XMTP and Ethereum rails."
     />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="tako-bot" />
     <meta property="og:title" content="tako-bot — highly autonomous octopus friend" />
     <meta
       property="og:description"
-      content="Operator-imprinted in Python with memory, Type 1/2 thinking, simulated DOSE balance (D/O/S/E), GTD+PARA workflows, and web3-native XMTP and Ethereum rails."
+      content="Operator-imprinted octopus agent with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
     />
     <meta property="og:url" content="https://tako.bot/" />
     <meta property="og:image" content="https://tako.bot/og-card.png" />
@@ -30,7 +30,7 @@
     <meta name="twitter:title" content="tako-bot — highly autonomous octopus friend" />
     <meta
       name="twitter:description"
-      content="Operator-imprinted in Python with memory, Type 1/2 thinking, simulated DOSE balance (D/O/S/E), GTD+PARA workflows, and web3-native XMTP and Ethereum rails."
+      content="Operator-imprinted octopus agent with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
     />
     <meta name="twitter:image" content="https://tako.bot/og-card.png" />
     <meta
@@ -345,8 +345,25 @@
         margin-top: 18px;
       }
 
+      .system-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      @media (max-width: 1050px) {
+        .system-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
       @media (max-width: 900px) {
         .section-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .system-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -502,7 +519,7 @@
         <nav class="nav" aria-label="Links">
           <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
           <a class="btn" href="#quickstart">Quickstart</a>
-          <a class="btn" href="#features">Features</a>
+          <a class="btn" href="#features">Systems</a>
           <a class="btn" href="#config">Config</a>
         </nav>
       </header>
@@ -512,18 +529,17 @@
             <div class="card hero-copy">
               <h1>A highly autonomous octopus friend, imprinted to you.</h1>
               <p class="subtitle">
-                <b>tako-bot</b> is built in <b>Python</b> with a docs-first <b>memory system</b> and deliberate
-                <b>Type 1 / Type 2 thinking</b>, plus a simulated <b>DOSE</b> balance (D/O/S/E) and a <b>GTD + PARA</b> productivity engine. It can
-                chat broadly, but only the operator can change identity, tools, permissions, and routines.
+                <b>tako-bot</b> is built in <b>Python</b> around three systems: a docs-first <b>memory system</b>, a
+                deterministic <b>emotion system</b> (DOSE, D/O/S/E), and a <b>productivity system</b> (GTD + PARA),
+                all under deliberate <b>Type 1 / Type 2</b> cognition. It can chat broadly, but only the operator can
+                change identity, tools, permissions, and routines.
                 It is web3-native via <b>XMTP</b> and <b>Ethereum</b>, with <b>Farcaster</b> support on the roadmap.
               </p>
               <div class="chips" aria-label="Project highlights">
-                <span class="chip"><b>Python</b> runtime</span>
-                <span class="chip"><b>Memory</b> + Type 1/2</span>
-                <span class="chip"><b>DOSE</b> neurotransmitters</span>
-                <span class="chip"><b>GTD</b> + PARA</span>
-                <span class="chip"><b>Daily</b> + Weekly review</span>
-                <span class="chip"><b>Progressive</b> summaries</span>
+                <span class="chip"><b>Memory</b> system</span>
+                <span class="chip"><b>Emotion</b> system (DOSE)</span>
+                <span class="chip"><b>Productivity</b> system (GTD + PARA)</span>
+                <span class="chip"><b>Type 1/2</b> cognition</span>
                 <span class="chip"><b>Operator</b> imprint</span>
                 <span class="chip"><b>Web3</b> XMTP + Ethereum</span>
                 <span class="chip"><b>Farcaster</b> roadmap</span>
@@ -669,40 +685,63 @@
           </div>
 
           <div class="card panel">
-            <h2>Objectives</h2>
+            <h2>The three systems</h2>
             <ul>
-              <li><b>Autonomous core</b>: Python runtime with memory-first workflows and Type 1 / Type 2 cognition.</li>
-              <li><b>DOSE balance</b>: runtime-only simulated D/O/S/E that biases risk tolerance, verbosity, and exploration vs stability (never overrides SOUL/operator rules).</li>
-              <li><b>Productivity engine</b>: GTD capture → clarify → next actions, backed by PARA structure (Projects/Areas/Resources/Archives).</li>
-              <li><b>Operator imprint</b>: only the operator can change identity, tools, permissions, and routines.</li>
-              <li><b>Web3-native rails</b>: XMTP control plane today, Ethereum identity support, Farcaster integration path.</li>
-              <li><b>Multi-instance safety</b>: locks prevent shared-state corruption.</li>
-              <li><b>Git-first docs</b>: SOUL/VISION/MEMORY/memory/FEATURES stay authoritative.</li>
+              <li><b>Memory system</b>: durable knowledge in git-tracked Markdown (<code>memory/</code> + promotions into <code>MEMORY.md</code>).</li>
+              <li><b>Emotion system</b>: deterministic DOSE state (<code>.tako/state/dose.json</code>) that biases escalation sensitivity and tone.</li>
+              <li><b>Productivity system</b>: GTD + PARA execution structure (<code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>) plus open loops (<code>.tako/state/open_loops.json</code>).</li>
+              <li><b>Safety boundary</b>: operator imprint + XMTP control plane for identity/tools/permissions/routines changes.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-              The current build still includes a tiny one-off DM sender — the long-term direction is a safe, extensible agent.
+              Tako stays git-first: memory and productivity artifacts are reviewable; runtime state lives under <code>.tako/</code> and is never committed.
             </p>
           </div>
         </section>
 
-          <section class="section-grid" id="features">
-            <div class="card panel">
-            <h2>Features</h2>
-            <ul>
-              <li><b>Docs-first</b>: <code>SOUL.md</code>, <code>VISION.md</code>, <code>MEMORY.md</code>, <code>FEATURES.md</code>.</li>
-              <li><b>Operator imprint</b>: controller-only changes to identity, tools, and permissions.</li>
-              <li><b>One-off DM</b>: <code>tako hi</code> sends to <code>0x…</code> or resolves <code>.eth</code>.</li>
-              <li><b>State hygiene</b>: runtime in <code>.tako/</code>; daily logs in <code>memory/dailies/</code>.</li>
-              <li><b>DOSE model</b>: runtime-only state in <code>.tako/state/dose.json</code> biases escalation, verbosity, and exploration.</li>
-              <li><b>GTD + PARA</b>: committed execution structure in <code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.</li>
-              <li><b>Reviews + summaries</b>: daily outcomes, weekly review, and progressive summaries (<code>morning</code>, <code>weekly</code>, <code>compress</code>).</li>
-            </ul>
-              <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
-                The canonical spec lives in <code>FEATURES.md</code> (with stability + test criteria).
-              </p>
+          <section id="features">
+            <div class="system-grid">
+              <div class="card panel">
+                <h2>Memory system</h2>
+                <p>
+                  A git-tracked second brain. The goal is reviewable durable knowledge, not runtime state.
+                </p>
+                <ul>
+                  <li><b>Daily logs</b>: <code>memory/dailies/YYYY-MM-DD.md</code> (no secrets; summaries only).</li>
+                  <li><b>World notes</b>: <code>memory/people/</code>, <code>memory/places/</code>, <code>memory/things/</code>.</li>
+                  <li><b>Promotions</b>: operator-approved notes go into <code>MEMORY.md</code> (via <code>promote</code>).</li>
+                  <li><b>Progressive summarization</b>: <code>compress</code> writes a structured summary block into today’s daily log.</li>
+                </ul>
+              </div>
+
+              <div class="card panel">
+                <h2>Emotion system</h2>
+                <p>
+                  A deterministic DOSE model (D/O/S/E) that reacts to events and decays toward baseline over time.
+                </p>
+                <ul>
+                  <li><b>Runtime-only</b>: stored at <code>.tako/state/dose.json</code> (ignored by git).</li>
+                  <li><b>Event-driven</b>: updated from the event log; ticked on heartbeat.</li>
+                  <li><b>Visible</b>: numeric values + a small mode label (steady/curious/bonded/stressed) in the TUI.</li>
+                  <li><b>Bias only</b>: shifts Type 1 → Type 2 escalation sensitivity and lightweight planning hints; never overrides operator rules.</li>
+                </ul>
+              </div>
+
+              <div class="card panel">
+                <h2>Productivity system</h2>
+                <p>
+                  A committed execution structure (GTD + PARA) with outcomes, reviews, and an open-loops index.
+                </p>
+                <ul>
+                  <li><b>PARA</b>: <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.</li>
+                  <li><b>Tasks</b>: one Markdown file per task under <code>tasks/</code> (YAML frontmatter, <code>open</code>/<code>done</code>/<code>blocked</code>/<code>someday</code>).</li>
+                  <li><b>3 outcomes</b>: set with <code>morning</code>; stored in today’s daily log and tracked as open loops.</li>
+                  <li><b>Weekly review</b>: <code>weekly</code> surfaces stale tasks + projects missing a next action.</li>
+                  <li><b>Open loops index</b>: runtime-only <code>.tako/state/open_loops.json</code> shown in the sidebar.</li>
+                </ul>
+              </div>
             </div>
 
-            <div class="card panel">
+            <div class="card panel" style="margin-top: 18px">
               <h2>Feature tracker</h2>
               <p>
                 This repo keeps a living <code>FEATURES.md</code> file (inspired by
@@ -730,6 +769,9 @@
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
               <li>
+                Initializes the memory system by ensuring today’s daily log exists at <code>memory/dailies/YYYY-MM-DD.md</code>.
+              </li>
+              <li>
                 Runs a startup health check to classify environment state (brand-new vs established), verify lock/safety, and probe resources.
               </li>
               <li>
@@ -739,10 +781,10 @@
                 Keeps inference execution gated until the first interactive chat turn, so startup remains deterministic.
               </li>
               <li>
-                Initializes runtime-only DOSE state in <code>.tako/state/dose.json</code> and shows it live in the TUI.
+                Initializes the emotion system (DOSE) at <code>.tako/state/dose.json</code> and shows it live in the TUI.
               </li>
               <li>
-                Uses a committed GTD + PARA execution structure: <code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.
+                Uses a committed productivity system (GTD + PARA): <code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.
               </li>
               <li>
                 Launches the interactive terminal app and runs onboarding as explicit states.

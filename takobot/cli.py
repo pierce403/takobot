@@ -26,7 +26,7 @@ from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
 from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
-from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmtp_import, send_dm_sync
+from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmtp_import, send_dm_sync, set_typing_indicator
 from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
 from .productivity import open_loops as prod_open_loops
 from .productivity import outcomes as prod_outcomes
@@ -50,6 +50,7 @@ CHAT_INFERENCE_TIMEOUT_S = 75.0
 CHAT_REPLY_MAX_CHARS = 700
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
+XMTP_TYPING_LEAD_S = 0.35
 
 
 @dataclass(frozen=True)
@@ -479,6 +480,51 @@ async def _run_daemon(
     return 0
 
 
+class _ConversationWithTyping:
+    def __init__(self, conversation, *, hooks: RuntimeHooks | None = None) -> None:
+        self._conversation = conversation
+        self._hooks = hooks
+        self._typing_supported: bool | None = None
+        self._typing_notice_emitted = False
+
+    async def send(self, content: object, content_type: object | None = None):
+        if content_type is not None:
+            return await self._conversation.send(content, content_type=content_type)
+
+        if not isinstance(content, str):
+            return await self._conversation.send(content)
+
+        typing_enabled = await self._toggle_typing(True)
+        if typing_enabled:
+            await asyncio.sleep(XMTP_TYPING_LEAD_S)
+        try:
+            return await self._conversation.send(content)
+        finally:
+            if typing_enabled:
+                await self._toggle_typing(False)
+
+    async def _toggle_typing(self, active: bool) -> bool:
+        if self._typing_supported is False:
+            return False
+        supported = await set_typing_indicator(self._conversation, active)
+        if supported:
+            self._typing_supported = True
+            return True
+        if self._typing_supported is None:
+            self._typing_supported = False
+            if not self._typing_notice_emitted:
+                self._typing_notice_emitted = True
+                _emit_runtime_log(
+                    "XMTP typing indicator is unavailable in this SDK/runtime; continuing without it.",
+                    level="warn",
+                    hooks=self._hooks,
+                )
+        return False
+
+    def __getattr__(self, name: str):
+        return getattr(self._conversation, name)
+
+
 async def _handle_incoming_message(
     item,
     client,
@@ -508,9 +554,10 @@ async def _handle_incoming_message(
     if not isinstance(convo_id, (bytes, bytearray)):
         return
 
-    convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
-    if convo is None:
+    raw_convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
+    if raw_convo is None:
         return
+    convo = _ConversationWithTyping(raw_convo, hooks=hooks)
 
     operator_cfg = load_operator(paths.operator_json)
     operator_inbox_id = get_operator_inbox_id(operator_cfg)

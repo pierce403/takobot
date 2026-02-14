@@ -806,6 +806,8 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes when git identity is configured.</li>
               <li>If required setup is missing (for example git identity), asks the operator in-app with concrete fix steps.</li>
+              <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
+              <li>Uses XMTP typing indicators for outbound replies when supported by the installed XMTP SDK/runtime.</li>
               <li>
                 Maintains an open-loops index at <code>.tako/state/open_loops.json</code> (unfinished tasks + onboarding prompts) and shows it in the sidebar.
               </li>

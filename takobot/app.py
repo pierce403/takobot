@@ -86,6 +86,7 @@ STREAM_BOX_MAX_CHARS = 8000
 STREAM_BOX_MAX_STATUS_LINES = 40
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
+THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -3045,7 +3046,7 @@ class TakoTerminalApp(App[None]):
             return
         self.stream_last_render_at = now
 
-        header = f"bubble stream: provider={self.stream_provider}\n"
+        header = f"bubble stream: provider={self.stream_provider} | mind={self._thinking_visual()}\n"
         status = ""
         if self.stream_status_lines:
             status = "\n".join(self.stream_status_lines) + "\n\n"
@@ -3260,6 +3261,23 @@ class TakoTerminalApp(App[None]):
     def _set_indicator(self, indicator: str) -> None:
         self.indicator = indicator
 
+    def _thinking_phase(self) -> str:
+        if self.stream_active:
+            return "responding"
+        if self.indicator.startswith("type2:"):
+            depth = self.indicator.split(":", 1)[1] or "medium"
+            return f"type2-{depth}"
+        if self.indicator in {"thinking", "acting"}:
+            return self.indicator
+        return "idle"
+
+    def _thinking_visual(self) -> str:
+        phase = self._thinking_phase()
+        if phase == "idle":
+            return "idle"
+        frame = THINKING_SPINNER_FRAMES[int(time.monotonic() * 8) % len(THINKING_SPINNER_FRAMES)]
+        return f"{frame} {phase}"
+
     def _ensure_input_focus(self) -> None:
         input_box = getattr(self, "input_box", None)
         if input_box is None or input_box.disabled:
@@ -3271,9 +3289,10 @@ class TakoTerminalApp(App[None]):
         uptime_s = int(time.monotonic() - self.started_at)
         safe = "on" if self.safe_mode else "off"
         updates = "on" if self.auto_updates_enabled else "off"
+        thinking = self._thinking_visual()
         self.status_bar.update(
             f"state={self.state.value} | mode={self.mode} | runtime={self.runtime_mode} | "
-            f"dose={self.dose_label} | indicator={self.indicator} | safe={safe} | updates={updates} | uptime={uptime_s}s"
+            f"dose={self.dose_label} | indicator={self.indicator} | mind={thinking} | safe={safe} | updates={updates} | uptime={uptime_s}s"
         )
         self._refresh_panels()
 
@@ -3322,12 +3341,14 @@ class TakoTerminalApp(App[None]):
         loops_count = int(self.open_loops_summary.get("count") or 0)
         loops_age_s = float(self.open_loops_summary.get("oldest_age_s") or 0.0)
         loops_age = f"{int(loops_age_s // 3600)}h" if loops_age_s >= 3600 else f"{int(loops_age_s)}s"
+        thinking = self._thinking_visual()
         tasks = (
             "Tasks\n"
             f"- state: {self.state.value}\n"
             f"- instance: {self.instance_kind}\n"
             f"- next: {pair_next}\n"
             f"- runtime: {self.runtime_mode}\n"
+            f"- mind: {thinking}\n"
             f"- safe mode: {'on' if self.safe_mode else 'off'}\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
@@ -3351,6 +3372,7 @@ class TakoTerminalApp(App[None]):
                 version=__version__,
                 dose_state=self.dose,
                 dose_label=self.dose_label,
+                thinking=thinking,
             )
         )
 
@@ -3379,6 +3401,7 @@ class TakoTerminalApp(App[None]):
         sensors = (
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
+            f"- mind: {thinking}\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"
@@ -3842,6 +3865,7 @@ def _octopus_panel_text(
     version: str,
     dose_state: dose.DoseState | None,
     dose_label: str,
+    thinking: str,
 ) -> str:
     art = _octopus_art(level, frame)
     mood = "zzz" if frame % 12 == 0 else "~"
@@ -3855,7 +3879,7 @@ def _octopus_panel_text(
             f"E{_dose_meter(dose_state.e)} "
             f"{dose_label}"
         )
-    return f"Takobot v{version} | L{level} {mood}\n{dose_line}\n{art}"
+    return f"Takobot v{version} | L{level} {mood}\nMind {thinking}\n{dose_line}\n{art}"
 
 
 def _dose_meter(value: float, *, width: int = 4) -> str:

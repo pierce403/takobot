@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from importlib import metadata
 import socket
 from pathlib import Path
@@ -86,6 +87,50 @@ async def create_client(env: str, db_root: Path, wallet_key: str, db_encryption_
         db_encryption_key=db_encryption_key,
     )
     return await Client.create(signer, options)
+
+
+async def set_typing_indicator(conversation: object, active: bool) -> bool:
+    targets = [conversation]
+    ffi = getattr(conversation, "_ffi", None)
+    if ffi is not None:
+        targets.append(ffi)
+
+    if active:
+        simple_names = ("set_typing", "send_typing", "typing", "set_typing_indicator", "send_typing_indicator")
+        state_names = ("start_typing", "begin_typing", "typing_start")
+    else:
+        simple_names = ("set_typing", "send_typing", "typing", "set_typing_indicator", "send_typing_indicator")
+        state_names = ("stop_typing", "end_typing", "typing_stop")
+
+    for target in targets:
+        for name in simple_names:
+            method = getattr(target, name, None)
+            if not callable(method):
+                continue
+            if await _call_maybe_async(method, active):
+                return True
+            if await _call_maybe_async(method):
+                return True
+        for name in state_names:
+            method = getattr(target, name, None)
+            if not callable(method):
+                continue
+            if await _call_maybe_async(method):
+                return True
+
+    return False
+
+
+async def _call_maybe_async(method, *args) -> bool:
+    try:
+        result = method(*args)
+        if inspect.isawaitable(result):
+            await result
+        return True
+    except TypeError:
+        return False
+    except Exception:
+        return False
 
 
 async def send_dm(

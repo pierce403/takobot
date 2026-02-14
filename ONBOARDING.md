@@ -16,6 +16,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] Heartbeat can auto-commit pending workspace changes (git repo + `user.name`/`user.email` configured).
 - [ ] If required setup is missing (for example git identity), Tako emits an operator request with concrete fix steps.
 - [ ] Auto-update policy is set (`tako.toml` `[updates].auto_apply`), defaulting to `true`.
+- [ ] TUI mind indicator visibly animates during thinking/responding, and XMTP typing indicators appear when supported by runtime SDK.
 - [ ] Skill/tool install pipeline works (quarantine → analyze → install disabled → enable requires operator approval).
 - [ ] `SOUL.md`, `MEMORY.md`, `tako.toml`, and `FEATURES.md` exist and are consistent with current behavior.
 

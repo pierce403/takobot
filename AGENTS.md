@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — Thinking visibility + XMTP typing signals
+
+- What happened: operators wanted a clear in-app signal for “thinking now,” plus outbound XMTP typing cues while replies are being emitted.
+- Fix: added an animated TUI mind indicator across status/sidebar/stream/octopus panel and wrapped XMTP reply sends with typing-indicator signaling when supported.
+- Prevention: treat response-lifecycle visibility (thinking vs responding) as first-class UX in both local TUI and remote chat channels.
+
 ### 2026-02-14 — Missing setup now triggers operator requests
 
 - What happened: startup/runtime warnings could report missing configuration (like git identity) without a direct operator ask in the TUI.

@@ -10,6 +10,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically
 - Missing-setup prompts: when required config/deps are missing (for example git identity), Tako asks the operator with concrete fix steps
+- Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
@@ -137,4 +138,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.
 - If git auto-commit is blocked by missing `user.name`/`user.email`, Tako asks the operator to configure them and shows copy-ready commands.
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
+- XMTP replies now use a typing indicator when supported by the installed XMTP SDK/runtime.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

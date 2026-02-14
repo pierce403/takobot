@@ -85,6 +85,7 @@
   - App transcript/system lines are appended to `.tako/logs/app.log`.
   - App heartbeat performs git auto-commit for pending workspace changes (`git add -A` + `git commit`).
   - When required setup is missing (for example git identity or XMTP dependency), app mode emits a polite operator request with concrete next steps.
+  - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Auto-update policy is configurable in `tako.toml` under `[updates].auto_apply` (default `true`).
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.
   - Terminal update controls expose setting state and toggles: `update auto status|on|off`.
@@ -115,6 +116,7 @@
   - [x] Inference provider subprocesses use workspace-local temp files under `.tako/tmp/`.
   - [x] App/daemon heartbeat can auto-commit pending workspace changes when git identity is configured.
   - [x] Missing git identity triggers an operator-facing request with concrete `git config` remediation commands.
+  - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] Auto-update setting defaults to on and is visible/toggleable from the TUI.
   - [x] App mode auto-applies available package updates and restarts when update changes are applied.
   - [x] Terminal chat inference streams output to the bubble-stream panel while generating.

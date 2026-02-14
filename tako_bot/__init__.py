@@ -1,4 +1,4 @@
-"""Tako — highly autonomous, operator-imprinted agent."""
+"""Takobot: highly autonomous octopus friend."""
 
 from __future__ import annotations
 

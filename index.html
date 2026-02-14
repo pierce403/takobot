@@ -7,14 +7,14 @@
     <link rel="canonical" href="https://tako.bot/" />
     <meta
       name="description"
-      content="Tako is an operator-imprinted octopus agent built in Python with three internal systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), grounded in web3-native XMTP and Ethereum rails."
+      content="Tako is a highly autonomous octopus friend built in Python with three internal systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), grounded in web3-native XMTP and Ethereum rails."
     />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="tako-bot" />
-    <meta property="og:title" content="tako-bot — highly autonomous octopus friend" />
+    <meta property="og:title" content="tako-bot: highly autonomous octopus friend" />
     <meta
       property="og:description"
-      content="Operator-imprinted octopus agent with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
+      content="Highly autonomous octopus friend with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
     />
     <meta property="og:url" content="https://tako.bot/" />
     <meta property="og:image" content="https://tako.bot/og-card.png" />
@@ -27,17 +27,17 @@
       content="tako-bot social preview card with octopus mascot and key project highlights"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="tako-bot — highly autonomous octopus friend" />
+    <meta name="twitter:title" content="tako-bot: highly autonomous octopus friend" />
     <meta
       name="twitter:description"
-      content="Operator-imprinted octopus agent with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
+      content="Highly autonomous octopus friend with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
     />
     <meta name="twitter:image" content="https://tako.bot/og-card.png" />
     <meta
       name="twitter:image:alt"
       content="tako-bot social preview card with octopus mascot and key project highlights"
     />
-    <title>tako-bot — highly autonomous operator-imprinted agent</title>
+    <title>tako-bot: highly autonomous octopus friend</title>
     <style>
       :root {
         color-scheme: dark;
@@ -513,7 +513,7 @@
           <div class="brand-badge" aria-hidden="true"><span>🐙</span></div>
           <div>
             <div style="font-weight: 800; letter-spacing: -0.01em">tako-bot</div>
-            <div style="color: var(--muted-2); font-size: 13px">highly autonomous operator-imprinted agent</div>
+            <div style="color: var(--muted-2); font-size: 13px">highly autonomous octopus friend</div>
           </div>
         </div>
         <nav class="nav" aria-label="Links">
@@ -527,12 +527,12 @@
       <main>
           <section class="hero">
             <div class="card hero-copy">
-              <h1>A highly autonomous octopus friend, imprinted to you.</h1>
+              <h1>A highly autonomous octopus friend.</h1>
               <p class="subtitle">
                 <b>tako-bot</b> is built in <b>Python</b> around three systems: a docs-first <b>memory system</b>, a
                 deterministic <b>emotion system</b> (DOSE, D/O/S/E), and a <b>productivity system</b> (GTD + PARA),
-                all under deliberate <b>Type 1 / Type 2</b> cognition. It can chat broadly, but only the operator can
-                change identity, tools, permissions, and routines.
+                all under deliberate <b>Type 1 / Type 2</b> cognition. It can chat broadly, but only you can change its
+                identity, tools, permissions, and routines.
                 It is web3-native via <b>XMTP</b> and <b>Ethereum</b>, with <b>Farcaster</b> support on the roadmap.
               </p>
               <div class="chips" aria-label="Project highlights">
@@ -540,7 +540,7 @@
                 <span class="chip"><b>Emotion</b> system (DOSE)</span>
                 <span class="chip"><b>Productivity</b> system (GTD + PARA)</span>
                 <span class="chip"><b>Type 1/2</b> cognition</span>
-                <span class="chip"><b>Operator</b> imprint</span>
+                <span class="chip"><b>You</b> control</span>
                 <span class="chip"><b>Web3</b> XMTP + Ethereum</span>
                 <span class="chip"><b>Farcaster</b> roadmap</span>
               </div>
@@ -688,7 +688,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><b>Memory system</b>: durable knowledge in git-tracked Markdown (<code>memory/</code> + promotions into <code>MEMORY.md</code>).</li>
               <li><b>Emotion system</b>: deterministic DOSE state (<code>.tako/state/dose.json</code>) that biases escalation sensitivity and tone.</li>
               <li><b>Productivity system</b>: GTD + PARA execution structure (<code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>) plus open loops (<code>.tako/state/open_loops.json</code>).</li>
-              <li><b>Safety boundary</b>: operator imprint + quarantine-first skill/tool installs (analyze → install disabled → enable).</li>
+              <li><b>Safety boundary</b>: operator control + quarantine-first skill/tool installs (analyze → install disabled → enable).</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Tako stays git-first: memory and productivity artifacts are reviewable; runtime state lives under <code>.tako/</code> and is never committed.
@@ -786,7 +786,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               </li>
               <li>
                 Prompts XMTP setup first in-app, sends outbound pairing DM, assumes the recipient is ready, then stores
-                operator imprint in <code>.tako/operator.json</code> when paired.
+                operator metadata in <code>.tako/operator.json</code> when paired.
               </li>
               <li>
                 Delays identity/goals/routine prompts until inference has actually run (or until manually triggered).
@@ -907,7 +907,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
       </main>
 
       <footer>
-        Built to be safe, operator-imprinted, and git-first. If it breaks, add a note in <code>AGENTS.md</code>
+        Built to be safe, you-controlled, and git-first. If it breaks, add a note in <code>AGENTS.md</code>
         (and a short entry in <code>memory/dailies/</code>) so future-us suffers less.
       </footer>
     </div>

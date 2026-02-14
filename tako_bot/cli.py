@@ -70,7 +70,7 @@ def _emit_runtime_log(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="tako", description="Tako — highly autonomous operator-imprinted agent")
+    parser = argparse.ArgumentParser(prog="tako", description="Takobot: highly autonomous octopus friend")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     sub = parser.add_subparsers(dest="cmd", required=False)

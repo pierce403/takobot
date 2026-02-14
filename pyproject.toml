@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "takobot"
 version = "0.1.0"
-description = "Tako — highly autonomous operator-imprinted agent"
+description = "Takobot: highly autonomous octopus friend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

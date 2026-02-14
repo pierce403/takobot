@@ -66,6 +66,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — PyPI trusted publisher after repo rename
+
+- What happened: after renaming the GitHub repo from `pierce403/tako-bot` to `pierce403/takobot`, tag `v0.1.2` publish failed with `invalid-publisher` because PyPI trusted publisher claims no longer matched.
+- Fix: updated the PyPI trusted publisher mapping to the new repo/workflow claims, then cut `v0.1.3` and confirmed publish success.
+- Prevention: whenever repo/workflow/environment names change, update trusted publisher settings before tagging a release.
+
 ### 2026-02-12 — Engine/workspace separation + quarantine installs
 
 - What happened: repo-as-workspace bootstrap made installs and extension loading hard to secure and hard to make idempotent.

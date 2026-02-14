@@ -48,7 +48,7 @@ def fetch_webpage(
     request = Request(
         target,
         headers={
-            "User-Agent": "tako-bot/1.0 (+https://tako.bot)",
+            "User-Agent": "takobot/1.0 (+https://tako.bot)",
             "Accept": "text/html, text/plain;q=0.9, */*;q=0.2",
         },
         method="GET",

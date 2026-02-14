@@ -37,5 +37,4 @@ Memory is git-tracked and reviewable. Never store secrets here.
 ## Long-lived Facts
 
 - Project website is served from `index.html` and the repo includes `CNAME` for `tako.bot`.
-- Repository: `pierce403/tako-bot` on GitHub.
-
+- Repository: `pierce403/takobot` on GitHub.

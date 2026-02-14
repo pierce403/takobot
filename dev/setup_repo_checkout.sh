@@ -6,9 +6,9 @@ set -euo pipefail
 #
 # New user-facing bootstrap is `./setup.sh` (workspace + venv + pip install).
 
-REPO_URL="https://github.com/pierce403/tako-bot.git"
+REPO_URL="https://github.com/pierce403/takobot.git"
 CALLER_DIR="$(pwd -P)"
-DEFAULT_TARGET="$CALLER_DIR/tako-bot"
+DEFAULT_TARGET="$CALLER_DIR/takobot"
 LOCAL_TRACKING_BRANCH="local"
 
 usage() {
@@ -18,7 +18,7 @@ Usage:
 
 Behavior:
   - If already inside the Tako git repo, runs ./start.sh.
-  - Otherwise bootstraps tako-bot into ./tako-bot from your current directory
+  - Otherwise bootstraps takobot into ./takobot from your current directory
     (or a timestamped fallback in the same directory)
     and then runs ./start.sh from there.
   - Fresh checkouts are created on a local branch (`local`) tracking `origin/main`.
@@ -39,7 +39,7 @@ clone_target() {
   fi
 
   if [[ -e "$target" ]]; then
-    target="$CALLER_DIR/tako-bot-$(date +%Y%m%d-%H%M%S)"
+    target="$CALLER_DIR/takobot-$(date +%Y%m%d-%H%M%S)"
   fi
 
   printf "%s\n" "$target"
@@ -135,4 +135,3 @@ main() {
 }
 
 main "$@"
-

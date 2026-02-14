@@ -5,10 +5,10 @@ set -euo pipefail
 #
 # Creates a local .venv, attempts to install the engine (`pip install takobot` with a fallback),
 # materializes workspace templates, initializes git (if available), then launches
-# the interactive TUI main loop.
+# the interactive TUI main loop (or CLI daemon mode if no interactive TTY exists).
 
 ENGINE_PYPI_NAME="takobot"
-ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/tako-bot.git"
+ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/takobot.git"
 
 WORKDIR="$(pwd -P)"
 VENV_DIR="$WORKDIR/.venv"
@@ -130,8 +130,13 @@ ensure_git() {
     return 0
   fi
 
-  log "git: init"
-  git init >/dev/null
+  log "git: init (main)"
+  if git init -b main >/dev/null 2>&1; then
+    :
+  else
+    git init >/dev/null
+    git symbolic-ref HEAD refs/heads/main >/dev/null 2>&1 || true
+  fi
 
   if [[ ! -f "$WORKDIR/.gitignore" ]]; then
     cat >"$WORKDIR/.gitignore" <<'EOF'
@@ -166,19 +171,23 @@ EOF
   fi
 }
 
-ensure_tty_stdin() {
-  if [[ -t 0 ]]; then
-    return 0
-  fi
-  if [[ -e /dev/tty ]] && ( : </dev/tty ) 2>/dev/null; then
-    exec </dev/tty
-  fi
-  die "interactive launch requires a TTY (try running from a real terminal)"
+interactive_tty_available() {
+  [[ -t 0 || -t 1 || -t 2 ]]
 }
 
 launch() {
-  ensure_tty_stdin
-  exec "$VENV_DIR/bin/tako"
+  if interactive_tty_available; then
+    if [[ -t 0 ]]; then
+      exec "$VENV_DIR/bin/tako"
+    fi
+    if [[ -e /dev/tty ]] && ( : </dev/tty ) 2>/dev/null; then
+      exec </dev/tty
+      exec "$VENV_DIR/bin/tako"
+    fi
+  fi
+
+  log "launch: no interactive TTY detected; starting command-line daemon mode"
+  exec "$VENV_DIR/bin/tako" run
 }
 
 main() {

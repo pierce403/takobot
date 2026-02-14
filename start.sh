@@ -16,7 +16,7 @@ Usage:
   ./start.sh
 
 Behavior:
-  - Verifies this is a valid tako-bot repo checkout.
+  - Verifies this is a valid takobot repo checkout.
   - Ensures local runtime env dependencies are available.
   - Launches Tako interactive terminal app (main loop).
 EOF
@@ -39,7 +39,7 @@ require_repo_layout() {
   done
 
   if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "Error: start.sh must run from a valid tako-bot repo checkout." >&2
+    echo "Error: start.sh must run from a valid takobot repo checkout." >&2
     printf 'Missing:\n' >&2
     printf '  - %s\n' "${missing[@]}" >&2
     exit 1

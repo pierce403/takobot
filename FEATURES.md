@@ -26,16 +26,18 @@
 
 ### Workspace bootstrap (`setup.sh`)
 - **Stability**: in-progress
-- **Description**: Safe bootstrap for a new workspace via `curl | bash`, ending in the interactive terminal app.
+- **Description**: Safe bootstrap for a new workspace via `curl | bash`, ending in the interactive terminal app when a TTY is available.
 - **Properties**:
   - Refuses to run unless the directory is empty, or already looks like a Tako workspace (`SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
   - Creates `.venv/` in the workspace directory.
   - Attempts `pip install takobot`. If PyPI install fails, clones source into `.tako/tmp/src/` and installs from there.
   - Materializes workspace templates from the installed engine (`tako_bot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
-  - Initializes git + `.gitignore` + first commit if git is available; warns if git is missing.
+  - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
   - Launches `.venv/bin/tako` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
+  - Falls back to `.venv/bin/tako run` (stdout CLI daemon mode) when no interactive TTY is available.
 - **Test Criteria**:
-  - [ ] In an empty dir, `curl -fsSL https://tako.bot/setup.sh | bash` creates `.venv/`, materializes workspace files, initializes git, and launches the TUI.
+  - [ ] In an empty dir with an interactive TTY, `curl -fsSL https://tako.bot/setup.sh | bash` creates `.venv/`, materializes workspace files, initializes git on `main`, and launches the TUI.
+  - [ ] In a non-interactive environment, the same command falls back to stdout daemon mode instead of exiting with a TTY error.
   - [ ] Re-running `setup.sh` is idempotent and does not overwrite edited files.
 
 ### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)

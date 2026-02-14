@@ -10,8 +10,8 @@
       content="Tako is your highly autonomous octopus friend built in Python with three internal systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), grounded in web3-native XMTP and Ethereum rails."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="tako-bot" />
-    <meta property="og:title" content="tako-bot: your highly autonomous octopus friend" />
+    <meta property="og:site_name" content="takobot" />
+    <meta property="og:title" content="takobot: your highly autonomous octopus friend" />
     <meta
       property="og:description"
       content="Your highly autonomous octopus friend with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
@@ -24,10 +24,10 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="tako-bot social preview card with octopus mascot and key project highlights"
+      content="takobot social preview card with octopus mascot and key project highlights"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="tako-bot: your highly autonomous octopus friend" />
+    <meta name="twitter:title" content="takobot: your highly autonomous octopus friend" />
     <meta
       name="twitter:description"
       content="Your highly autonomous octopus friend with three systems: memory (git-tracked), emotion (deterministic DOSE), and productivity (GTD + PARA), plus Type 1/2 cognition and XMTP/Ethereum rails."
@@ -35,9 +35,9 @@
     <meta name="twitter:image" content="https://tako.bot/og-card.png" />
     <meta
       name="twitter:image:alt"
-      content="tako-bot social preview card with octopus mascot and key project highlights"
+      content="takobot social preview card with octopus mascot and key project highlights"
     />
-    <title>tako-bot: your highly autonomous octopus friend</title>
+    <title>takobot: your highly autonomous octopus friend</title>
     <style>
       :root {
         color-scheme: dark;
@@ -509,15 +509,15 @@
   <body>
     <div class="wrap">
       <header>
-        <div class="brand" aria-label="tako-bot">
+        <div class="brand" aria-label="takobot">
             <div class="brand-badge" aria-hidden="true"><span>🐙</span></div>
           <div>
-            <div style="font-weight: 800; letter-spacing: -0.01em">tako-bot</div>
+            <div style="font-weight: 800; letter-spacing: -0.01em">takobot</div>
             <div style="color: var(--muted-2); font-size: 13px">your highly autonomous octopus friend</div>
           </div>
         </div>
         <nav class="nav" aria-label="Links">
-          <a class="btn primary" href="https://github.com/pierce403/tako-bot">View on GitHub</a>
+          <a class="btn primary" href="https://github.com/pierce403/takobot">View on GitHub</a>
           <a class="btn" href="#quickstart">Quickstart</a>
           <a class="btn" href="#features">Systems</a>
           <a class="btn" href="#config">Config</a>
@@ -529,7 +529,7 @@
             <div class="card hero-copy">
               <h1>Your highly autonomous octopus friend.</h1>
               <p class="subtitle">
-                <b>tako-bot</b> is built in <b>Python</b> around three systems: a docs-first <b>memory system</b>, a
+                <b>takobot</b> is built in <b>Python</b> around three systems: a docs-first <b>memory system</b>, a
                 deterministic <b>emotion system</b> (DOSE, D/O/S/E), and a <b>productivity system</b> (GTD + PARA),
                 all under deliberate <b>Type 1 / Type 2</b> cognition. It can chat broadly, but only you can change its
                 identity, tools, permissions, and routines.
@@ -747,7 +747,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 in-progress, or planned.
               </p>
               <p style="margin-top: 12px">
-                <a class="btn" href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">Open FEATURES.md on GitHub</a>
+                <a class="btn" href="https://github.com/pierce403/takobot/blob/main/FEATURES.md">Open FEATURES.md on GitHub</a>
               </p>
             </div>
           </section>
@@ -758,7 +758,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
             <ul>
               <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
               <li>Attempts to install the engine with <code>pip install takobot</code> (PyPI). If that fails, it falls back to a source clone install.</li>
-              <li>Materializes the workspace from engine templates (<code>tako_bot/templates/**</code>) without overwriting existing files, then initializes git if available.</li>
+              <li>Materializes the workspace from engine templates (<code>tako_bot/templates/**</code>) without overwriting existing files, then initializes git on <code>main</code> if available.</li>
               <li>
                 Generates <code>.tako/keys.json</code> with a wallet key and DB encryption key (unencrypted; file-perms only).
               </li>
@@ -782,7 +782,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Uses a committed productivity system (GTD + PARA): <code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>.
               </li>
               <li>
-                Launches the interactive terminal app and runs onboarding as explicit states.
+                Launches the interactive terminal app and runs onboarding as explicit states (or falls back to stdout daemon mode when no interactive TTY is available).
               </li>
               <li>
                 Prompts XMTP setup first in-app, sends outbound pairing DM, assumes the recipient is ready, then stores
@@ -875,19 +875,19 @@ curl -fsSL https://tako.bot/setup.sh | bash
             <ul>
               <li>
                 GitHub:
-                <a href="https://github.com/pierce403/tako-bot">github.com/pierce403/tako-bot</a>
+                <a href="https://github.com/pierce403/takobot">github.com/pierce403/takobot</a>
               </li>
               <li>
                 Docs:
-                <a href="https://github.com/pierce403/tako-bot/blob/main/AGENTS.md">AGENTS</a>,
-                <a href="https://github.com/pierce403/tako-bot/blob/main/SOUL.md">SOUL</a>,
-                <a href="https://github.com/pierce403/tako-bot/blob/main/VISION.md">VISION</a>,
-                <a href="https://github.com/pierce403/tako-bot/blob/main/MEMORY.md">MEMORY</a>,
-                <a href="https://github.com/pierce403/tako-bot/blob/main/ONBOARDING.md">ONBOARDING</a>
+                <a href="https://github.com/pierce403/takobot/blob/main/AGENTS.md">AGENTS</a>,
+                <a href="https://github.com/pierce403/takobot/blob/main/SOUL.md">SOUL</a>,
+                <a href="https://github.com/pierce403/takobot/blob/main/VISION.md">VISION</a>,
+                <a href="https://github.com/pierce403/takobot/blob/main/MEMORY.md">MEMORY</a>,
+                <a href="https://github.com/pierce403/takobot/blob/main/ONBOARDING.md">ONBOARDING</a>
               </li>
               <li>
                 Features:
-                <a href="https://github.com/pierce403/tako-bot/blob/main/FEATURES.md">FEATURES.md</a>
+                <a href="https://github.com/pierce403/takobot/blob/main/FEATURES.md">FEATURES.md</a>
               </li>
               <li>
                 Entrypoint:

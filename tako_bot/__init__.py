@@ -1,4 +1,4 @@
-"""Takobot: highly autonomous octopus friend."""
+"""Takobot: your highly autonomous octopus friend."""
 
 from __future__ import annotations
 

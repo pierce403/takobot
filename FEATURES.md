@@ -66,6 +66,7 @@
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
   - Runs startup health checks (instance context, lock state, writable paths, dependency/network probes) before onboarding.
   - Detects inference providers from local CLI installs (`codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
+  - Codex inference subprocesses are invoked with sandbox/approval bypass flags to avoid false read-only replies during agentic chat.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
   - Prompts for XMTP control-channel setup first (ASAP), and delays identity/routine prompts until inference has actually run.

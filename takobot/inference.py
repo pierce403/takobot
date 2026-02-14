@@ -14,6 +14,10 @@ from typing import Any, Callable
 
 
 PROVIDER_PRIORITY = ("codex", "claude", "gemini")
+CODEX_AGENTIC_EXEC_ARGS = [
+    "--skip-git-repo-check",
+    "--dangerously-bypass-approvals-and-sandbox",
+]
 
 StreamEventHook = Callable[[str, str], None]
 
@@ -501,7 +505,7 @@ def _run_codex(prompt: str, *, env: dict[str, str], timeout_s: float) -> str:
     cmd = [
         "codex",
         "exec",
-        "--skip-git-repo-check",
+        *CODEX_AGENTIC_EXEC_ARGS,
         "--output-last-message",
         str(output_path),
         prompt,
@@ -745,7 +749,7 @@ async def _stream_codex(
     timeout_s: float,
     on_event: StreamEventHook | None,
 ) -> str:
-    cmd = ["codex", "exec", "--skip-git-repo-check", "--color", "never", "--json", prompt]
+    cmd = ["codex", "exec", *CODEX_AGENTIC_EXEC_ARGS, "--color", "never", "--json", prompt]
     final_messages: list[str] = []
     streamed_any_delta = False
 

@@ -773,6 +773,9 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Detects local inference bridges (<code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
               </li>
               <li>
+                Invokes Codex inference with sandbox/approval bypass flags so agentic chat reflects real workspace write capability.
+              </li>
+              <li>
                 Keeps inference execution gated until the first interactive chat turn, so startup remains deterministic.
               </li>
               <li>

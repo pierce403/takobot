@@ -481,11 +481,12 @@ async def _run_daemon(
 
 
 class _ConversationWithTyping:
+    _typing_unavailable_noted = False
+
     def __init__(self, conversation, *, hooks: RuntimeHooks | None = None) -> None:
         self._conversation = conversation
         self._hooks = hooks
         self._typing_supported: bool | None = None
-        self._typing_notice_emitted = False
 
     async def send(self, content: object, content_type: object | None = None):
         if content_type is not None:
@@ -512,8 +513,8 @@ class _ConversationWithTyping:
             return True
         if self._typing_supported is None:
             self._typing_supported = False
-            if not self._typing_notice_emitted:
-                self._typing_notice_emitted = True
+            if not _ConversationWithTyping._typing_unavailable_noted:
+                _ConversationWithTyping._typing_unavailable_noted = True
                 _emit_runtime_log(
                     "XMTP typing indicator is unavailable in this SDK/runtime; continuing without it.",
                     level="warn",

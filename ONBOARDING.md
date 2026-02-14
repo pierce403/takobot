@@ -13,6 +13,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] DOSE engine initialized at `.tako/state/dose.json`, shown in UI, and biases Type 1 → Type 2 escalation sensitivity.
 - [ ] PARA execution structure exists (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`) with README conventions.
 - [ ] Open loops index exists at `.tako/state/open_loops.json` and is surfaced in the UI sidebar.
+- [ ] Heartbeat can auto-commit pending workspace changes (git repo + `user.name`/`user.email` configured).
 - [ ] Skill/tool install pipeline works (quarantine → analyze → install disabled → enable requires operator approval).
 - [ ] `SOUL.md`, `MEMORY.md`, `tako.toml`, and `FEATURES.md` exist and are consistent with current behavior.
 
@@ -43,6 +44,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During `BOOTING`, inference execution remains gated; first model calls are allowed only after the first interactive chat turn.
 - During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
+- During heartbeat, Tako checks for pending git changes and auto-commits when possible.
 - During `RUNNING`, Tako keeps a small runtime-only DOSE model (D/O/S/E) ticking on heartbeat and reflecting mode in the UI.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**

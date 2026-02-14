@@ -15,6 +15,7 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 - [ ] DOSE engine initialized (`.tako/state/dose.json`) and visible in the UI.
 - [ ] Productivity folders exist (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`).
 - [ ] Open loops index initialized (`.tako/state/open_loops.json`).
+- [ ] Heartbeat git auto-commit works (`git add -A` + `git commit`) when `user.name`/`user.email` are configured.
 
 ## Operator Control Channel (XMTP)
 

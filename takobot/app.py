@@ -31,7 +31,7 @@ from .config import TakoConfig, load_tako_toml
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
-from .git_safety import assert_not_tracked, panic_check_runtime_secrets
+from .git_safety import assert_not_tracked, auto_commit_pending, panic_check_runtime_secrets
 from .inference import (
     InferenceRuntime,
     discover_inference_runtime,
@@ -259,6 +259,7 @@ class TakoTerminalApp(App[None]):
         self.type2_last = "none"
         self.event_total_written = 0
         self.event_total_ingested = 0
+        self.last_git_autocommit_error = ""
         self.inference_runtime: InferenceRuntime | None = None
         self.inference_state_path: Path | None = None
         self.inference_last_provider = "none"
@@ -1738,9 +1739,37 @@ class TakoTerminalApp(App[None]):
                         except Exception as exc:  # noqa: BLE001
                             self._write_system(f"dose save warning: {_summarize_error(exc)}")
                 self._refresh_open_loops(save=True)
+                await self._run_git_autocommit()
             await asyncio.sleep(
                 self.interval
                 + random.uniform(-HEARTBEAT_JITTER * self.interval, HEARTBEAT_JITTER * self.interval)
+            )
+
+    async def _run_git_autocommit(self) -> None:
+        result = await asyncio.to_thread(
+            auto_commit_pending,
+            repo_root(),
+            message="Heartbeat auto-commit: capture pending workspace changes",
+        )
+        if result.committed:
+            commit_ref = result.commit or "unknown"
+            self.last_git_autocommit_error = ""
+            self._add_activity("git", f"auto-commit {commit_ref}")
+            self._record_event(
+                "git.auto_commit.created",
+                f"Heartbeat auto-commit created ({commit_ref}).",
+                source="runtime",
+                metadata={"commit": result.commit},
+            )
+            return
+        if not result.ok and result.summary != self.last_git_autocommit_error:
+            self.last_git_autocommit_error = result.summary
+            self._write_system(result.summary)
+            self._record_event(
+                "git.auto_commit.error",
+                result.summary,
+                severity="warn",
+                source="runtime",
             )
 
     async def _enable_safe_mode(self) -> None:

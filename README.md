@@ -8,6 +8,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Inference execution gate so first model call starts on the first interactive chat turn
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
+- Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
@@ -128,5 +129,6 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
 - Codex inference subprocesses are launched with sandbox/approval bypass flags so agentic chat does not falsely assume a read-only environment.
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
+- On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

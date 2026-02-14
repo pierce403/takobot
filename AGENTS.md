@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — Heartbeat now auto-commits pending workspace changes
+
+- What happened: workspace files could remain untracked or uncommitted during active runtime loops.
+- Fix: added heartbeat-time git auto-commit (`git add -A` + `git commit`) for pending workspace changes in both app and daemon loops.
+- Prevention: heartbeat now treats “dirty git state” as actionable maintenance, not a manual follow-up.
+
 ### 2026-02-14 — Keep temp writes inside workspace + persist runtime logs
 
 - What happened: inference fallback used a default tempfile path (`/tmp`), and runtime diagnostics were not consistently persisted under `.tako/logs/`.

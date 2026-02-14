@@ -16,7 +16,7 @@ from typing import Callable
 from . import __version__
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
-from .git_safety import assert_not_tracked, panic_check_runtime_secrets
+from .git_safety import assert_not_tracked, auto_commit_pending, panic_check_runtime_secrets
 from .inference import InferenceRuntime, discover_inference_runtime, format_runtime_lines, run_inference_prompt_with_fallback
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
@@ -338,7 +338,7 @@ async def _run_daemon(
     _emit_runtime_log("Daemon started. Press Ctrl+C to stop.", hooks=hooks)
 
     start = time.monotonic()
-    heartbeat = asyncio.create_task(_heartbeat_loop(args))
+    heartbeat = asyncio.create_task(_heartbeat_loop(args, hooks=hooks))
     update_check = asyncio.create_task(_periodic_update_check_loop(hooks=hooks))
     reconnect_attempt = 0
     error_burst_count = 0
@@ -1006,12 +1006,25 @@ async def _poll_new_messages(client, seen_ids: set[bytes], seen_order: deque[byt
     return new_items
 
 
-async def _heartbeat_loop(args: argparse.Namespace) -> None:
+async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | None = None) -> None:
     first_tick = True
+    last_autocommit_error = ""
     while True:
         if first_tick:
             first_tick = False
             ensure_daily_log(daily_root(), date.today())
+        result = await asyncio.to_thread(
+            auto_commit_pending,
+            repo_root(),
+            message="Heartbeat auto-commit: capture pending workspace changes",
+        )
+        if result.committed:
+            tail = f" ({result.commit})" if result.commit else ""
+            _emit_runtime_log(f"git: heartbeat auto-commit created{tail}", hooks=hooks)
+            last_autocommit_error = ""
+        elif not result.ok and result.summary != last_autocommit_error:
+            last_autocommit_error = result.summary
+            _emit_runtime_log(result.summary, level="warn", stderr=True, hooks=hooks)
         interval = max(1.0, float(args.interval))
         await asyncio.sleep(interval + random.uniform(-0.2 * interval, 0.2 * interval))
 

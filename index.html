@@ -802,6 +802,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>
                 Starts heartbeat + event-log ingestion with Type 1 triage and Type 2 escalation for serious events.
               </li>
+              <li>On each heartbeat, auto-commits pending workspace changes when git identity is configured.</li>
               <li>
                 Maintains an open-loops index at <code>.tako/state/open_loops.json</code> (unfinished tasks + onboarding prompts) and shows it in the sidebar.
               </li>

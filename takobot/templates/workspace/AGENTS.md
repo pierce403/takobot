@@ -43,3 +43,6 @@ Directories:
 
 - Tako must avoid running twice against the same `.tako/` state (use locks).
 
+## Runtime Git Hygiene
+
+- On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when git identity is configured.

@@ -23,6 +23,7 @@ From the workspace root:
 
 - `.venv/bin/takobot` starts the interactive TUI (the main loop).
 - `takobot doctor`, `takobot run`, etc exist for developer/automation use, but the default UX is the TUI.
+- Heartbeat loops (`takobot` app and `takobot run`) auto-commit pending workspace changes (`git add -A` + `git commit`) when the repo and git identity are configured.
 
 ## Update Model
 

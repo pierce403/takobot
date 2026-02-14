@@ -36,14 +36,14 @@ Issues = "https://github.com/pierce403/takobot/issues"
 dev = ["build", "twine"]
 
 [project.scripts]
-tako = "tako_bot.cli:main"
+tako = "takobot.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tako_bot*"]
+include = ["takobot*"]
 
 [tool.setuptools.package-data]
-tako_bot = ["templates/**/*.md", "templates/**/*.toml"]
+takobot = ["templates/**/*.md", "templates/**/*.toml"]
 
 [tool.setuptools.exclude-package-data]
-tako_bot = ["**/*.pyc", "**/__pycache__/*"]
+takobot = ["**/*.pyc", "**/__pycache__/*"]

@@ -76,7 +76,7 @@ engine_installed() {
 import importlib.util
 import sys
 
-sys.exit(0 if importlib.util.find_spec("tako_bot") else 1)
+sys.exit(0 if importlib.util.find_spec("takobot") else 1)
 PY
 }
 
@@ -91,7 +91,7 @@ install_engine() {
     if engine_installed; then
       return 0
     fi
-    log "engine: PyPI package installed but did not provide tako_bot; falling back"
+    log "engine: PyPI package installed but did not provide takobot; falling back"
   fi
 
   log "engine: PyPI install failed; falling back to source clone"
@@ -111,7 +111,7 @@ materialize_templates() {
   log "workspace: materializing templates (no overwrite)"
   "$VENV_DIR/bin/python" - <<'PY' || die "template materialization failed"
 from pathlib import Path
-from tako_bot.workspace import materialize_workspace
+from takobot.workspace import materialize_workspace
 
 root = Path.cwd()
 result = materialize_workspace(root)

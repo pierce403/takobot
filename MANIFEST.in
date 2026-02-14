@@ -1,8 +1,8 @@
 include pyproject.toml
 include README.md
 
-recursive-include tako_bot *.py
-recursive-include tako_bot/templates *
+recursive-include takobot *.py
+recursive-include takobot/templates *
 
 prune .tako
 prune .venv

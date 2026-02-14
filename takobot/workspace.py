@@ -36,7 +36,7 @@ def materialize_workspace(root: Path) -> MaterializeResult:
     warning = ""
 
     try:
-        tmpl_root = importlib.resources.files("tako_bot.templates").joinpath("workspace")
+        tmpl_root = importlib.resources.files("takobot.templates").joinpath("workspace")
     except Exception as exc:  # noqa: BLE001
         return MaterializeResult([], [], f"workspace templates unavailable: {exc}")
 

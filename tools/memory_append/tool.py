@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from tako_bot.daily import ensure_daily_log
-from tako_bot.paths import daily_root
+from takobot.daily import ensure_daily_log
+from takobot.paths import daily_root
 
 TOOL_MANIFEST = {
     "name": "memory_append",

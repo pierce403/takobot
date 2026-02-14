@@ -19,7 +19,7 @@
 - **Properties**:
   - Uses `uv` to create/manage a virtualenv at `.venv/` (repo-local).
   - Installs dependencies from `requirements.txt` via `uv pip` when needed.
-  - Defaults to `python -m tako_bot app`.
+  - Defaults to `python -m takobot app`.
   - Exposes developer utilities (`doctor`, `hi`).
 - **Test Criteria**:
   - [x] `./tako.sh` starts the interactive app (dev path).
@@ -32,7 +32,7 @@
   - Creates `.venv/` in the workspace directory.
   - Attempts `pip install takobot`. If PyPI install fails, clones source into `.tako/tmp/src/` and installs from there.
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
-  - Materializes workspace templates from the installed engine (`tako_bot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
+  - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
   - Launches `.venv/bin/tako` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
   - Falls back to `.venv/bin/tako run` (stdout CLI daemon mode) when no interactive TTY is available.
@@ -41,11 +41,11 @@
   - [ ] In a non-interactive environment, the same command falls back to stdout daemon mode instead of exiting with a TTY error.
   - [ ] Re-running `setup.sh` is idempotent and does not overwrite edited files.
 
-### CLI entrypoints (`tako`, `python -m tako_bot`, `tako.py`)
+### CLI entrypoints (`tako`, `python -m takobot`, `tako.py`)
 - **Stability**: in-progress
 - **Description**: `tako` defaults to interactive app mode; subcommands remain for dev/automation paths.
 - **Properties**:
-  - `tako` / `python -m tako_bot` launch `app` mode by default (interactive terminal main loop).
+  - `tako` / `python -m takobot` launch `app` mode by default (interactive terminal main loop).
   - `tako app` starts the TUI explicitly.
   - `tako run` remains available for direct daemon loop (dev path).
   - `tako run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
@@ -55,7 +55,7 @@
   - `tako doctor` and `tako hi` exist as developer utilities.
   - `tako.py` remains as a backwards-compatible wrapper.
 - **Test Criteria**:
-  - [x] `python -m tako_bot doctor` runs and reports missing dependencies clearly.
+  - [x] `python -m takobot doctor` runs and reports missing dependencies clearly.
   - [x] `python tako.py --to <addr>` invokes the `hi` command path.
 
 ### Interactive terminal app main loop (`tako app`)

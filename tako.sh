@@ -195,4 +195,4 @@ then
   fi
 fi
 
-exec "$VENV_PY" -m tako_bot "${ARGS[@]}"
+exec "$VENV_PY" -m takobot "${ARGS[@]}"

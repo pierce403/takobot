@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sys
 
-from tako_bot.cli import main
+from takobot.cli import main
 
 
 def _argv() -> list[str]:

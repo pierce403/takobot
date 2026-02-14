@@ -85,7 +85,7 @@ Runtime-only (ignored):
 
 - Creates a local Python virtual environment in `.venv/`.
 - Attempts to install the engine with `pip install takobot` (PyPI). If that fails, it clones source into `.tako/tmp/src/` and installs from there.
-- Materializes the workspace from engine templates (`tako_bot/templates/**`) without overwriting existing files.
+- Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.

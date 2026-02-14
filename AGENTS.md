@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — Missing setup now triggers operator requests
+
+- What happened: startup/runtime warnings could report missing configuration (like git identity) without a direct operator ask in the TUI.
+- Fix: added explicit operator-request messages with concrete remediation commands for missing git identity, XMTP dependency, and parse failures.
+- Prevention: treat configuration gaps as operator-action prompts, not passive warnings.
+
 ### 2026-02-14 — Auto-update in TUI now applies and restarts by default
 
 - What happened: periodic update checks only announced new releases; operators expected unattended auto-update behavior in the TUI.

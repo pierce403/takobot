@@ -32,6 +32,24 @@ def is_git_repo(repo_root: Path) -> bool:
     return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
+def git_identity_status(repo_root: Path) -> tuple[bool, str]:
+    if not is_git_repo(repo_root):
+        return True, "git repo not initialized"
+
+    name_proc = _run_git(repo_root, "config", "--get", "user.name")
+    email_proc = _run_git(repo_root, "config", "--get", "user.email")
+    name = name_proc.stdout.strip() if name_proc.returncode == 0 else ""
+    email = email_proc.stdout.strip() if email_proc.returncode == 0 else ""
+
+    if name and email:
+        return True, f"{name} <{email}>"
+    if not name and not email:
+        return False, "git user.name/user.email are not configured"
+    if not name:
+        return False, "git user.name is not configured"
+    return False, "git user.email is not configured"
+
+
 def assert_not_tracked(repo_root: Path, path: Path) -> None:
     if not is_git_repo(repo_root):
         return
@@ -79,8 +97,10 @@ def auto_commit_pending(repo_root: Path, *, message: str) -> GitAutoCommitResult
     commit = _run_git(repo_root, "commit", "-m", message)
     if commit.returncode != 0:
         detail = " ".join(commit.stderr.strip().split()) or "commit failed"
-        if "Author identity unknown" in detail:
-            detail = "git user.name/user.email are not configured"
+        detail_lower = detail.lower()
+        if "author identity unknown" in detail_lower or "unable to auto-detect email address" in detail_lower:
+            _, identity = git_identity_status(repo_root)
+            detail = identity
         return GitAutoCommitResult(False, False, f"auto-commit failed: {detail}")
 
     head = _run_git(repo_root, "rev-parse", "--short", "HEAD")

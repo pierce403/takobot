@@ -172,7 +172,7 @@ EOF
   if git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then
     log "git: committed initial workspace"
   else
-    log "git: commit skipped (configure user.name/user.email to enable commits)"
+    log "git: commit skipped (operator action requested: configure git user.name/user.email, then retry commit)"
   fi
 }
 

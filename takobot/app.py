@@ -32,7 +32,7 @@ from .config import TakoConfig, load_tako_toml, set_updates_auto_apply
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
-from .git_safety import assert_not_tracked, auto_commit_pending, panic_check_runtime_secrets
+from .git_safety import assert_not_tracked, auto_commit_pending, git_identity_status, panic_check_runtime_secrets
 from .inference import (
     InferenceRuntime,
     discover_inference_runtime,
@@ -274,6 +274,7 @@ class TakoTerminalApp(App[None]):
         self.last_update_check_signature = ""
         self.auto_updates_enabled = True
         self.last_auto_update_error = ""
+        self.operator_requests_sent: set[str] = set()
 
         self.dose: dose.DoseState | None = None
         self.dose_path: Path | None = None
@@ -474,6 +475,14 @@ class TakoTerminalApp(App[None]):
                     severity="warn",
                     source="config",
                 )
+                self._request_operator_configuration(
+                    key="config.tako_toml",
+                    reason="could you please fix `tako.toml` so I can load workspace settings cleanly?",
+                    next_steps=[
+                        "run `doctor` to inspect current environment/config status",
+                        "fix TOML syntax in `tako.toml`, then restart `takobot`",
+                    ],
+                )
             else:
                 self._add_activity("config", "tako.toml loaded")
             self._add_activity("update", f"auto-updates {'on' if self.auto_updates_enabled else 'off'}")
@@ -607,6 +616,24 @@ class TakoTerminalApp(App[None]):
         except Exception:
             return False
 
+    def _request_operator_configuration(self, *, key: str, reason: str, next_steps: list[str]) -> None:
+        token = key.strip().lower()
+        if token in self.operator_requests_sent:
+            return
+        self.operator_requests_sent.add(token)
+        lines = [f"operator request: {reason}"]
+        for step in next_steps:
+            lines.append(f"- {step}")
+        message = "\n".join(lines)
+        self._write_tako(message)
+        self._add_activity("operator", f"request: {reason}")
+        self._record_event(
+            "operator.request.configuration",
+            reason,
+            source="operator",
+            metadata={"request_key": token, "next_steps": list(next_steps)},
+        )
+
     async def _initialize_reasoning_runtime(self) -> None:
         if self.paths is None:
             return
@@ -718,6 +745,7 @@ class TakoTerminalApp(App[None]):
         xmtp_import_ok, xmtp_import_status = probe_xmtp_import()
         web3_import_ok = importlib.util.find_spec("web3") is not None
         textual_import_ok = importlib.util.find_spec("textual") is not None
+        git_identity_ok, git_identity_detail = git_identity_status(repo_root())
 
         self.health_summary = {
             "instance_kind": self.instance_kind,
@@ -733,6 +761,8 @@ class TakoTerminalApp(App[None]):
             "xmtp_import_status": xmtp_import_status,
             "web3_import": _yes_no(web3_import_ok),
             "textual_import": _yes_no(textual_import_ok),
+            "git_identity_configured": _yes_no(git_identity_ok),
+            "git_identity_status": git_identity_detail,
             "dns_xmtp": _yes_no(dns_xmtp_ok),
             "python": platform.python_version(),
         }
@@ -756,6 +786,8 @@ class TakoTerminalApp(App[None]):
             issues.append(("warn", f"Low disk space under .tako: {disk_free_mb} MB free."))
         if not xmtp_import_ok:
             issues.append(("warn", f"xmtp import unavailable; {xmtp_import_status}"))
+        if not git_identity_ok:
+            issues.append(("warn", f"git identity unavailable; {git_identity_detail}"))
         if not dns_xmtp_ok:
             issues.append(("warn", "DNS lookup for XMTP host failed; outbound XMTP connectivity may be unavailable."))
         if self.inference_runtime is None:
@@ -793,6 +825,26 @@ class TakoTerminalApp(App[None]):
                 continue
             self._write_system(f"health issue [{severity}]: {message}")
             self._record_event("health.check.issue", message, severity=severity, source="health")
+
+        if not git_identity_ok:
+            self._request_operator_configuration(
+                key="git.identity",
+                reason="could you please configure git `user.name` and `user.email` so heartbeat auto-commit can run?",
+                next_steps=[
+                    "run `git config --global user.name \"Your Name\"`",
+                    "run `git config --global user.email \"you@example.com\"`",
+                    "or set repo-local values without `--global`",
+                ],
+            )
+        if not xmtp_import_ok:
+            self._request_operator_configuration(
+                key="deps.xmtp",
+                reason="could you please install XMTP support so pairing/runtime messaging can run?",
+                next_steps=[
+                    "run `.venv/bin/pip install --upgrade takobot xmtp`",
+                    "restart `takobot` and run `doctor`",
+                ],
+            )
 
     def _record_event(
         self,
@@ -1839,6 +1891,15 @@ class TakoTerminalApp(App[None]):
                 result.summary,
                 severity="warn",
                 source="runtime",
+            )
+        if not result.ok and _is_git_identity_error(result.summary):
+            self._request_operator_configuration(
+                key="git.identity",
+                reason="could you please configure git `user.name` and `user.email` so I can keep auto-committing pending changes?",
+                next_steps=[
+                    "run `git config --global user.name \"Your Name\"`",
+                    "run `git config --global user.email \"you@example.com\"`",
+                ],
             )
 
     async def _enable_safe_mode(self) -> None:
@@ -3704,6 +3765,11 @@ def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
 
 
+def _is_git_identity_error(text: str) -> bool:
+    lowered = text.lower()
+    return "user.name" in lowered or "user.email" in lowered or "author identity unknown" in lowered
+
+
 def _depth_for_severity(severity: str) -> str:
     rank = SEVERITY_ORDER.get(severity, 0)
     if rank >= 3:
@@ -3721,6 +3787,8 @@ def _type2_recommendation(event_type: str, message: str) -> str:
         return "Another Tako instance may be active here. Stop the duplicate process before continuing."
     if "xmtp import unavailable" in text or "no module named 'xmtp'" in text:
         return "XMTP dependency is missing. Install `takobot` (or `xmtp`) into `.venv`, then retry pairing/runtime startup."
+    if "user.name" in text or "user.email" in text or "author identity unknown" in text:
+        return "Configure git identity (`git config --global user.name ...` and `git config --global user.email ...`) so heartbeat auto-commit can run."
     if "dns lookup for xmtp" in text:
         return "Check network/DNS egress for XMTP hosts, then retry pairing or runtime startup."
     if "runtime crashed" in text or "runtime.crash" in kind:

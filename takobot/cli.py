@@ -16,7 +16,7 @@ from typing import Callable
 from . import __version__
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
-from .git_safety import assert_not_tracked, auto_commit_pending, panic_check_runtime_secrets
+from .git_safety import assert_not_tracked, auto_commit_pending, git_identity_status, panic_check_runtime_secrets
 from .inference import InferenceRuntime, discover_inference_runtime, format_runtime_lines, run_inference_prompt_with_fallback
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
@@ -224,6 +224,13 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
         f"- env: {env}",
         f"- keys: {'present' if paths.keys_json.exists() else 'missing'}",
     ]
+    git_identity_ok, git_identity_detail = git_identity_status(root)
+    lines.append(f"- git identity: {git_identity_detail}")
+    if not git_identity_ok:
+        problems.append(
+            "git identity missing: configure `git config --global user.name \"Your Name\"` and "
+            "`git config --global user.email \"you@example.com\"`"
+        )
 
     if operator and isinstance(operator.get("operator_address"), str):
         lines.append(f"- operator: {operator['operator_address']}")
@@ -1009,6 +1016,7 @@ async def _poll_new_messages(client, seen_ids: set[bytes], seen_order: deque[byt
 async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | None = None) -> None:
     first_tick = True
     last_autocommit_error = ""
+    last_operator_request = ""
     while True:
         if first_tick:
             first_tick = False
@@ -1022,9 +1030,19 @@ async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | Non
             tail = f" ({result.commit})" if result.commit else ""
             _emit_runtime_log(f"git: heartbeat auto-commit created{tail}", hooks=hooks)
             last_autocommit_error = ""
+            last_operator_request = ""
         elif not result.ok and result.summary != last_autocommit_error:
             last_autocommit_error = result.summary
             _emit_runtime_log(result.summary, level="warn", stderr=True, hooks=hooks)
+            if _is_git_identity_error(result.summary):
+                request = (
+                    "operator request: please configure git identity so auto-commit can run "
+                    "(`git config --global user.name \"Your Name\"` + "
+                    "`git config --global user.email \"you@example.com\"`)."
+                )
+                if request != last_operator_request:
+                    last_operator_request = request
+                    _emit_runtime_log(request, level="warn", stderr=True, hooks=hooks)
         interval = max(1.0, float(args.interval))
         await asyncio.sleep(interval + random.uniform(-0.2 * interval, 0.2 * interval))
 
@@ -1219,6 +1237,11 @@ def _clean_chat_reply(text: str) -> str:
     if len(value) > CHAT_REPLY_MAX_CHARS:
         return value[: CHAT_REPLY_MAX_CHARS - 3] + "..."
     return value
+
+
+def _is_git_identity_error(text: str) -> bool:
+    lowered = text.lower()
+    return "user.name" in lowered or "user.email" in lowered or "author identity unknown" in lowered
 
 
 def _summarize_stream_error(error: Exception) -> str:

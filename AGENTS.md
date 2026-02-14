@@ -53,6 +53,7 @@ Root directories (must exist):
 ## Working Agreements
 
 - **Commit and push** on every meaningful repo update (keep commits small and reviewable).
+- **Cut a new release for every new feature.** Any feature addition requires a version bump, tag, and PyPI publish.
 - Keep `index.html`, `README.md`, and `FEATURES.md` aligned with current behavior and entrypoints.
 - When changing behavior, update docs + website + feature tracker together.
 
@@ -65,6 +66,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-14 — Feature changes now always require release
+
+- What happened: feature work was occasionally merged without immediately cutting a new package release.
+- Fix: added a working agreement that every new feature requires a version bump, tag, and PyPI publish.
+- Prevention: treat feature merge completion and release completion as a single definition of done.
 
 ### 2026-02-14 — XMTP became a required package dependency
 

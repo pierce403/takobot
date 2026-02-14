@@ -209,6 +209,11 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
         import xmtp  # noqa: F401
 
         lines.append("- xmtp: import OK")
+    except ModuleNotFoundError as exc:
+        if exc.name == "xmtp":
+            problems.append('xmtp import failed: missing dependency. Install with: pip install "takobot[xmtp]"')
+        else:
+            problems.append(f"xmtp import failed: {exc}")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"xmtp import failed: {exc}")
 

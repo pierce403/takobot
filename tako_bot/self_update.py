@@ -10,7 +10,7 @@ import importlib.metadata
 
 GIT_TIMEOUT_S = 45.0
 PIP_TIMEOUT_S = 90.0
-ENGINE_PACKAGE_NAME = "tako"
+ENGINE_PACKAGE_NAME = "takobot"
 
 
 @dataclass(frozen=True)

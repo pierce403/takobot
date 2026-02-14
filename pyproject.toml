@@ -3,7 +3,7 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tako"
+name = "takobot"
 version = "0.1.0"
 description = "Tako — highly autonomous operator-imprinted agent"
 readme = "README.md"
@@ -12,6 +12,28 @@ dependencies = [
   "textual",
   "web3",
 ]
+authors = [{ name = "pierce403" }]
+keywords = ["agent", "tui", "xmtp", "gtd", "para"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://tako.bot"
+Repository = "https://github.com/pierce403/tako-bot"
+Issues = "https://github.com/pierce403/tako-bot/issues"
+
+[project.optional-dependencies]
+xmtp = ["xmtp"]
+dev = ["build", "twine"]
 
 [project.scripts]
 tako = "tako_bot.cli:main"
@@ -21,5 +43,7 @@ where = ["."]
 include = ["tako_bot*"]
 
 [tool.setuptools.package-data]
-tako_bot = ["templates/**/*"]
+tako_bot = ["templates/**/*.md", "templates/**/*.toml"]
 
+[tool.setuptools.exclude-package-data]
+tako_bot = ["**/*.pyc", "**/__pycache__/*"]

@@ -82,7 +82,7 @@ Runtime-only (ignored):
 ## What happens on first run
 
 - Creates a local Python virtual environment in `.venv/`.
-- Installs the engine with `pip install tako` (PyPI). If that fails, it clones source into `.tako/tmp/src/` and installs from there.
+- Attempts to install the engine with `pip install takobot` (PyPI). If that fails, it clones source into `.tako/tmp/src/` and installs from there.
 - Materializes the workspace from engine templates (`tako_bot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
@@ -119,4 +119,4 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
-- The XMTP Python SDK (`xmtp`) may compile native components on install, so make sure Rust is available if needed.
+- XMTP support is optional: install with `pip install "takobot[xmtp]"` (may compile native components; Rust may be required).

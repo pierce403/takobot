@@ -1,0 +1,40 @@
+include pyproject.toml
+include README.md
+
+recursive-include tako_bot *.py
+recursive-include tako_bot/templates *
+
+prune .tako
+prune .venv
+prune .github
+prune build
+prune dist
+prune __pycache__
+prune archives
+prune areas
+prune dev
+prune memory
+prune projects
+prune resources
+prune skills
+prune tasks
+prune tools
+
+exclude AGENTS.md
+exclude DEPLOYMENT.md
+exclude FEATURES.md
+exclude MEMORY.md
+exclude ONBOARDING.md
+exclude SECURITY_MODEL.md
+exclude SOUL.md
+exclude VISION.md
+exclude index.html
+exclude CNAME
+exclude og-card.png
+
+global-exclude *.py[cod]
+global-exclude __pycache__/*
+global-exclude *.db3
+global-exclude *.db3-wal
+global-exclude *.db3-shm
+global-exclude .DS_Store

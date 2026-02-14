@@ -3,11 +3,11 @@ set -euo pipefail
 
 # Tako workspace bootstrap (curl | bash friendly).
 #
-# Creates a local .venv, installs the engine (`pip install tako` with a fallback),
+# Creates a local .venv, attempts to install the engine (`pip install takobot` with a fallback),
 # materializes workspace templates, initializes git (if available), then launches
 # the interactive TUI main loop.
 
-ENGINE_PYPI_NAME="tako"
+ENGINE_PYPI_NAME="takobot"
 ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/tako-bot.git"
 
 WORKDIR="$(pwd -P)"
@@ -87,7 +87,7 @@ install_engine() {
   fi
 
   log "engine: installing from PyPI ($ENGINE_PYPI_NAME)"
-  if "$VENV_DIR/bin/python" -m pip install "$ENGINE_PYPI_NAME" >/dev/null; then
+  if "$VENV_DIR/bin/python" -m pip install "$ENGINE_PYPI_NAME" >/dev/null 2>&1; then
     if engine_installed; then
       return 0
     fi

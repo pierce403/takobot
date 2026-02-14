@@ -3116,7 +3116,15 @@ class TakoTerminalApp(App[None]):
             operator_paired=self.operator_paired,
         )
         frame = int((time.monotonic() - self.started_at) * 2.0)
-        self.octo_panel.update(_octopus_panel_text(level, frame))
+        self.octo_panel.update(
+            _octopus_panel_text(
+                level,
+                frame,
+                version=__version__,
+                dose_state=self.dose,
+                dose_label=self.dose_label,
+            )
+        )
 
         event_log_value = str(self.event_log_path) if self.event_log_path is not None else "not ready"
         memory = (
@@ -3574,10 +3582,34 @@ def _octopus_level(*, heartbeat_ticks: int, type2_escalations: int, operator_pai
     return 0
 
 
-def _octopus_panel_text(level: int, frame: int) -> str:
+def _octopus_panel_text(
+    level: int,
+    frame: int,
+    *,
+    version: str,
+    dose_state: dose.DoseState | None,
+    dose_label: str,
+) -> str:
     art = _octopus_art(level, frame)
     mood = "zzz" if frame % 12 == 0 else "~"
-    return f"Tako L{level} {mood}\n{art}"
+    if dose_state is None:
+        dose_line = "D○○○○ O○○○○ S○○○○ E○○○○ pending"
+    else:
+        dose_line = (
+            f"D{_dose_meter(dose_state.d)} "
+            f"O{_dose_meter(dose_state.o)} "
+            f"S{_dose_meter(dose_state.s)} "
+            f"E{_dose_meter(dose_state.e)} "
+            f"{dose_label}"
+        )
+    return f"Takobot v{version} | L{level} {mood}\n{dose_line}\n{art}"
+
+
+def _dose_meter(value: float, *, width: int = 4) -> str:
+    clamped = max(0.0, min(1.0, float(value)))
+    filled = int(round(clamped * width))
+    filled = max(0, min(width, filled))
+    return ("●" * filled) + ("○" * (width - filled))
 
 
 def _octopus_art(level: int, frame: int) -> str:

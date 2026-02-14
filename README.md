@@ -10,7 +10,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
-- TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated leveling ASCII octopus panel
+- TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 
@@ -94,6 +94,7 @@ Runtime-only (ignored):
 - Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
+- Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
 - Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
 - Type 2 escalation uses discovered inference providers with fallback across ready CLIs after the first interactive chat turn, then falls back to heuristic guidance if inference calls fail.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit with plain-text chat still available.

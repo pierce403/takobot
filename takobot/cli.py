@@ -4,7 +4,8 @@ import asyncio
 import argparse
 import contextlib
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 import random
 import re
 import sys
@@ -56,6 +57,7 @@ class RuntimeHooks:
     log: Callable[[str, str], None] | None = None
     inbound_message: Callable[[str, str], None] | None = None
     emit_console: bool = True
+    log_file: Path | None = None
 
 
 def _emit_runtime_log(
@@ -67,8 +69,28 @@ def _emit_runtime_log(
 ) -> None:
     if hooks and hooks.log:
         hooks.log(level, message)
+    if hooks and hooks.log_file is not None:
+        _append_runtime_log(hooks.log_file, level=level, message=message)
     if hooks is None or hooks.emit_console:
         print(message, file=sys.stderr if stderr else sys.stdout)
+
+
+def _append_runtime_log(log_file: Path, *, level: str, message: str) -> None:
+    normalized_message = " ".join(message.split())
+    stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+    line = f"{stamp} [{level.lower()}] {normalized_message}\n"
+    with contextlib.suppress(Exception):
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+
+
+def _hooks_with_log_file(hooks: RuntimeHooks | None, log_file: Path) -> RuntimeHooks:
+    if hooks is None:
+        return RuntimeHooks(log_file=log_file)
+    if hooks.log_file is not None:
+        return hooks
+    return replace(hooks, log_file=log_file)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -248,17 +270,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     address = derive_eth_address(wallet_key)
     operator_cfg = load_operator(paths.operator_json)
     operator_inbox_id = get_operator_inbox_id(operator_cfg)
+    hooks = _hooks_with_log_file(None, paths.logs_dir / "runtime.log")
 
-    _emit_runtime_log(f"takobot address: {address}")
-    _emit_runtime_log("status: starting daemon")
+    _emit_runtime_log(f"takobot address: {address}", hooks=hooks)
+    _emit_runtime_log("status: starting daemon", hooks=hooks)
     if operator_inbox_id:
-        _emit_runtime_log("pairing: operator already imprinted")
+        _emit_runtime_log("pairing: operator already imprinted", hooks=hooks)
     else:
-        _emit_runtime_log("pairing: unpaired (launch `takobot` for terminal onboarding)")
+        _emit_runtime_log("pairing: unpaired (launch `takobot` for terminal onboarding)", hooks=hooks)
 
     try:
         with instance_lock(paths.locks_dir / "tako.lock"):
-            return asyncio.run(_run_daemon(args, paths, env, wallet_key, db_encryption_key, address))
+            return asyncio.run(_run_daemon(args, paths, env, wallet_key, db_encryption_key, address, hooks=hooks))
     except KeyboardInterrupt:
         return 130
     except Exception as exc:  # noqa: BLE001
@@ -277,6 +300,7 @@ async def _run_daemon(
 ) -> int:
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
+    hooks = _hooks_with_log_file(hooks, paths.logs_dir / "runtime.log")
 
     try:
         client = await create_client(env, paths.xmtp_db_dir, wallet_key, db_encryption_key)

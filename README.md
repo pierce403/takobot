@@ -76,6 +76,8 @@ Runtime-only (ignored):
 
 - `.tako/keys.json` (XMTP wallet key + DB encryption key; unencrypted, file perms only)
 - `.tako/operator.json` (operator imprint metadata)
+- `.tako/logs/` (runtime and terminal logs)
+- `.tako/tmp/` (workspace-local temp files used by inference and bootstrap fallback)
 - `.tako/xmtp-db/` (local XMTP DB)
 - `.tako/state/**` (runtime state: heartbeat/cognition/etc)
 - `.tako/quarantine/**` (download quarantine for skills/tools)
@@ -88,6 +90,7 @@ Runtime-only (ignored):
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
+- Creates runtime logs/temp directories at `.tako/logs/` and `.tako/tmp/`.
 - Creates a local XMTP database at `.tako/xmtp-db/`.
 - Launches the interactive terminal app main loop (`takobot`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
@@ -122,6 +125,8 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - XMTP client initialization disables history sync by default for compatibility.
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
+- Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
 - Codex inference subprocesses are launched with sandbox/approval bypass flags so agentic chat does not falsely assume a read-only environment.
+- Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

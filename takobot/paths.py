@@ -64,6 +64,7 @@ class RuntimePaths:
     operator_json: Path
     locks_dir: Path
     logs_dir: Path
+    tmp_dir: Path
     state_dir: Path
     xmtp_db_dir: Path
 
@@ -76,6 +77,7 @@ def runtime_paths() -> RuntimePaths:
         operator_json=root / "operator.json",
         locks_dir=root / "locks",
         logs_dir=root / "logs",
+        tmp_dir=root / "tmp",
         state_dir=root / "state",
         xmtp_db_dir=root / "xmtp-db",
     )
@@ -86,6 +88,7 @@ def ensure_runtime_dirs(paths: RuntimePaths | None = None) -> RuntimePaths:
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.locks_dir.mkdir(parents=True, exist_ok=True)
     paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    paths.tmp_dir.mkdir(parents=True, exist_ok=True)
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     paths.xmtp_db_dir.mkdir(parents=True, exist_ok=True)
     return paths

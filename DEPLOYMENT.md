@@ -4,7 +4,7 @@
 
 - **Engine**: the Python package (`takobot`, module `takobot`) installed into a local venv. This is the TUI + cognition loops + XMTP runtime + tool plumbing.
 - **Workspace**: git-tracked Markdown + config + optional local code (`tools/` + `skills/`).
-- **Runtime state**: `.tako/` (ignored). Holds keys, local DBs, locks, and runtime indexes.
+- **Runtime state**: `.tako/` (ignored). Holds keys, local DBs, locks, logs, local temp files, and runtime indexes.
 
 ## Bootstrap (curl | bash)
 

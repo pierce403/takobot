@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .paths import ensure_runtime_dirs, runtime_paths
+
 
 PROVIDER_PRIORITY = ("codex", "claude", "gemini")
 CODEX_AGENTIC_EXEC_ARGS = [
@@ -500,8 +502,7 @@ def _detect_gemini(home: Path, env: os._Environ[str]) -> tuple[InferenceProvider
 
 
 def _run_codex(prompt: str, *, env: dict[str, str], timeout_s: float) -> str:
-    with tempfile.NamedTemporaryFile(prefix="tako-codex-", suffix=".txt", delete=False) as handle:
-        output_path = Path(handle.name)
+    output_path = _new_workspace_temp_file(prefix="tako-codex-", suffix=".txt")
     cmd = [
         "codex",
         "exec",
@@ -626,8 +627,7 @@ def _tilde_path(path: Path) -> str:
 
 
 def _run_with_provider(runtime: InferenceRuntime, provider: str, prompt: str, *, timeout_s: float) -> str:
-    env = os.environ.copy()
-    env.update(runtime.env_overrides_for(provider))
+    env = _provider_env(runtime, provider)
     if provider == "codex":
         return _run_codex(prompt, env=env, timeout_s=timeout_s)
     if provider == "claude":
@@ -645,8 +645,7 @@ async def _stream_with_provider(
     timeout_s: float,
     on_event: StreamEventHook | None,
 ) -> str:
-    env = os.environ.copy()
-    env.update(runtime.env_overrides_for(provider))
+    env = _provider_env(runtime, provider)
 
     if provider == "gemini":
         return await _stream_gemini(prompt, env=env, timeout_s=timeout_s, on_event=on_event)
@@ -880,3 +879,25 @@ def _summarize_error_text(text: str) -> str:
     if len(value) <= 220:
         return value
     return f"{value[:217]}..."
+
+
+def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(runtime.env_overrides_for(provider))
+    tmp_dir = _workspace_tmp_dir()
+    tmp_value = str(tmp_dir)
+    env["TMPDIR"] = tmp_value
+    env["TMP"] = tmp_value
+    env["TEMP"] = tmp_value
+    return env
+
+
+def _workspace_tmp_dir() -> Path:
+    paths = ensure_runtime_dirs(runtime_paths())
+    return paths.tmp_dir
+
+
+def _new_workspace_temp_file(*, prefix: str, suffix: str) -> Path:
+    tmp_dir = _workspace_tmp_dir()
+    with tempfile.NamedTemporaryFile(prefix=prefix, suffix=suffix, dir=tmp_dir, delete=False) as handle:
+        return Path(handle.name)

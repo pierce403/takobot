@@ -49,6 +49,7 @@
   - `takobot app` starts the TUI explicitly.
   - `takobot run` remains available for direct daemon loop (dev path).
   - Daemon/runtime performs periodic update checks and logs when a newer package version is available.
+  - `takobot run` appends daemon/runtime lines to `.tako/logs/runtime.log`.
   - `takobot run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
   - If stream failures persist, `takobot run` falls back to polling message history until stream mode stabilizes.
   - App onboarding performs terminal-first outbound pairing and then starts runtime tasks.
@@ -76,9 +77,11 @@
   - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes discovered inference providers with automatic fallback across ready CLIs.
+  - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Includes an activity panel with inference/tool/runtime trace lines.
+  - App transcript/system lines are appended to `.tako/logs/app.log`.
   - Streams in-progress inference output into a scrollable "bubble stream" panel above the input box (Cursor/Claude style).
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
@@ -102,6 +105,8 @@
   - [x] After pairing, non-command text in terminal still receives chat replies.
   - [x] Activity panel shows inference/tool/runtime actions.
   - [x] Octopus panel shows Takobot version and live DOSE indicators.
+  - [x] Runtime logs are persisted under `.tako/logs/runtime.log` and app transcript/system logs under `.tako/logs/app.log`.
+  - [x] Inference provider subprocesses use workspace-local temp files under `.tako/tmp/`.
   - [x] Terminal chat inference streams output to the bubble-stream panel while generating.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
   - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).

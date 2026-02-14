@@ -243,6 +243,7 @@ class TakoTerminalApp(App[None]):
         self.shutdown_complete = False
 
         self.event_log_path: Path | None = None
+        self.app_log_path: Path | None = None
         self.event_cursor = 0
         self.pending_events: list[dict[str, Any]] = []
         self.seen_event_ids: set[str] = set()
@@ -453,6 +454,7 @@ class TakoTerminalApp(App[None]):
 
         try:
             self.paths = ensure_runtime_dirs(runtime_paths())
+            self.app_log_path = self.paths.logs_dir / "app.log"
             root = repo_root()
 
             cfg, warn = load_tako_toml(root / "tako.toml")
@@ -1538,7 +1540,12 @@ class TakoTerminalApp(App[None]):
 
         await self._stop_xmtp_runtime()
 
-        hooks = RuntimeHooks(log=self._on_runtime_log, inbound_message=self._on_runtime_inbound, emit_console=False)
+        hooks = RuntimeHooks(
+            log=self._on_runtime_log,
+            inbound_message=self._on_runtime_inbound,
+            emit_console=False,
+            log_file=self.paths.logs_dir / "runtime.log",
+        )
         args = argparse.Namespace(interval=self.interval, once=False)
         self.runtime_mode = "stream"
         self.runtime_task = asyncio.create_task(
@@ -3165,19 +3172,36 @@ class TakoTerminalApp(App[None]):
         self.activity_panel.update(_activity_text(list(self.activity_entries)))
 
     def _write_tako(self, text: str) -> None:
-        line = f"Tako: {_sanitize_for_display(text)}"
+        safe = _sanitize_for_display(text)
+        line = f"Tako: {safe}"
         self.transcript_lines.append(line)
         self.transcript.write(line)
+        self._append_app_log("tako", safe)
 
     def _write_user(self, text: str) -> None:
-        line = f"You: {_sanitize_for_display(text)}"
+        safe = _sanitize_for_display(text)
+        line = f"You: {safe}"
         self.transcript_lines.append(line)
         self.transcript.write(line)
+        self._append_app_log("user", safe)
 
     def _write_system(self, text: str) -> None:
-        line = f"System: {_sanitize_for_display(text)}"
+        safe = _sanitize_for_display(text)
+        line = f"System: {safe}"
         self.transcript_lines.append(line)
         self.transcript.write(line)
+        self._append_app_log("system", safe)
+
+    def _append_app_log(self, channel: str, message: str) -> None:
+        if self.app_log_path is None:
+            return
+        stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+        safe_channel = channel.strip().lower() or "system"
+        safe_message = " ".join(message.split())
+        with contextlib.suppress(Exception):
+            self.app_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.app_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{stamp} [{safe_channel}] {safe_message}\n")
 
     def _add_activity(self, kind: str, detail: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")

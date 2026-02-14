@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — Keep temp writes inside workspace + persist runtime logs
+
+- What happened: inference fallback used a default tempfile path (`/tmp`), and runtime diagnostics were not consistently persisted under `.tako/logs/`.
+- Fix: moved inference temp output + subprocess temp env (`TMPDIR`/`TMP`/`TEMP`) to `.tako/tmp/`, and started writing daemon/app logs to `.tako/logs/`.
+- Prevention: keep all runtime writes under workspace-local `.tako/` paths and treat log persistence as a required runtime capability.
+
 ### 2026-02-14 — Feature changes now always require release
 
 - What happened: feature work was occasionally merged without immediately cutting a new package release.

@@ -4,7 +4,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 ## Done When
 
-- [ ] `.tako/` runtime structure exists (`locks/`, `logs/`, `state/`, `xmtp-db/`) and `.tako/keys.json` exists.
+- [ ] `.tako/` runtime structure exists (`locks/`, `logs/`, `tmp/`, `state/`, `xmtp-db/`) and `.tako/keys.json` exists.
 - [ ] `.venv/` exists and the engine is installed (`.venv/bin/tako` runs).
 - [ ] An XMTP identity key exists locally (no external secrets required).
 - [ ] Operator is imprinted (paired) and stored locally, or local-only mode is explicitly chosen.
@@ -20,7 +20,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 1) **Initialize runtime dirs**
 
-- Create: `.tako/locks/`, `.tako/logs/`, `.tako/state/`, `.tako/xmtp-db/`.
+- Create: `.tako/locks/`, `.tako/logs/`, `.tako/tmp/`, `.tako/state/`, `.tako/xmtp-db/`.
 
 2) **Launch interactive terminal app**
 
@@ -38,6 +38,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
   - `RUNNING`
 - During `BOOTING`, Tako runs a startup health check (instance context, lock state, and resource probes).
 - During `BOOTING`, Tako scans local inference bridges (`codex`, `claude`, `gemini`) and records runtime metadata in `.tako/state/inference.json`.
+- During runtime, Tako appends daemon/app diagnostics to `.tako/logs/runtime.log` and `.tako/logs/app.log`.
+- During inference provider subprocess execution, Tako pins temp writes to `.tako/tmp/` via `TMPDIR`/`TMP`/`TEMP`.
 - During `BOOTING`, inference execution remains gated; first model calls are allowed only after the first interactive chat turn.
 - During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).

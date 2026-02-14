@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Creates a local .venv, attempts to install/upgrade the engine (`pip install --upgrade takobot` with a fallback),
 # materializes workspace templates, initializes git (if available), then launches
-# the interactive TUI main loop (or CLI daemon mode if no interactive TTY exists).
+# the interactive TUI main loop with `python -m takobot` (or CLI daemon mode if no interactive TTY exists).
 
 ENGINE_PYPI_NAME="takobot"
 ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/takobot.git"
@@ -183,16 +183,16 @@ interactive_tty_available() {
 launch() {
   if interactive_tty_available; then
     if [[ -t 0 ]]; then
-      exec "$VENV_DIR/bin/tako"
+      exec "$VENV_DIR/bin/python" -m takobot
     fi
     if [[ -e /dev/tty ]] && ( : </dev/tty ) 2>/dev/null; then
       exec </dev/tty
-      exec "$VENV_DIR/bin/tako"
+      exec "$VENV_DIR/bin/python" -m takobot
     fi
   fi
 
   log "launch: no interactive TTY detected; starting command-line daemon mode"
-  exec "$VENV_DIR/bin/tako" run
+  exec "$VENV_DIR/bin/python" -m takobot run
 }
 
 main() {

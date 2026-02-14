@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from importlib import metadata
 import socket
 from pathlib import Path
 
@@ -25,6 +26,36 @@ def hint_for_xmtp_error(error: Exception) -> str | None:
             "a fresh runtime directory to recreate it."
         )
     return None
+
+
+def probe_xmtp_import() -> tuple[bool, str]:
+    package_version: str | None = None
+    try:
+        package_version = metadata.version("xmtp")
+    except metadata.PackageNotFoundError:
+        package_version = None
+    except Exception:
+        package_version = None
+
+    try:
+        import xmtp  # noqa: F401
+    except ModuleNotFoundError as exc:
+        missing_name = (exc.name or "").strip()
+        if missing_name == "xmtp":
+            if package_version:
+                return False, f"package xmtp=={package_version} is installed, but import still failed: {exc}"
+            return False, "package `xmtp` is not installed in this Python environment."
+        if package_version:
+            return False, f"xmtp=={package_version} is installed, but a subdependency is missing: {missing_name or exc}"
+        return False, f"xmtp import failed: missing module {missing_name or exc}"
+    except Exception as exc:  # noqa: BLE001
+        if package_version:
+            return False, f"xmtp=={package_version} is installed, but import failed: {exc}"
+        return False, f"xmtp import failed: {exc}"
+
+    if package_version:
+        return True, f"import OK (xmtp=={package_version})"
+    return True, "import OK"
 
 
 async def create_client(env: str, db_root: Path, wallet_key: str, db_encryption_key: str) -> object:

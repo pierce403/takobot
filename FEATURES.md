@@ -34,32 +34,32 @@
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
-  - Launches `.venv/bin/tako` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
-  - Falls back to `.venv/bin/tako run` (stdout CLI daemon mode) when no interactive TTY is available.
+  - Launches `.venv/bin/takobot` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
+  - Falls back to `.venv/bin/takobot run` (stdout CLI daemon mode) when no interactive TTY is available.
 - **Test Criteria**:
   - [ ] In an empty dir with an interactive TTY, `curl -fsSL https://tako.bot/setup.sh | bash` creates `.venv/`, materializes workspace files, initializes git on `main`, and launches the TUI.
   - [ ] In a non-interactive environment, the same command falls back to stdout daemon mode instead of exiting with a TTY error.
   - [ ] Re-running `setup.sh` is idempotent and does not overwrite edited files.
 
-### CLI entrypoints (`tako`, `python -m takobot`, `tako.py`)
+### CLI entrypoints (`takobot`, `python -m takobot`, `tako.py`)
 - **Stability**: in-progress
-- **Description**: `tako` defaults to interactive app mode; subcommands remain for dev/automation paths.
+- **Description**: `takobot` defaults to interactive app mode; subcommands remain for dev/automation paths.
 - **Properties**:
-  - `tako` / `python -m takobot` launch `app` mode by default (interactive terminal main loop).
-  - `tako app` starts the TUI explicitly.
-  - `tako run` remains available for direct daemon loop (dev path).
+  - `takobot` / `python -m takobot` launch `app` mode by default (interactive terminal main loop).
+  - `takobot app` starts the TUI explicitly.
+  - `takobot run` remains available for direct daemon loop (dev path).
   - Daemon/runtime performs periodic update checks and logs when a newer package version is available.
-  - `tako run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
-  - If stream failures persist, `tako run` falls back to polling message history until stream mode stabilizes.
+  - `takobot run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
+  - If stream failures persist, `takobot run` falls back to polling message history until stream mode stabilizes.
   - App onboarding performs terminal-first outbound pairing and then starts runtime tasks.
-  - `tako bootstrap` remains as a legacy/bootstrap utility path.
-  - `tako doctor` and `tako hi` exist as developer utilities.
+  - `takobot bootstrap` remains as a legacy/bootstrap utility path.
+  - `takobot doctor` and `takobot hi` exist as developer utilities.
   - `tako.py` remains as a backwards-compatible wrapper.
 - **Test Criteria**:
   - [x] `python -m takobot doctor` runs and reports missing dependencies clearly.
   - [x] `python tako.py --to <addr>` invokes the `hi` command path.
 
-### Interactive terminal app main loop (`tako app`)
+### Interactive terminal app main loop (`takobot app`)
 - **Stability**: in-progress
 - **Description**: A persistent full-screen terminal UI acts as the primary operator-facing runtime loop.
 - **Properties**:
@@ -87,7 +87,7 @@
   - Rebinds app stdin to `/dev/tty` in launcher flow so `curl ... | bash` startup doesn't inherit a pipe for TUI input.
   - Surfaces operational failures as concise in-UI error cards with suggested next actions.
 - **Test Criteria**:
-  - [x] Running `tako` opens app mode by default (no required subcommand).
+  - [x] Running `takobot` opens app mode by default (no required subcommand).
   - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
   - [x] XMTP setup prompt appears first in-chat on unpaired startup.
   - [x] Identity + routine onboarding prompts are delayed until inference is active (or manually triggered).
@@ -114,7 +114,7 @@
   - Displayed in the TUI status bar and sidebar sensor panel.
   - Biases Type 1 → Type 2 escalation sensitivity (more cautious when low S/E; more tolerant when high S/E).
 - **Test Criteria**:
-  - [ ] Launch `tako` shows DOSE values + label in the UI.
+  - [ ] Launch `takobot` shows DOSE values + label in the UI.
   - [ ] A simulated runtime/pairing failure reduces S/E and shifts the label toward `stressed`.
   - [ ] After calm heartbeats, DOSE decays back toward baseline.
   - [ ] Type 1 → Type 2 escalation threshold changes measurably with DOSE (critical/error still escalate).
@@ -134,7 +134,7 @@
   - `weekly` review surfaces stale tasks and projects missing a next action, and prompts for archive + promote.
   - DOSE biases planning hints (e.g., stressed tides reduce churn; high D suggests exploration).
 - **Test Criteria**:
-  - [ ] Running `tako` on a new day creates today’s daily log and offers `morning` if outcomes are blank.
+  - [ ] Running `takobot` on a new day creates today’s daily log and offers `morning` if outcomes are blank.
   - [ ] Sidebar shows open tasks + open loops count and oldest age.
   - [ ] `task <title>` creates a file under `tasks/` and appends a daily log note.
   - [ ] `tasks` lists open tasks and filters by project/area/due.
@@ -182,7 +182,7 @@
   - [x] A `0x…` recipient is returned unchanged.
   - [x] A `.eth` recipient attempts ENS resolution and falls back before erroring.
 
-### One-off XMTP DM send (`tako hi`)
+### One-off XMTP DM send (`takobot hi`)
 - **Stability**: stable
 - **Description**: Creates an XMTP client, opens a DM, and sends a message.
 - **Properties**:
@@ -231,7 +231,7 @@
   - Operator can run `web <url>` and `run <command>` over XMTP.
   - Plain-text XMTP messages are handled as chat (inference-backed when available) while command-style messages route to command handlers.
 - **Test Criteria**:
-  - [x] `tako` app mode can complete first pairing without requiring inbound XMTP stream health.
+  - [x] `takobot` app mode can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
   - [x] Operator can run `update` / `update check` over XMTP and receive result details.
   - [x] Operator can run `web` / `run` over XMTP and receive output.
@@ -241,10 +241,10 @@
 - **Stability**: in-progress
 - **Description**: OpenClaw-style daily logs are committed under `memory/dailies/`, while runtime state stays under `.tako/`.
 - **Properties**:
-  - `tako` app mode and `tako run` ensure today’s daily log exists.
+  - `takobot` app mode and `takobot run` ensure today’s daily log exists.
   - Daily log templates warn against secrets.
 - **Test Criteria**:
-  - [x] Running `tako` or `tako run` creates `memory/dailies/YYYY-MM-DD.md` if missing.
+  - [x] Running `takobot` or `takobot run` creates `memory/dailies/YYYY-MM-DD.md` if missing.
 
 ### Tool discovery (`tools/*/tool.py`)
 - **Stability**: in-progress

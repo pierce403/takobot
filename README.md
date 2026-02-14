@@ -2,7 +2,7 @@
 
 Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
-- A first-class interactive terminal app main loop (`tako`) with transcript, status bar, panels, and input box
+- A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Inference-provider discovery for Codex / Claude / Gemini CLIs with key-source detection
 - Inference execution gate so first model call starts on the first interactive chat turn
@@ -30,19 +30,19 @@ cd tako-workspace
 curl -fsSL https://tako.bot/setup.sh | bash
 ```
 
-If no interactive TTY is available, bootstrap falls back to command-line daemon mode (`.venv/bin/tako run`) instead of exiting.
+If no interactive TTY is available, bootstrap falls back to command-line daemon mode (`python -m takobot run`) instead of exiting.
 
 Next runs:
 
 ```bash
-.venv/bin/tako
+.venv/bin/takobot
 ```
 
 Bootstrap refuses to run in a non-empty directory unless it already looks like a Tako workspace (has `SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
 
 Pairing flow:
 
-- `tako` always starts the interactive terminal app first.
+- `takobot` always starts the interactive terminal app first.
 - During onboarding, Tako asks for XMTP setup ASAP (in-chat):
   - yes: outbound DM pairing (`.eth` or `0x...`) and assumes the recipient is ready
   - no: continue onboarding locally and allow later pairing from terminal
@@ -89,7 +89,7 @@ Runtime-only (ignored):
 - Initializes git (if available) and commits the initial workspace.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates a local XMTP database at `.tako/xmtp-db/`.
-- Launches the interactive terminal app main loop (`tako`, default).
+- Launches the interactive terminal app main loop (`takobot`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
@@ -108,9 +108,9 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 
 ## Developer utilities (optional)
 
-- Local checks: `.venv/bin/tako doctor`
-- One-off DM send: `.venv/bin/tako hi --to <xmtp_address_or_ens> [--message ...]`
-- Direct daemon (dev): `.venv/bin/tako run`
+- Local checks: `.venv/bin/takobot doctor`
+- One-off DM send: `.venv/bin/takobot hi --to <xmtp_address_or_ens> [--message ...]`
+- Direct daemon (dev): `.venv/bin/takobot run`
 
 ## Notes
 

@@ -36,6 +36,7 @@ Issues = "https://github.com/pierce403/takobot/issues"
 dev = ["build", "twine"]
 
 [project.scripts]
+takobot = "takobot.cli:main"
 tako = "takobot.cli:main"
 
 [tool.setuptools.packages.find]

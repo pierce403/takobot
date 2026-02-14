@@ -13,6 +13,7 @@ import re
 import secrets
 import shutil
 import socket
+import subprocess
 import time
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -48,7 +49,7 @@ from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
-from .xmtp import create_client, hint_for_xmtp_error
+from .xmtp import create_client, hint_for_xmtp_error, probe_xmtp_import
 from .productivity import open_loops as prod_open_loops
 from .productivity import outcomes as prod_outcomes
 from .productivity import promote as prod_promote
@@ -187,6 +188,8 @@ class TakoTerminalApp(App[None]):
         ("ctrl+shift+c", "copy_transcript", "Copy Transcript"),
         ("ctrl+shift+l", "copy_last_line", "Copy Last Line"),
         ("ctrl+shift+v", "paste_input", "Paste"),
+        ("ctrl+v", "paste_input", "Paste"),
+        ("shift+insert", "paste_input", "Paste"),
     ]
 
     def __init__(self, *, interval: float = 30.0) -> None:
@@ -365,8 +368,7 @@ class TakoTerminalApp(App[None]):
             self._write_system("clipboard: transcript is empty.")
             return
         payload = "\n".join(self.transcript_lines)
-        self.copy_to_clipboard(payload)
-        self._write_system(f"clipboard: copied transcript ({len(self.transcript_lines)} lines).")
+        self._copy_payload_to_clipboard(payload, summary=f"transcript ({len(self.transcript_lines)} lines)")
         self._add_activity("clipboard", "copied full transcript")
 
     def action_copy_last_line(self) -> None:
@@ -374,15 +376,43 @@ class TakoTerminalApp(App[None]):
             self._write_system("clipboard: no transcript lines yet.")
             return
         payload = self.transcript_lines[-1]
-        self.copy_to_clipboard(payload)
-        self._write_system("clipboard: copied last transcript line.")
+        self._copy_payload_to_clipboard(payload, summary="last transcript line")
         self._add_activity("clipboard", "copied last line")
 
     def action_paste_input(self) -> None:
         if self.input_box.disabled:
             return
         self._ensure_input_focus()
-        self.input_box.action_paste()
+        pasted_text, backend = _paste_from_system_clipboard()
+        if pasted_text:
+            cleaned = _clean_paste_text(pasted_text)
+            if cleaned:
+                self.input_box.insert_text_at_cursor(cleaned)
+                self._add_activity("clipboard", f"pasted from {backend}")
+                return
+
+        local_clipboard = self.clipboard or ""
+        cleaned = _clean_paste_text(local_clipboard)
+        if cleaned:
+            self.input_box.insert_text_at_cursor(cleaned)
+            self._add_activity("clipboard", "pasted local clipboard")
+            return
+
+        self._write_system("clipboard: no paste payload detected. try terminal paste or install `wl-paste`/`xclip`.")
+
+    def _copy_payload_to_clipboard(self, payload: str, *, summary: str) -> None:
+        self.copy_to_clipboard(payload)
+        backend = _copy_to_system_clipboard(payload)
+        fallback_path = _persist_clipboard_payload(self.paths.state_dir if self.paths is not None else None, payload)
+        if backend:
+            self._write_system(f"clipboard: copied {summary} via {backend}.")
+            return
+        if fallback_path:
+            self._write_system(
+                f"clipboard: sent {summary} via terminal OSC52; fallback saved to {fallback_path}."
+            )
+            return
+        self._write_system(f"clipboard: sent {summary} via terminal OSC52.")
 
     def on_paste(self, event: events.Paste) -> None:
         if self.input_box.disabled or self.input_box.has_focus is False:
@@ -553,7 +583,7 @@ class TakoTerminalApp(App[None]):
                 str(exc),
                 [
                     "Check repo safety constraints (.tako secrets must not be tracked).",
-                    "Resolve the issue, then restart `tako`.",
+                    "Resolve the issue, then restart `takobot`.",
                 ],
             )
             self.input_box.disabled = True
@@ -677,7 +707,7 @@ class TakoTerminalApp(App[None]):
         disk = shutil.disk_usage(self.paths.root)
         disk_free_mb = int(disk.free / (1024 * 1024))
         dns_xmtp_ok = _dns_lookup_ok("grpc.production.xmtp.network")
-        xmtp_import_ok = importlib.util.find_spec("xmtp") is not None
+        xmtp_import_ok, xmtp_import_status = probe_xmtp_import()
         web3_import_ok = importlib.util.find_spec("web3") is not None
         textual_import_ok = importlib.util.find_spec("textual") is not None
 
@@ -692,6 +722,7 @@ class TakoTerminalApp(App[None]):
             "xmtp_db_preexisting": _yes_no(xmtp_db_preexisting),
             "state_preexisting": _yes_no(state_preexisting),
             "xmtp_import": _yes_no(xmtp_import_ok),
+            "xmtp_import_status": xmtp_import_status,
             "web3_import": _yes_no(web3_import_ok),
             "textual_import": _yes_no(textual_import_ok),
             "dns_xmtp": _yes_no(dns_xmtp_ok),
@@ -716,7 +747,7 @@ class TakoTerminalApp(App[None]):
         if disk_free_mb < 256:
             issues.append(("warn", f"Low disk space under .tako: {disk_free_mb} MB free."))
         if not xmtp_import_ok:
-            issues.append(("warn", "xmtp import unavailable; XMTP runtime/pairing may fail until dependencies are installed."))
+            issues.append(("warn", f"xmtp import unavailable; {xmtp_import_status}"))
         if not dns_xmtp_ok:
             issues.append(("warn", "DNS lookup for XMTP host failed; outbound XMTP connectivity may be unavailable."))
         if self.inference_runtime is None:
@@ -3218,6 +3249,75 @@ def _clean_paste_text(value: str) -> str:
     return " ".join(parts)
 
 
+def _copy_to_system_clipboard(value: str) -> str | None:
+    candidates = [
+        ("pbcopy",),
+        ("wl-copy",),
+        ("xclip", "-selection", "clipboard"),
+        ("xsel", "--clipboard", "--input"),
+        ("clip.exe",),
+    ]
+    for command in candidates:
+        executable = command[0]
+        if shutil.which(executable) is None:
+            continue
+        try:
+            subprocess.run(
+                command,
+                input=value,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+                timeout=2,
+            )
+        except Exception:
+            continue
+        return executable
+    return None
+
+
+def _paste_from_system_clipboard() -> tuple[str | None, str | None]:
+    candidates = [
+        ("pbpaste",),
+        ("wl-paste", "-n"),
+        ("xclip", "-selection", "clipboard", "-out"),
+        ("xsel", "--clipboard", "--output"),
+        ("powershell.exe", "-NoProfile", "-Command", "Get-Clipboard"),
+    ]
+    for command in candidates:
+        executable = command[0]
+        if shutil.which(executable) is None:
+            continue
+        try:
+            completed = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+                timeout=2,
+            )
+        except Exception:
+            continue
+        if not completed.stdout:
+            continue
+        return completed.stdout, executable
+    return None, None
+
+
+def _persist_clipboard_payload(state_dir: Path | None, value: str) -> Path | None:
+    if state_dir is None:
+        return None
+    target = state_dir / "clipboard.txt"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value, encoding="utf-8")
+    except Exception:
+        return None
+    return target
+
+
 def _parse_yes_no(value: str) -> bool | None:
     normalized = value.strip().lower()
     if normalized in {"y", "yes", "true", "1", "ok", "sure"}:
@@ -3229,7 +3329,10 @@ def _parse_yes_no(value: str) -> bool | None:
 
 def _parse_command(text: str) -> tuple[str, str]:
     value = text.strip()
-    if value.lower().startswith("tako "):
+    lowered = value.lower()
+    if lowered.startswith("takobot "):
+        value = value[8:].lstrip()
+    elif lowered.startswith("tako "):
         value = value[5:].lstrip()
     if value.startswith("/"):
         value = value[1:].lstrip()
@@ -3246,7 +3349,7 @@ def _looks_like_local_command(text: str) -> bool:
     if not value:
         return False
     lowered = value.lower()
-    if lowered.startswith("tako ") or value.startswith("/"):
+    if lowered.startswith("takobot ") or lowered.startswith("tako ") or value.startswith("/"):
         return True
 
     cmd, rest = _parse_command(value)

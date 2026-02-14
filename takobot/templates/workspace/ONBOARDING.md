@@ -4,7 +4,7 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 
 ## Quickstart
 
-- Start Tako: `.venv/bin/tako`
+- Start Tako: `.venv/bin/takobot`
 - Tako boots into an interactive terminal UI (main loop).
 
 ## On First Boot
@@ -26,4 +26,3 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 
 - [ ] Install pipeline works (quarantine → analyze → install disabled → enable with operator approval).
 - [ ] Enabled extensions respect permissions (`tako.toml` defaults; explicit grants required).
-

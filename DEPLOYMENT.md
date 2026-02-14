@@ -15,14 +15,14 @@ The supported "fresh start" is:
 - It attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is already present, it clones the engine source into `.tako/tmp/src/` and installs from there.
 - It materializes the workspace from templates shipped inside the installed engine (`takobot/templates/**`) without overwriting existing files.
 - If `git` is available and `.git/` is missing, it initializes git, writes `.gitignore`, and commits the initial workspace.
-- It ends by running `.venv/bin/tako` (interactive TUI main loop).
+- It ends by running `.venv/bin/takobot` (interactive TUI main loop).
 
 ## Running Tako
 
 From the workspace root:
 
-- `.venv/bin/tako` starts the interactive TUI (the main loop).
-- `tako doctor`, `tako run`, etc exist for developer/automation use, but the default UX is the TUI.
+- `.venv/bin/takobot` starts the interactive TUI (the main loop).
+- `takobot doctor`, `takobot run`, etc exist for developer/automation use, but the default UX is the TUI.
 
 ## Update Model
 

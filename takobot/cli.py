@@ -25,7 +25,7 @@ from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
 from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
-from .xmtp import create_client, default_message, hint_for_xmtp_error, send_dm_sync
+from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmtp_import, send_dm_sync
 from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
 from .productivity import open_loops as prod_open_loops
 from .productivity import outcomes as prod_outcomes
@@ -72,7 +72,7 @@ def _emit_runtime_log(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="tako", description="Takobot: your highly autonomous octopus friend")
+    parser = argparse.ArgumentParser(prog="takobot", description="Takobot: your highly autonomous octopus friend")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     sub = parser.add_subparsers(dest="cmd", required=False)
@@ -194,10 +194,11 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
             problems.append(str(exc))
 
     lines = [
-        "tako doctor",
+        "takobot doctor",
         f"- workspace: {root}",
         f"- runtime: {paths.root} (ignored)",
         f"- memory dailies: {daily_root()} (committed)",
+        f"- python executable: {sys.executable}",
         f"- env: {env}",
         f"- keys: {'present' if paths.keys_json.exists() else 'missing'}",
     ]
@@ -207,17 +208,10 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
     else:
         lines.append("- operator: not imprinted")
 
-    try:
-        import xmtp  # noqa: F401
-
-        lines.append("- xmtp: import OK")
-    except ModuleNotFoundError as exc:
-        if exc.name == "xmtp":
-            problems.append("xmtp import failed: missing dependency. Install with: pip install --upgrade takobot xmtp")
-        else:
-            problems.append(f"xmtp import failed: {exc}")
-    except Exception as exc:  # noqa: BLE001
-        problems.append(f"xmtp import failed: {exc}")
+    xmtp_ok, xmtp_status = probe_xmtp_import()
+    lines.append(f"- xmtp: {xmtp_status}")
+    if not xmtp_ok:
+        problems.append(f"xmtp import failed: {xmtp_status}")
 
     try:
         import web3  # noqa: F401
@@ -255,12 +249,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     operator_cfg = load_operator(paths.operator_json)
     operator_inbox_id = get_operator_inbox_id(operator_cfg)
 
-    _emit_runtime_log(f"tako address: {address}")
+    _emit_runtime_log(f"takobot address: {address}")
     _emit_runtime_log("status: starting daemon")
     if operator_inbox_id:
         _emit_runtime_log("pairing: operator already imprinted")
     else:
-        _emit_runtime_log("pairing: unpaired (launch `tako` for terminal onboarding)")
+        _emit_runtime_log("pairing: unpaired (launch `takobot` for terminal onboarding)")
 
     try:
         with instance_lock(paths.locks_dir / "tako.lock"):
@@ -311,7 +305,7 @@ async def _run_daemon(
         _emit_runtime_log("status: paired", hooks=hooks)
     else:
         _emit_runtime_log("status: unpaired", hooks=hooks)
-        _emit_runtime_log("pairing: launch `tako` for terminal-first pairing", hooks=hooks)
+        _emit_runtime_log("pairing: launch `takobot` for terminal-first pairing", hooks=hooks)
 
     _emit_runtime_log(f"inbox_id: {client.inbox_id}", hooks=hooks)
     if args.once:
@@ -494,7 +488,7 @@ async def _handle_incoming_message(
         if _looks_like_command(text):
             await convo.send(
                 "This Tako instance is not paired yet.\n\n"
-                "Pairing is terminal-first: run `.venv/bin/tako` in the workspace (or bootstrap with `setup.sh`), "
+                "Pairing is terminal-first: run `.venv/bin/takobot` in the workspace (or bootstrap with `setup.sh`), "
                 "enter your XMTP handle, and I'll send an outbound DM and imprint the operator channel."
             )
         else:
@@ -828,13 +822,13 @@ async def _handle_incoming_message(
             await convo.send(
                 "Re-imprint is operator-only and destructive.\n\n"
                 "Reply: `reimprint CONFIRM` to clear the current operator. "
-                "Then re-run terminal onboarding (`.venv/bin/tako`) to pair again."
+                "Then re-run terminal onboarding (`.venv/bin/takobot`) to pair again."
             )
             return
         clear_operator(paths.operator_json)
         clear_pending(paths.state_dir / "pairing.json")
         append_daily_note(daily_root(), date.today(), "Operator cleared imprint (reimprint CONFIRM).")
-        await convo.send("Operator imprint cleared. Run `.venv/bin/tako` in the local terminal to pair a new operator.")
+        await convo.send("Operator imprint cleared. Run `.venv/bin/takobot` in the local terminal to pair a new operator.")
         return
 
     await convo.send("Unknown command. Reply 'help'. For normal chat, send plain text.")
@@ -1051,7 +1045,10 @@ def _refresh_open_loops_index(paths, *, operator_paired: bool, inference_ready: 
 
 def _parse_command(text: str) -> tuple[str, str]:
     value = text.strip()
-    if value.lower().startswith("tako "):
+    lowered = value.lower()
+    if lowered.startswith("takobot "):
+        value = value[8:].lstrip()
+    elif lowered.startswith("tako "):
         value = value[5:].lstrip()
     if value.startswith("/"):
         value = value[1:].lstrip()
@@ -1065,7 +1062,7 @@ def _parse_command(text: str) -> tuple[str, str]:
 
 def _help_text() -> str:
     return (
-        "tako commands:\n"
+        "takobot commands:\n"
         "- help\n"
         "- status\n"
         "- doctor\n"
@@ -1090,7 +1087,7 @@ def _looks_like_command(text: str) -> bool:
     if not value:
         return False
     lowered = value.lower()
-    if lowered.startswith("tako ") or value.startswith("/"):
+    if lowered.startswith("takobot ") or lowered.startswith("tako ") or value.startswith("/"):
         return True
     cmd, rest = _parse_command(value)
     tail = rest.strip()
@@ -1175,7 +1172,7 @@ def _fallback_chat_reply(*, is_operator: bool, operator_paired: bool) -> str:
         return "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
     if operator_paired:
         return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
-    return "Happy to chat. This instance is not paired yet; run `.venv/bin/tako` locally to set the operator channel."
+    return "Happy to chat. This instance is not paired yet; run `.venv/bin/takobot` locally to set the operator channel."
 
 
 def _clean_chat_reply(text: str) -> str:

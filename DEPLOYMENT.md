@@ -12,7 +12,7 @@ The supported "fresh start" is:
 
 - Run `setup.sh` from an empty directory (or an existing Tako workspace).
 - It creates a local `.venv/`.
-- It attempts to install the engine with `pip install takobot` (PyPI). If that fails, it clones the engine source into `.tako/tmp/src/` and installs from there.
+- It attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is already present, it clones the engine source into `.tako/tmp/src/` and installs from there.
 - It materializes the workspace from templates shipped inside the installed engine (`takobot/templates/**`) without overwriting existing files.
 - If `git` is available and `.git/` is missing, it initializes git, writes `.gitignore`, and commits the initial workspace.
 - It ends by running `.venv/bin/tako` (interactive TUI main loop).

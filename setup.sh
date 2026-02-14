@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Tako workspace bootstrap (curl | bash friendly).
 #
-# Creates a local .venv, attempts to install the engine (`pip install takobot` with a fallback),
+# Creates a local .venv, attempts to install/upgrade the engine (`pip install --upgrade takobot` with a fallback),
 # materializes workspace templates, initializes git (if available), then launches
 # the interactive TUI main loop (or CLI daemon mode if no interactive TTY exists).
 
@@ -81,17 +81,22 @@ PY
 }
 
 install_engine() {
+  local had_engine=0
   if engine_installed; then
-    log "engine: already installed"
-    return 0
+    had_engine=1
+    log "engine: checking for updates from PyPI ($ENGINE_PYPI_NAME)"
+  else
+    log "engine: installing from PyPI ($ENGINE_PYPI_NAME)"
   fi
 
-  log "engine: installing from PyPI ($ENGINE_PYPI_NAME)"
-  if "$VENV_DIR/bin/python" -m pip install "$ENGINE_PYPI_NAME" >/dev/null 2>&1; then
+  if "$VENV_DIR/bin/python" -m pip install --upgrade "$ENGINE_PYPI_NAME" >/dev/null 2>&1; then
     if engine_installed; then
       return 0
     fi
     log "engine: PyPI package installed but did not provide takobot; falling back"
+  elif [[ "$had_engine" -eq 1 ]] && engine_installed; then
+    log "engine: PyPI update check failed; continuing with installed engine"
+    return 0
   fi
 
   log "engine: PyPI install failed; falling back to source clone"

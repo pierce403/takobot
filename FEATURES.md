@@ -30,7 +30,7 @@
 - **Properties**:
   - Refuses to run unless the directory is empty, or already looks like a Tako workspace (`SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
   - Creates `.venv/` in the workspace directory.
-  - Attempts `pip install takobot`. If PyPI install fails, clones source into `.tako/tmp/src/` and installs from there.
+  - Attempts `pip install --upgrade takobot`. If PyPI install fails and no engine is already present, clones source into `.tako/tmp/src/` and installs from there.
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
@@ -48,6 +48,7 @@
   - `tako` / `python -m takobot` launch `app` mode by default (interactive terminal main loop).
   - `tako app` starts the TUI explicitly.
   - `tako run` remains available for direct daemon loop (dev path).
+  - Daemon/runtime performs periodic update checks and logs when a newer package version is available.
   - `tako run` automatically retries XMTP message stream subscriptions with backoff on transient stream failures.
   - If stream failures persist, `tako run` falls back to polling message history until stream mode stabilizes.
   - App onboarding performs terminal-first outbound pairing and then starts runtime tasks.

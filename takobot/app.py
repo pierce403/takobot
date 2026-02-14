@@ -82,6 +82,8 @@ ACTIVITY_LOG_MAX = 80
 TRANSCRIPT_LOG_MAX = 2000
 STREAM_BOX_MAX_CHARS = 8000
 STREAM_BOX_MAX_STATUS_LINES = 40
+UPDATE_CHECK_INITIAL_DELAY_S = 20.0
+UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -231,6 +233,7 @@ class TakoTerminalApp(App[None]):
         self.type1_task: asyncio.Task[None] | None = None
         self.type2_task: asyncio.Task[None] | None = None
         self.boot_task: asyncio.Task[None] | None = None
+        self.update_check_task: asyncio.Task[None] | None = None
 
         self.lock_context = None
         self.lock_acquired = False
@@ -261,6 +264,8 @@ class TakoTerminalApp(App[None]):
         self.inference_gate_opened_at: float | None = None
         self.inference_gate_block_noted = False
         self.inference_ever_used = False
+        self.last_update_check_at: float | None = None
+        self.last_update_check_signature = ""
 
         self.dose: dose.DoseState | None = None
         self.dose_path: Path | None = None
@@ -583,6 +588,7 @@ class TakoTerminalApp(App[None]):
         if self.type2_task is None:
             self.type2_task = asyncio.create_task(self._type2_loop(), name="tako-type2")
         await self._start_local_heartbeat()
+        await self._start_periodic_update_checks()
 
         self._write_system("Type1 tide scanner online. Consuming event log and triaging signals.")
         self._add_activity("reasoning", "Type1/Type2 loops online")
@@ -1574,6 +1580,65 @@ class TakoTerminalApp(App[None]):
             return
         self.local_heartbeat_task = asyncio.create_task(self._local_heartbeat_loop(), name="tako-local-heartbeat")
         self._record_event("heartbeat.loop.started", "Heartbeat loop started.", source="heartbeat")
+
+    async def _start_periodic_update_checks(self) -> None:
+        if self.update_check_task is not None:
+            return
+        self.update_check_task = asyncio.create_task(self._periodic_update_check_loop(), name="tako-update-check")
+        self._record_event("update.check.loop.started", "Periodic update checks started.", source="update")
+
+    async def _stop_periodic_update_checks(self) -> None:
+        if self.update_check_task is None:
+            return
+        self.update_check_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.update_check_task
+        self.update_check_task = None
+        self._record_event("update.check.loop.stopped", "Periodic update checks stopped.", source="update")
+
+    async def _periodic_update_check_loop(self) -> None:
+        await asyncio.sleep(UPDATE_CHECK_INITIAL_DELAY_S)
+        while True:
+            await self._run_periodic_update_check()
+            await asyncio.sleep(UPDATE_CHECK_INTERVAL_S)
+
+    async def _run_periodic_update_check(self) -> None:
+        try:
+            result = await asyncio.to_thread(run_self_update, repo_root(), apply=False)
+        except Exception as exc:  # noqa: BLE001
+            summary = f"update check failed: {_summarize_error(exc)}"
+            if summary == self.last_update_check_signature:
+                return
+            self.last_update_check_signature = summary
+            self.last_update_check_at = time.monotonic()
+            self._add_activity("update", summary)
+            self._record_event("update.check.error", summary, severity="warn", source="update")
+            return
+
+        detail = result.details[0] if result.details else ""
+        signature = f"{result.ok}|{result.summary}|{detail}"
+        self.last_update_check_at = time.monotonic()
+        if signature == self.last_update_check_signature:
+            return
+        self.last_update_check_signature = signature
+
+        if result.ok and result.summary == "update available.":
+            message = "package update available. run `update` to apply."
+            if detail:
+                message = f"{message} ({detail})"
+            self._write_system(message)
+            self._add_activity("update", _summarize_text(message))
+            self._record_event("update.check.available", message, source="update")
+            append_daily_note(daily_root(), date.today(), f"Periodic update check: {result.summary}")
+            return
+
+        if not result.ok:
+            self._add_activity("update", f"check warning: {result.summary}")
+            self._record_event("update.check.error", result.summary, severity="warn", source="update")
+            return
+
+        self._add_activity("update", f"check: {result.summary}")
+        self._record_event("update.check.ok", result.summary, source="update")
 
     async def _stop_local_heartbeat(self) -> None:
         if self.local_heartbeat_task is None:
@@ -2921,6 +2986,7 @@ class TakoTerminalApp(App[None]):
                 await self.boot_task
 
         await self._cleanup_pairing_resources()
+        await self._stop_periodic_update_checks()
         await self._stop_xmtp_runtime()
         await self._stop_local_heartbeat()
         await _cancel_task(self.event_ingest_task)

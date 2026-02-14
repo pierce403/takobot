@@ -84,7 +84,7 @@ Runtime-only (ignored):
 ## What happens on first run
 
 - Creates a local Python virtual environment in `.venv/`.
-- Attempts to install the engine with `pip install takobot` (PyPI). If that fails, it clones source into `.tako/tmp/src/` and installs from there.
+- Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
@@ -117,6 +117,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Workspaces are git-first, but git is optional. If git is missing, Tako runs and warns that versioning is disabled.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
+- While running, Tako periodically checks for package updates and surfaces when `update` can apply a newer version.
 - XMTP client initialization disables history sync by default for compatibility.
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).

@@ -47,6 +47,8 @@ MESSAGE_HISTORY_PER_CONVERSATION = 80
 SEEN_MESSAGE_CACHE_MAX = 4096
 CHAT_INFERENCE_TIMEOUT_S = 75.0
 CHAT_REPLY_MAX_CHARS = 700
+UPDATE_CHECK_INITIAL_DELAY_S = 20.0
+UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -319,6 +321,7 @@ async def _run_daemon(
 
     start = time.monotonic()
     heartbeat = asyncio.create_task(_heartbeat_loop(args))
+    update_check = asyncio.create_task(_periodic_update_check_loop(hooks=hooks))
     reconnect_attempt = 0
     error_burst_count = 0
     last_error_at = 0.0
@@ -442,8 +445,11 @@ async def _run_daemon(
             await asyncio.sleep(reconnect_delay)
     finally:
         heartbeat.cancel()
+        update_check.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat
+        with contextlib.suppress(asyncio.CancelledError):
+            await update_check
 
     return 0
 
@@ -990,6 +996,34 @@ async def _heartbeat_loop(args: argparse.Namespace) -> None:
             ensure_daily_log(daily_root(), date.today())
         interval = max(1.0, float(args.interval))
         await asyncio.sleep(interval + random.uniform(-0.2 * interval, 0.2 * interval))
+
+
+async def _periodic_update_check_loop(*, hooks: RuntimeHooks | None = None) -> None:
+    await asyncio.sleep(UPDATE_CHECK_INITIAL_DELAY_S)
+    last_signature = ""
+    while True:
+        try:
+            result = await asyncio.to_thread(run_self_update, repo_root(), apply=False)
+        except Exception as exc:  # noqa: BLE001
+            message = f"update check failed: {_summarize_stream_error(exc)}"
+            if message != last_signature:
+                last_signature = message
+                _emit_runtime_log(message, level="warn", stderr=True, hooks=hooks)
+            await asyncio.sleep(UPDATE_CHECK_INTERVAL_S)
+            continue
+
+        detail = result.details[0] if result.details else ""
+        signature = f"{result.ok}|{result.summary}|{detail}"
+        if signature != last_signature:
+            last_signature = signature
+            if result.ok and result.summary == "update available.":
+                message = "update check: package update available. Run `update` to apply."
+                if detail:
+                    message = f"{message} ({detail})"
+                _emit_runtime_log(message, hooks=hooks)
+            elif not result.ok:
+                _emit_runtime_log(f"update check warning: {result.summary}", level="warn", stderr=True, hooks=hooks)
+        await asyncio.sleep(UPDATE_CHECK_INTERVAL_S)
 
 
 def _refresh_open_loops_index(paths, *, operator_paired: bool, inference_ready: bool) -> None:

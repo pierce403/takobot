@@ -16,6 +16,7 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 - [ ] Productivity folders exist (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`).
 - [ ] Open loops index initialized (`.tako/state/open_loops.json`).
 - [ ] Heartbeat git auto-commit works (`git add -A` + `git commit`) when `user.name`/`user.email` are configured.
+- [ ] Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`).
 
 ## Operator Control Channel (XMTP)
 

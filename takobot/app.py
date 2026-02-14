@@ -14,6 +14,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -27,7 +28,7 @@ from textual.widgets import Footer, Input, RichLog, Static, TextArea
 
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
-from .config import TakoConfig, load_tako_toml
+from .config import TakoConfig, load_tako_toml, set_updates_auto_apply
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
@@ -271,6 +272,8 @@ class TakoTerminalApp(App[None]):
         self.inference_ever_used = False
         self.last_update_check_at: float | None = None
         self.last_update_check_signature = ""
+        self.auto_updates_enabled = True
+        self.last_auto_update_error = ""
 
         self.dose: dose.DoseState | None = None
         self.dose_path: Path | None = None
@@ -460,6 +463,7 @@ class TakoTerminalApp(App[None]):
 
             cfg, warn = load_tako_toml(root / "tako.toml")
             self.config = cfg
+            self.auto_updates_enabled = bool(cfg.updates.auto_apply)
             self.config_warning = warn
             if warn:
                 self._write_system(warn)
@@ -472,6 +476,7 @@ class TakoTerminalApp(App[None]):
                 )
             else:
                 self._add_activity("config", "tako.toml loaded")
+            self._add_activity("update", f"auto-updates {'on' if self.auto_updates_enabled else 'off'}")
 
             self.dose_path = self.paths.state_dir / "dose.json"
             try:
@@ -1657,18 +1662,23 @@ class TakoTerminalApp(App[None]):
         detail = result.details[0] if result.details else ""
         signature = f"{result.ok}|{result.summary}|{detail}"
         self.last_update_check_at = time.monotonic()
-        if signature == self.last_update_check_signature:
+        update_available = result.ok and result.summary == "update available."
+        if signature == self.last_update_check_signature and not (update_available and self.auto_updates_enabled):
             return
         self.last_update_check_signature = signature
 
-        if result.ok and result.summary == "update available.":
+        if update_available:
+            append_daily_note(daily_root(), date.today(), f"Periodic update check: {result.summary}")
+            if self.auto_updates_enabled:
+                await self._apply_auto_update(detail)
+                return
+
             message = "package update available. run `update` to apply."
             if detail:
                 message = f"{message} ({detail})"
             self._write_system(message)
             self._add_activity("update", _summarize_text(message))
             self._record_event("update.check.available", message, source="update")
-            append_daily_note(daily_root(), date.today(), f"Periodic update check: {result.summary}")
             return
 
         if not result.ok:
@@ -1676,8 +1686,67 @@ class TakoTerminalApp(App[None]):
             self._record_event("update.check.error", result.summary, severity="warn", source="update")
             return
 
+        self.last_auto_update_error = ""
         self._add_activity("update", f"check: {result.summary}")
         self._record_event("update.check.ok", result.summary, source="update")
+
+    async def _apply_auto_update(self, detail: str) -> None:
+        message = "package update available. auto-update is on; applying now."
+        if detail:
+            message = f"{message} ({detail})"
+        self._write_system(message)
+        self._add_activity("update", "auto-update applying")
+        self._record_event("update.auto.apply.start", message, source="update", metadata={"detail": detail})
+
+        try:
+            result = await asyncio.to_thread(run_self_update, repo_root(), apply=True)
+        except Exception as exc:  # noqa: BLE001
+            summary = f"auto-update failed: {_summarize_error(exc)}"
+            if summary != self.last_auto_update_error:
+                self.last_auto_update_error = summary
+                self._write_system(summary)
+                self._add_activity("update", summary)
+                self._record_event("update.auto.apply.error", summary, severity="warn", source="update")
+            return
+
+        lines = [result.summary, *result.details]
+        self._write_system("\n".join(lines))
+        self._add_activity("update", f"auto-apply: {result.summary}")
+        self._record_event(
+            "update.auto.apply.result",
+            result.summary,
+            severity="info" if result.ok else "warn",
+            source="update",
+            metadata={"changed": result.changed},
+        )
+
+        if not result.ok:
+            summary = f"auto-update failed: {result.summary}"
+            if summary != self.last_auto_update_error:
+                self.last_auto_update_error = summary
+                self._write_system(summary)
+            return
+
+        self.last_auto_update_error = ""
+        if result.changed:
+            append_daily_note(daily_root(), date.today(), "Auto-update applied; restarting terminal app.")
+            await self._restart_after_auto_update()
+
+    async def _restart_after_auto_update(self) -> None:
+        self._write_system("auto-update applied. restarting takobot now.")
+        self._add_activity("update", "restarting after auto-update")
+        self._record_event("runtime.restart", "Restarting after auto-update.", source="update")
+        await asyncio.sleep(0.2)
+        argv_tail = [arg for arg in sys.argv[1:] if arg]
+        if not argv_tail:
+            argv_tail = ["app", "--interval", str(self.interval)]
+        args = [sys.executable, "-m", "takobot", *argv_tail]
+        try:
+            os.execv(sys.executable, args)
+        except OSError as exc:
+            summary = f"auto-restart failed: {_summarize_error(exc)}"
+            self._write_system(summary)
+            self._record_event("runtime.restart.error", summary, severity="warn", source="update")
 
     async def _stop_local_heartbeat(self) -> None:
         if self.local_heartbeat_task is None:
@@ -1803,7 +1872,8 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit"
+                "local cockpit commands: help, status, health, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "update controls: `update`, `update check`, `update auto status`, `update auto on`, `update auto off`"
             )
             return
 
@@ -1814,6 +1884,11 @@ class TakoTerminalApp(App[None]):
             heartbeat_age = (
                 f"{int(time.monotonic() - self.last_heartbeat_at)}s ago"
                 if self.last_heartbeat_at is not None
+                else "n/a"
+            )
+            update_check_age = (
+                f"{int(time.monotonic() - self.last_update_check_at)}s ago"
+                if self.last_update_check_at is not None
                 else "n/a"
             )
             self._write_tako(
@@ -1831,6 +1906,8 @@ class TakoTerminalApp(App[None]):
                 f"inference_ready: {('yes' if self.inference_runtime and self.inference_runtime.ready else 'no')}\n"
                 f"inference_gate: {('open' if self.inference_gate_open else 'closed')}\n"
                 f"inference_gate_state: {self.inference_gate_opened_state}\n"
+                f"auto_updates: {('on' if self.auto_updates_enabled else 'off')}\n"
+                f"last_update_check: {update_check_age}\n"
                 f"dose_label: {self.dose_label}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
@@ -2297,7 +2374,48 @@ class TakoTerminalApp(App[None]):
         if cmd == "update":
             action = rest.strip().lower()
             if action in {"help", "?"}:
-                self._write_tako("usage: `update` (apply fast-forward) or `update check` (check only).")
+                self._write_tako(
+                    "usage:\n"
+                    "- `update` (apply update)\n"
+                    "- `update check` (check only)\n"
+                    "- `update auto status`\n"
+                    "- `update auto on`\n"
+                    "- `update auto off`"
+                )
+                return
+
+            parts = [part for part in action.split() if part]
+            if parts and parts[0] == "auto":
+                choice = parts[1] if len(parts) > 1 else "status"
+                if choice in {"status", "state"}:
+                    self._write_tako(f"auto-updates are currently {'on' if self.auto_updates_enabled else 'off'}.")
+                    return
+                if choice not in {"on", "off"}:
+                    self._write_tako("usage: `update auto status|on|off`")
+                    return
+
+                enabled = choice == "on"
+                config_path = repo_root() / "tako.toml"
+                ok, summary = await asyncio.to_thread(set_updates_auto_apply, config_path, enabled)
+                if not ok:
+                    self._write_tako(f"failed to persist update setting: {summary}")
+                    self._record_event("update.auto.config.error", summary, severity="warn", source="terminal")
+                    return
+
+                self.auto_updates_enabled = enabled
+                self._add_activity("update", f"auto-updates {'on' if enabled else 'off'}")
+                self._record_event(
+                    "update.auto.config.changed",
+                    f"Auto-updates set to {'on' if enabled else 'off'}.",
+                    source="terminal",
+                    metadata={"enabled": enabled},
+                )
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"Auto-updates set to {'on' if enabled else 'off'} from terminal.",
+                )
+                self._write_tako(f"auto-updates {'enabled' if enabled else 'disabled'}.\n{summary}")
                 return
 
             apply_update = action not in {"check", "status", "dry-run", "dryrun"}
@@ -2324,7 +2442,10 @@ class TakoTerminalApp(App[None]):
 
             lines = [result.summary, *result.details]
             if result.changed:
-                lines.append("restart Tako to load updated code.")
+                if apply_update:
+                    lines.append("update applied. restarting now.")
+                else:
+                    lines.append("restart Tako to load updated code.")
             self._write_tako("\n".join(lines))
             self._add_activity("update", result.summary)
             append_daily_note(daily_root(), date.today(), f"Local self-update command: {result.summary}")
@@ -2335,6 +2456,8 @@ class TakoTerminalApp(App[None]):
                 source="terminal",
                 metadata={"changed": result.changed, "apply": apply_update},
             )
+            if apply_update and result.ok and result.changed:
+                await self._restart_after_auto_update()
             return
 
         if cmd == "extensions":
@@ -3086,9 +3209,10 @@ class TakoTerminalApp(App[None]):
     def _refresh_status(self) -> None:
         uptime_s = int(time.monotonic() - self.started_at)
         safe = "on" if self.safe_mode else "off"
+        updates = "on" if self.auto_updates_enabled else "off"
         self.status_bar.update(
             f"state={self.state.value} | mode={self.mode} | runtime={self.runtime_mode} | "
-            f"dose={self.dose_label} | indicator={self.indicator} | safe={safe} | uptime={uptime_s}s"
+            f"dose={self.dose_label} | indicator={self.indicator} | safe={safe} | updates={updates} | uptime={uptime_s}s"
         )
         self._refresh_panels()
 
@@ -3129,6 +3253,11 @@ class TakoTerminalApp(App[None]):
             if self.last_heartbeat_at is not None
             else "n/a"
         )
+        update_check_age = (
+            f"{int(time.monotonic() - self.last_update_check_at)}s"
+            if self.last_update_check_at is not None
+            else "n/a"
+        )
         loops_count = int(self.open_loops_summary.get("count") or 0)
         loops_age_s = float(self.open_loops_summary.get("oldest_age_s") or 0.0)
         loops_age = f"{int(loops_age_s // 3600)}h" if loops_age_s >= 3600 else f"{int(loops_age_s)}s"
@@ -3139,11 +3268,13 @@ class TakoTerminalApp(App[None]):
             f"- next: {pair_next}\n"
             f"- runtime: {self.runtime_mode}\n"
             f"- safe mode: {'on' if self.safe_mode else 'off'}\n"
+            f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
             f"- open tasks: {self.open_tasks_count}\n"
             f"- open loops: {loops_count} (oldest {loops_age})\n"
             f"- heartbeat ticks: {self.heartbeat_ticks}\n"
-            f"- last heartbeat: {heartbeat_age}"
+            f"- last heartbeat: {heartbeat_age}\n"
+            f"- last update check: {update_check_age}"
         )
         self.tasks_panel.update(tasks)
         level = _octopus_level(
@@ -3187,6 +3318,7 @@ class TakoTerminalApp(App[None]):
         sensors = (
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
+            f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"
             f"- type2 last: {self.type2_last}\n"

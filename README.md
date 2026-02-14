@@ -9,6 +9,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically
+- Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
@@ -96,6 +97,7 @@ Runtime-only (ignored):
 - Launches the interactive terminal app main loop (`takobot`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
+- Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
@@ -108,6 +110,7 @@ Runtime-only (ignored):
 There is **no user-facing configuration via environment variables or CLI flags**.
 
 Workspace configuration lives in `tako.toml` (no secrets).
+- Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
 
 Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
 
@@ -122,7 +125,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Workspaces are git-first, but git is optional. If git is missing, Tako runs and warns that versioning is disabled.
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
-- While running, Tako periodically checks for package updates and surfaces when `update` can apply a newer version.
+- While running, Tako periodically checks for package updates. With `updates.auto_apply = true`, the TUI applies the update and restarts itself.
 - XMTP client initialization disables history sync by default for compatibility.
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).

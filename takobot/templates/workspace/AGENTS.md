@@ -46,3 +46,4 @@ Directories:
 ## Runtime Git Hygiene
 
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when git identity is configured.
+- Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`); when enabled, app mode auto-applies updates and restarts.

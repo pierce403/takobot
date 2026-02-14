@@ -773,6 +773,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>
                 Detects local inference bridges (<code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
               </li>
+              <li>Loads auto-update policy from <code>tako.toml</code> (<code>[updates].auto_apply</code>, default <code>true</code>).</li>
               <li>
                 Invokes Codex inference with sandbox/approval bypass flags so agentic chat reflects real workspace write capability.
               </li>
@@ -802,6 +803,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>
                 Starts heartbeat + event-log ingestion with Type 1 triage and Type 2 escalation for serious events.
               </li>
+              <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes when git identity is configured.</li>
               <li>
                 Maintains an open-loops index at <code>.tako/state/open_loops.json</code> (unfinished tasks + onboarding prompts) and shows it in the sidebar.

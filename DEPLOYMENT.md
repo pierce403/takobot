@@ -29,4 +29,5 @@ From the workspace root:
 
 - Workspace updates are git-native (your repo history).
 - Engine updates are package-native (upgrade `takobot` inside `.venv/`).
+- App mode periodically checks for package updates and, when `tako.toml` has `[updates].auto_apply = true`, auto-applies updates and restarts itself.
 - Templates never overwrite user edits; drift is logged to the daily log.

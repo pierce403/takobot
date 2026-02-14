@@ -13,6 +13,10 @@ e = 0.55
 daily_outcomes = 3
 weekly_review_day = "sun"
 
+[updates]
+# Auto-apply package updates and restart TUI when a newer takobot release is detected.
+auto_apply = true
+
 [security.download]
 # Default: HTTPS only.
 allow_non_https = false
@@ -28,4 +32,3 @@ network = false
 shell = false
 xmtp = false
 filesystem = false
-

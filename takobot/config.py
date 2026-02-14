@@ -74,6 +74,11 @@ class ProductivityConfig:
 
 
 @dataclass(frozen=True)
+class UpdatesConfig:
+    auto_apply: bool = True
+
+
+@dataclass(frozen=True)
 class SecurityDownloadConfig:
     allow_non_https: bool = False
     max_bytes: int = 15_000_000
@@ -99,6 +104,7 @@ class TakoConfig:
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     dose_baseline: DoseBaselineConfig = field(default_factory=DoseBaselineConfig)
     productivity: ProductivityConfig = field(default_factory=ProductivityConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
 
 
@@ -123,6 +129,7 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
     dose = data.get("dose") if isinstance(data.get("dose"), dict) else {}
     dose_baseline = dose.get("baseline") if isinstance(dose.get("baseline"), dict) else {}
     productivity = data.get("productivity") if isinstance(data.get("productivity"), dict) else {}
+    updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
     security = data.get("security") if isinstance(data.get("security"), dict) else {}
     security_download = security.get("download") if isinstance(security.get("download"), dict) else {}
     security_defaults = security.get("defaults") if isinstance(security.get("defaults"), dict) else {}
@@ -141,6 +148,9 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
         productivity=ProductivityConfig(
             daily_outcomes=max(1, _as_int(productivity.get("daily_outcomes"), default=ProductivityConfig.daily_outcomes)),
             weekly_review_day=str(productivity.get("weekly_review_day") or ProductivityConfig.weekly_review_day),
+        ),
+        updates=UpdatesConfig(
+            auto_apply=_as_bool(updates.get("auto_apply"), default=UpdatesConfig.auto_apply),
         ),
         security=SecurityConfig(
             download=SecurityDownloadConfig(
@@ -161,3 +171,71 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
     )
 
     return cfg, ""
+
+
+def set_updates_auto_apply(path: Path, enabled: bool) -> tuple[bool, str]:
+    literal = "true" if enabled else "false"
+    line = f"auto_apply = {literal}"
+
+    if not path.exists():
+        payload = "[updates]\n" + line + "\n"
+        try:
+            path.write_text(payload, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"updates.auto_apply set to {literal} (new file)"
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed reading tako.toml: {exc}"
+
+    lines = text.splitlines()
+    section_start = None
+    for idx, raw in enumerate(lines):
+        if raw.strip() == "[updates]":
+            section_start = idx
+            break
+
+    if section_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("[updates]")
+        lines.append(line)
+        updated = "\n".join(lines) + "\n"
+        try:
+            path.write_text(updated, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"updates.auto_apply set to {literal}"
+
+    section_end = len(lines)
+    for idx in range(section_start + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section_end = idx
+            break
+
+    target_idx = None
+    for idx in range(section_start + 1, section_end):
+        stripped = lines[idx].strip()
+        if stripped.startswith("auto_apply"):
+            target_idx = idx
+            break
+
+    if target_idx is not None:
+        lines[target_idx] = line
+    else:
+        insert_idx = section_start + 1
+        while insert_idx < section_end and not lines[insert_idx].strip():
+            insert_idx += 1
+        lines.insert(insert_idx, line)
+
+    updated = "\n".join(lines)
+    if text.endswith("\n") or not updated.endswith("\n"):
+        updated += "\n"
+    try:
+        path.write_text(updated, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed writing tako.toml: {exc}"
+    return True, f"updates.auto_apply set to {literal}"

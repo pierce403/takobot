@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — Auto-update in TUI now applies and restarts by default
+
+- What happened: periodic update checks only announced new releases; operators expected unattended auto-update behavior in the TUI.
+- Fix: added `tako.toml` setting `[updates].auto_apply` (default `true`), exposed it in TUI commands/panels, and made app mode auto-apply updates then restart.
+- Prevention: treat update detection and update execution as one flow when auto-update is enabled.
+
 ### 2026-02-14 — Heartbeat now auto-commits pending workspace changes
 
 - What happened: workspace files could remain untracked or uncommitted during active runtime loops.

@@ -12,6 +12,9 @@ e = 0.55
 daily_outcomes = 3
 weekly_review_day = "sun"
 
+[updates]
+auto_apply = true
+
 [security.download]
 allow_non_https = false
 max_bytes = 15000000
@@ -22,4 +25,3 @@ network = false
 shell = false
 xmtp = false
 filesystem = false
-

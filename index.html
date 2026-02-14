@@ -757,7 +757,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <h2>What happens on first run</h2>
             <ul>
               <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
-              <li>Attempts to install the engine with <code>pip install takobot</code> (PyPI). If that fails, it falls back to a source clone install.</li>
+              <li>Attempts to install the engine with <code>pip install takobot</code> (PyPI, including XMTP dependency). If that fails, it falls back to a source clone install.</li>
               <li>Materializes the workspace from engine templates (<code>tako_bot/templates/**</code>) without overwriting existing files, then initializes git on <code>main</code> if available.</li>
               <li>
                 Generates <code>.tako/keys.json</code> with a wallet key and DB encryption key (unencrypted; file-perms only).

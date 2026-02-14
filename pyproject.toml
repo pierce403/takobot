@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "takobot"
-version = "0.1.3"
+version = "0.1.4"
 description = "Takobot: your highly autonomous octopus friend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "textual",
   "web3",
+  "xmtp",
 ]
 authors = [{ name = "pierce403" }]
 keywords = ["agent", "tui", "xmtp", "gtd", "para"]
@@ -32,7 +33,6 @@ Repository = "https://github.com/pierce403/takobot"
 Issues = "https://github.com/pierce403/takobot/issues"
 
 [project.optional-dependencies]
-xmtp = ["xmtp"]
 dev = ["build", "twine"]
 
 [project.scripts]

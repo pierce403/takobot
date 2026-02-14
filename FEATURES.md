@@ -31,6 +31,7 @@
   - Refuses to run unless the directory is empty, or already looks like a Tako workspace (`SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
   - Creates `.venv/` in the workspace directory.
   - Attempts `pip install takobot`. If PyPI install fails, clones source into `.tako/tmp/src/` and installs from there.
+  - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`tako_bot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
   - Launches `.venv/bin/tako` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.

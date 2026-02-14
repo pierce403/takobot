@@ -66,6 +66,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — XMTP became a required package dependency
+
+- What happened: plain `pip install takobot` could leave XMTP unavailable because `xmtp` was only declared as an optional extra.
+- Fix: moved `xmtp` into required project dependencies, updated runtime/install guidance, and released a new patch version.
+- Prevention: treat control-plane/runtime-critical libraries as required dependencies unless there is an explicit degraded mode.
+
 ### 2026-02-14 — PyPI trusted publisher after repo rename
 
 - What happened: after renaming the GitHub repo from `pierce403/tako-bot` to `pierce403/takobot`, tag `v0.1.2` publish failed with `invalid-publisher` because PyPI trusted publisher claims no longer matched.

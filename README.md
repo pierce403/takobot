@@ -121,4 +121,4 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
-- XMTP support is optional: install with `pip install "takobot[xmtp]"` (may compile native components; Rust may be required).
+- XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

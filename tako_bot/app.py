@@ -3358,7 +3358,7 @@ def _type2_recommendation(event_type: str, message: str) -> str:
     if "another tako instance" in text or "instance lock" in text:
         return "Another Tako instance may be active here. Stop the duplicate process before continuing."
     if "xmtp import unavailable" in text or "no module named 'xmtp'" in text:
-        return "XMTP dependency is missing. Install `takobot[xmtp]` (or `xmtp`) into `.venv`, then retry pairing/runtime startup."
+        return "XMTP dependency is missing. Install `takobot` (or `xmtp`) into `.venv`, then retry pairing/runtime startup."
     if "dns lookup for xmtp" in text:
         return "Check network/DNS egress for XMTP hosts, then retry pairing or runtime startup."
     if "runtime crashed" in text or "runtime.crash" in kind:

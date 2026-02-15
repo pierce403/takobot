@@ -9,6 +9,7 @@
   - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`.
   - Committed knowledge lives under `memory/` (daily logs + world notes); `memory/MEMORY.md` is a compatibility pointer.
   - Feature state is tracked in `FEATURES.md`.
+  - Feature checklist coverage is enforced by `tests/test_features_contract.py` (every criterion is parsed and mapped to executable probes).
   - Website copy lives in `index.html`.
 - **Test Criteria**:
   - [x] Root contract docs exist and are coherent.
@@ -91,7 +92,9 @@
   - Runtime and `doctor`-detected problems are converted into committed follow-up tasks under `tasks/` (deduped by issue key).
   - `doctor` includes offline inference diagnostics (CLI version/help probes + recent inference-error scan from `.tako/state/events.jsonl`).
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
+  - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
+  - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.
   - Runtime auto-seeds an OpenClaw starter skill pack into `skills/` (disabled) and registers those skills in extension registry.
   - `workspace.name` in `tako.toml` is treated as the bot identity name and kept synced on rename flows.
@@ -130,11 +133,13 @@
   - [x] `doctor` can diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
+  - [x] Local `web` command writes a daily-log note for each successful fetch.
   - [x] `config` command explains `tako.toml` sections/options and live values.
   - [x] OpenClaw starter skills are auto-seeded and extension-registered as installed-but-disabled.
   - [x] Auto-update setting defaults to on and is visible/toggleable from the TUI.
   - [x] App mode auto-applies available package updates and restarts when update changes are applied.
   - [x] Terminal chat inference streams output to the bubble-stream panel while generating.
+  - [x] Default chat prompts include explicit world-curiosity guidance.
   - [x] Resize/blur does not leave the app without a usable text-input focus.
   - [x] `curl ... | bash` launch path enters app mode with usable TTY input (no pipe-inherited garble).
 

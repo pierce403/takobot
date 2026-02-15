@@ -52,8 +52,13 @@ Root directories (must exist):
 
 ## Working Agreements
 
-- **Commit and push** on every meaningful repo update (keep commits small and reviewable).
-- **Cut a new release for every new feature.** Any feature addition requires a version bump, tag, and PyPI publish.
+- **Commit and push on every meaningful update immediately.** Do not leave pending repo changes between updates.
+- **Keep commits small and reviewable.** Prefer one logical change per commit.
+- **Every new feature requires a release before work is considered done.**
+  - bump version in `pyproject.toml` and `takobot/__init__.py`
+  - commit + push to `main`
+  - create tag `vX.Y.Z` and push the tag
+  - ensure PyPI publish is triggered/complete
 - Keep `index.html`, `README.md`, and `FEATURES.md` aligned with current behavior and entrypoints.
 - When changing behavior, update docs + website + feature tracker together.
 
@@ -66,6 +71,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-15 — Release discipline made explicit
+
+- What happened: commit/push cadence and “feature requires release” policy were being followed inconsistently.
+- Fix: clarified Working Agreements with an explicit release checklist (version bump, push, tag, publish verification) and immediate commit/push expectation.
+- Prevention: treat “released artifact available” as required completion criteria for any feature work.
 
 ### 2026-02-15 — OpenClaw starter skills seeded by default
 

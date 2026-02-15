@@ -6,7 +6,8 @@ from .paths import repo_root
 
 
 DEFAULT_SOUL_NAME = "Tako"
-DEFAULT_SOUL_ROLE = "Help the operator think clearly, decide wisely, and act safely."
+DEFAULT_SOUL_ROLE = "Help the operator think clearly, decide wisely, and act safely while staying incredibly curious about the world."
+DEFAULT_SOUL_MISSION = DEFAULT_SOUL_ROLE
 
 
 def soul_path(path: Path | None = None) -> Path:
@@ -41,8 +42,14 @@ def read_identity(path: Path | None = None) -> tuple[str, str]:
             name = stripped[len("- Name:") :].strip()
         if in_identity and stripped.startswith("- Role:"):
             role = stripped[len("- Role:") :].strip()
+        if in_identity and stripped.startswith("- Mission:") and not role:
+            role = stripped[len("- Mission:") :].strip()
 
     return (_sanitize(name) or DEFAULT_SOUL_NAME, _sanitize(role) or DEFAULT_SOUL_ROLE)
+
+
+def read_identity_mission(path: Path | None = None) -> tuple[str, str]:
+    return read_identity(path)
 
 
 def update_identity(name: str, role: str, path: Path | None = None) -> tuple[str, str]:
@@ -120,3 +127,7 @@ def update_identity(name: str, role: str, path: Path | None = None) -> tuple[str
 
     target.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
     return final_name, final_role
+
+
+def update_identity_mission(name: str, mission: str, path: Path | None = None) -> tuple[str, str]:
+    return update_identity(name, mission, path)

@@ -7,7 +7,6 @@ import importlib.resources
 from pathlib import Path
 
 from .daily import append_daily_note, ensure_daily_log
-from .paths import daily_root
 
 
 @dataclass(frozen=True)
@@ -78,11 +77,12 @@ def materialize_workspace(root: Path) -> MaterializeResult:
 
     if drifted:
         try:
-            ensure_daily_log(daily_root(), date.today())
+            workspace_daily_root = root / "memory" / "dailies"
+            ensure_daily_log(workspace_daily_root, date.today())
             summary = "Template drift detected (kept your versions): " + ", ".join(drifted[:12])
             if len(drifted) > 12:
                 summary += f", ... (+{len(drifted) - 12} more)"
-            append_daily_note(daily_root(), date.today(), summary)
+            append_daily_note(workspace_daily_root, date.today(), summary)
         except Exception as exc:  # noqa: BLE001
             warning = f"template drift note failed: {exc}"
 

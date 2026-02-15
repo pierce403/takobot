@@ -59,10 +59,11 @@ from .productivity import promote as prod_promote
 from .productivity import summarize as prod_summarize
 from .productivity import tasks as prod_tasks
 from .productivity import weekly_review as prod_weekly
-from .extensions.analyze import ManifestError, analyze_quarantine, file_hashes as ext_file_hashes
+from .extensions.analyze import ManifestError, analyze_quarantine
 from .extensions.enable import permissions_ok as ext_permissions_ok
 from .extensions.enable import verify_integrity as ext_verify_integrity
 from .extensions.install import InstallError, install_from_quarantine
+from .extensions.draft import create_draft_extension
 from .extensions.model import PermissionSet as ExtPermissionSet
 from .extensions.model import QuarantineProvenance
 from .extensions.quarantine import QuarantineError, fetch_to_quarantine
@@ -2908,105 +2909,27 @@ class TakoTerminalApp(App[None]):
             if kind not in {"skill", "tool"} or not name_raw:
                 self._write_tako("usage: `draft skill <name>` or `draft tool <name>`")
                 return
-
-            def _safe(name: str) -> str:
-                out = []
-                for ch in name.strip():
-                    if ch.isalnum() or ch in {"-", "_"}:
-                        out.append(ch.lower())
-                    elif ch.isspace():
-                        out.append("-")
-                value = "".join(out).strip("-_")
-                return value or "unnamed"
-
-            name = _safe(name_raw)
             root = repo_root()
-            dest = root / ("skills" if kind == "skill" else "tools") / name
-            if dest.exists():
-                self._write_tako(f"draft blocked: already exists: {dest.relative_to(root)}")
+            result = await asyncio.to_thread(
+                create_draft_extension,
+                root,
+                registry_path=self.extensions_registry_path,
+                kind=kind,
+                name_raw=name_raw,
+            )
+            if not result.created:
+                self._write_tako(result.message)
                 return
-            dest.mkdir(parents=True, exist_ok=True)
 
-            if kind == "skill":
-                (dest / "playbook.md").write_text(
-                    f"# {name_raw}\n\n"
-                    "Describe the workflow and constraints here.\n",
-                    encoding="utf-8",
-                )
-                (dest / "policy.toml").write_text(
-                    "[skill]\n"
-                    f"name = \"{name_raw}\"\n"
-                    "version = \"0.1.0\"\n"
-                    "entry = \"playbook.md\"\n\n"
-                    "[permissions]\n"
-                    "network = false\n"
-                    "shell = false\n"
-                    "xmtp = false\n"
-                    "filesystem = false\n",
-                    encoding="utf-8",
-                )
-                (dest / "README.md").write_text(
-                    f"# {name_raw}\n\n"
-                    "Status: drafted (disabled)\n",
-                    encoding="utf-8",
-                )
-            else:
-                (dest / "tool.py").write_text(
-                    "def run(input: dict, ctx: dict) -> dict:\n"
-                    "    \"\"\"Tool entrypoint.\n\n"
-                    "    Keep tools deterministic and safe. Return structured data.\n"
-                    "    \"\"\"\n"
-                    "    return {\"ok\": True, \"echo\": input}\n",
-                    encoding="utf-8",
-                )
-                (dest / "manifest.toml").write_text(
-                    "[tool]\n"
-                    f"name = \"{name_raw}\"\n"
-                    "version = \"0.1.0\"\n"
-                    "entry = \"tool.py\"\n\n"
-                    "[permissions]\n"
-                    "network = false\n"
-                    "shell = false\n"
-                    "xmtp = false\n"
-                    "filesystem = false\n",
-                    encoding="utf-8",
-                )
-                (dest / "README.md").write_text(
-                    f"# {name_raw}\n\n"
-                    "Status: drafted (disabled)\n",
-                    encoding="utf-8",
-                )
-
-            # Register as installed-but-disabled (runtime-only registry; folder itself is committed).
-            hashes = await asyncio.to_thread(ext_file_hashes, dest)
-            record = {
-                "kind": kind,
-                "name": name,
-                "display_name": name_raw,
-                "version": "0.1.0",
-                "enabled": False,
-                "installed_at": _utc_now_iso(),
-                "source_url": "local:draft",
-                "final_url": "local:draft",
-                "sha256": "",
-                "bytes": 0,
-                "risk": "low",
-                "recommendation": "Drafted locally (disabled).",
-                "requested_permissions": {"network": False, "shell": False, "xmtp": False, "filesystem": False},
-                "granted_permissions": {"network": False, "shell": False, "xmtp": False, "filesystem": False},
-                "path": str(dest.relative_to(root)),
-                "hashes": hashes,
-            }
-            ext_record_installed(self.extensions_registry_path, record)
-            append_daily_note(daily_root(), date.today(), f"Drafted {kind} `{name}` (disabled).")
+            append_daily_note(daily_root(), date.today(), f"Drafted {kind} `{result.name}` (disabled).")
             self._record_event(
                 "extensions.drafted",
-                f"Extension drafted: {kind} {name}",
+                f"Extension drafted: {kind} {result.name}",
                 source="terminal",
-                metadata={"kind": kind, "name": name},
+                metadata={"kind": kind, "name": result.name},
             )
-            self._add_activity("ext:draft", f"drafted {kind} {name} (disabled)")
-            self._write_tako(f"drafted {kind} {name} (disabled).")
+            self._add_activity("ext:draft", f"drafted {kind} {result.name} (disabled)")
+            self._write_tako(result.message)
             return
 
         if cmd == "web":
@@ -3027,6 +2950,7 @@ class TakoTerminalApp(App[None]):
                 self._write_tako(f"web fetch failed: {result.error}")
                 return
             title_line = f"title: {result.title}\n" if result.title else ""
+            append_daily_note(daily_root(), date.today(), f"Local web fetch: {result.url}")
             self._write_tako(f"web: {result.url}\n{title_line}{result.text}")
             self._add_activity("tool:web", f"fetched {result.url}")
             return
@@ -3799,6 +3723,7 @@ def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_pa
     return (
         "You are Tako, a super cute octopus assistant with pragmatic engineering judgment.\n"
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
+        "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
         "Terminal chat is always available.\n"
         "Hard boundary: identity/config/tools/permissions/routines remain operator-only over XMTP when paired.\n"
         f"session_mode={mode}\n"

@@ -1,7 +1,7 @@
-"""Takobot: your highly autonomous octopus friend."""
+"""Takobot: your highly autonomous and incredibly curious octopus friend."""
 
 from __future__ import annotations
 
 __all__ = ["__version__"]
 
-__version__ = "0.1.15"
+__version__ = "0.1.16"

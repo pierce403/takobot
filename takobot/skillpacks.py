@@ -365,15 +365,16 @@ def _playbook_text(skill: StarterSkill) -> str:
             "",
             "## Workflow",
             "1. Confirm prerequisites and required credentials are already present.",
-            "2. Run a quick capability probe:",
+            "2. Mission alignment check: proceed only if the requested action clearly supports the operator mission in `SOUL.md`.",
+            "3. Run a quick capability probe:",
         ]
     )
     for command in skill.commands:
         lines.append(f"   - `{command}`")
     lines.extend(
         [
-            "3. Execute the requested operation with minimal scope and clear output.",
-            "4. Summarize results, errors, and next actions for the operator.",
+            "4. Execute the requested operation with minimal scope and clear output.",
+            "5. Summarize results, errors, and next actions for the operator.",
             "",
             "## Safety",
             "- Respect operator-only boundaries for config/tooling changes.",

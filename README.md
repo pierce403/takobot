@@ -1,6 +1,6 @@
 # takobot
 
-Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
+Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. By default, Tako is intentionally curious about the world and pushes toward evidence-backed answers. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
@@ -133,6 +133,9 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Local checks: `.venv/bin/takobot doctor`
 - One-off DM send: `.venv/bin/takobot hi --to <xmtp_address_or_ens> [--message ...]`
 - Direct daemon (dev): `.venv/bin/takobot run`
+- Test suite: `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`
+- Feature checklist guard: `tests/test_features_contract.py` parses every `FEATURES.md` test criterion and enforces probe coverage so checklist drift is caught in CI/local runs.
+- Research-note scenario: `tests/test_research_workflow.py` validates that a research topic can fetch sources and write structured daily notes.
 
 ## Notes
 
@@ -152,4 +155,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - XMTP replies now use a typing indicator when supported by the installed XMTP SDK/runtime.
 - Transcript view is now selectable (read-only text area), so mouse highlight/copy works directly in compatible terminals.
+- Web reads are fetched with the built-in `web` tool and logged into the daily notes stream for traceability.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

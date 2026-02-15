@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — XMTP resilience + terminal-native right-click copy
+
+- What happened: operators observed XMTP reliability issues and right-click copy in the TUI could clear selection instead of copying selected text.
+- Fix: added XMTP send retries and daemon-side client rebuild on repeated stream/poll failures; switched app mode to run with mouse reporting disabled so terminal-native selection/right-click copy works reliably.
+- Prevention: keep transport resilience in daemon loops and preserve native terminal copy ergonomics for transcript inspection.
+
 ### 2026-02-15 — Bubble stream now exposes request focus during long thinking
 
 - What happened: during long inference turns, the UI could show “responding” without clear visibility into what request was being worked.

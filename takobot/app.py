@@ -3951,7 +3951,9 @@ class TakoTerminalApp(App[None]):
 
 def run_terminal_app(*, interval: float = 30.0) -> int:
     app = TakoTerminalApp(interval=interval)
-    app.run()
+    # Keep terminal-native text selection/copy behavior (right-click/context-menu) by
+    # disabling mouse reporting in app mode.
+    app.run(mouse=False)
     return 0
 
 

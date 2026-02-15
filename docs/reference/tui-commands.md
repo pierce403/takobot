@@ -27,6 +27,7 @@ Clipboard helpers:
 - `Ctrl+Shift+C` copy transcript
 - `Ctrl+Shift+L` copy last line
 - `Ctrl+V` / `Shift+Insert` paste
+- Native terminal right-click copy is supported for selected transcript text.
 
 Input history:
 

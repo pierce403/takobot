@@ -72,6 +72,11 @@ CHAT_CONTEXT_MAX_CHARS = 8_000
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 XMTP_TYPING_LEAD_S = 0.35
+XMTP_SEND_RETRY_ATTEMPTS = 3
+XMTP_SEND_RETRY_BASE_S = 0.4
+XMTP_POLL_ERROR_REBUILD_THRESHOLD = 4
+XMTP_STREAM_CRASH_REBUILD_THRESHOLD = 2
+XMTP_CLIENT_REBUILD_COOLDOWN_S = 30.0
 
 
 @dataclass(frozen=True)
@@ -576,7 +581,10 @@ async def _run_daemon(
     reconnect_attempt = 0
     error_burst_count = 0
     last_error_at = 0.0
+    stream_crash_streak = 0
     poll_successes = 0
+    poll_error_streak = 0
+    last_client_rebuild_at = 0.0
     mode = "stream"
     hint_last_printed: dict[str, float] = {}
     seen_message_ids: set[bytes] = set()
@@ -603,6 +611,7 @@ async def _run_daemon(
                             hooks=hooks,
                         )
                     poll_successes += 1
+                    poll_error_streak = 0
                     reconnect_attempt = 0
                     if poll_successes >= STREAM_POLL_STABLE_CYCLES:
                         _emit_runtime_log(
@@ -624,6 +633,30 @@ async def _run_daemon(
                     _emit_runtime_log(f"XMTP polling error: {summary}", level="error", stderr=True, hooks=hooks)
                     _maybe_print_xmtp_hint(exc, hint_last_printed, now, hooks=hooks)
                     poll_successes = 0
+                    poll_error_streak += 1
+                    if (
+                        poll_error_streak >= XMTP_POLL_ERROR_REBUILD_THRESHOLD
+                        and (now - last_client_rebuild_at) >= XMTP_CLIENT_REBUILD_COOLDOWN_S
+                    ):
+                        rebuilt = await _rebuild_xmtp_client(
+                            client,
+                            env=env,
+                            db_root=paths.xmtp_db_dir,
+                            wallet_key=wallet_key,
+                            db_encryption_key=db_encryption_key,
+                            hooks=hooks,
+                        )
+                        last_client_rebuild_at = now
+                        if rebuilt is not None:
+                            client = rebuilt
+                            seen_message_ids.clear()
+                            seen_message_order.clear()
+                            with contextlib.suppress(Exception):
+                                await _prime_seen_messages(client, seen_message_ids, seen_message_order)
+                            poll_error_streak = 0
+                            stream_crash_streak = 0
+                            reconnect_attempt = 0
+                            mode = "stream"
 
                 await asyncio.sleep(STREAM_POLL_INTERVAL_S)
                 continue
@@ -656,6 +689,7 @@ async def _run_daemon(
                         continue
 
                     error_burst_count = 0
+                    stream_crash_streak = 0
                     reconnect_attempt = 0
                     if _mark_message_seen(item, seen_message_ids, seen_message_order):
                         await _handle_incoming_message(
@@ -678,8 +712,32 @@ async def _run_daemon(
                 summary = _summarize_stream_error(exc)
                 _emit_runtime_log(f"XMTP stream crashed: {summary}", level="error", stderr=True, hooks=hooks)
                 _maybe_print_xmtp_hint(exc, hint_last_printed, now, hooks=hooks)
+                stream_crash_streak += 1
                 mode = "poll"
                 poll_successes = 0
+                if (
+                    stream_crash_streak >= XMTP_STREAM_CRASH_REBUILD_THRESHOLD
+                    and (now - last_client_rebuild_at) >= XMTP_CLIENT_REBUILD_COOLDOWN_S
+                ):
+                    rebuilt = await _rebuild_xmtp_client(
+                        client,
+                        env=env,
+                        db_root=paths.xmtp_db_dir,
+                        wallet_key=wallet_key,
+                        db_encryption_key=db_encryption_key,
+                        hooks=hooks,
+                    )
+                    last_client_rebuild_at = now
+                    if rebuilt is not None:
+                        client = rebuilt
+                        seen_message_ids.clear()
+                        seen_message_order.clear()
+                        with contextlib.suppress(Exception):
+                            await _prime_seen_messages(client, seen_message_ids, seen_message_order)
+                        stream_crash_streak = 0
+                        poll_error_streak = 0
+                        reconnect_attempt = 0
+                        mode = "stream"
             finally:
                 with contextlib.suppress(Exception):
                     await stream.close()
@@ -717,19 +775,46 @@ class _ConversationWithTyping:
 
     async def send(self, content: object, content_type: object | None = None):
         if content_type is not None:
-            return await self._conversation.send(content, content_type=content_type)
+            return await self._send_with_retry(content, content_type=content_type)
 
         if not isinstance(content, str):
-            return await self._conversation.send(content)
+            return await self._send_with_retry(content)
 
         typing_enabled = await self._toggle_typing(True)
         if typing_enabled:
             await asyncio.sleep(XMTP_TYPING_LEAD_S)
         try:
-            return await self._conversation.send(content)
+            return await self._send_with_retry(content)
         finally:
             if typing_enabled:
                 await self._toggle_typing(False)
+
+    async def _send_with_retry(self, content: object, *, content_type: object | None = None):
+        attempts = max(1, int(XMTP_SEND_RETRY_ATTEMPTS))
+        for attempt in range(1, attempts + 1):
+            try:
+                if content_type is None:
+                    return await self._conversation.send(content)
+                return await self._conversation.send(content, content_type=content_type)
+            except asyncio.CancelledError:
+                raise
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                retryable = _is_retryable_xmtp_error(exc)
+                if attempt >= attempts or not retryable:
+                    raise
+                delay = min(3.0, XMTP_SEND_RETRY_BASE_S * (2 ** (attempt - 1)))
+                _emit_runtime_log(
+                    (
+                        f"XMTP send retry ({attempt}/{attempts - 1}) in {delay:.1f}s: "
+                        f"{_summarize_stream_error(exc)}"
+                    ),
+                    level="warn",
+                    stderr=True,
+                    hooks=self._hooks,
+                )
+                await asyncio.sleep(delay)
 
     async def _toggle_typing(self, active: bool) -> bool:
         if self._typing_supported is False:
@@ -1404,6 +1489,55 @@ async def _poll_new_messages(client, seen_ids: set[bytes], seen_order: deque[byt
     return new_items
 
 
+async def _close_xmtp_client(client) -> None:
+    for attr in ("close", "disconnect"):
+        method = getattr(client, attr, None)
+        if not callable(method):
+            continue
+        with contextlib.suppress(Exception):
+            result = method()
+            if asyncio.iscoroutine(result):
+                await result
+        return
+
+
+async def _rebuild_xmtp_client(
+    client,
+    *,
+    env: str,
+    db_root: Path,
+    wallet_key: str,
+    db_encryption_key: str,
+    hooks: RuntimeHooks | None = None,
+):
+    _emit_runtime_log(
+        "XMTP client health: rebuilding client session.",
+        level="warn",
+        stderr=True,
+        hooks=hooks,
+    )
+    await _close_xmtp_client(client)
+    try:
+        rebuilt = await create_client(env, db_root, wallet_key, db_encryption_key)
+    except asyncio.CancelledError:
+        raise
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _emit_runtime_log(
+            f"XMTP client rebuild failed: {_summarize_stream_error(exc)}",
+            level="error",
+            stderr=True,
+            hooks=hooks,
+        )
+        hint = hint_for_xmtp_error(exc)
+        if hint:
+            _emit_runtime_log(hint, level="warn", stderr=True, hooks=hooks)
+        return None
+    _emit_runtime_log("XMTP client health: rebuild succeeded.", hooks=hooks)
+    return rebuilt
+
+
 async def _heartbeat_loop(
     args: argparse.Namespace,
     *,
@@ -1721,6 +1855,26 @@ def _record_chat_turn(
 def _is_git_identity_error(text: str) -> bool:
     lowered = text.lower()
     return "user.name" in lowered or "user.email" in lowered or "author identity unknown" in lowered
+
+
+def _is_retryable_xmtp_error(error: Exception) -> bool:
+    lowered = str(error).strip().lower()
+    if not lowered:
+        return False
+    retryable_tokens = (
+        "temporarily unavailable",
+        "unavailable",
+        "connection reset",
+        "connection closed",
+        "broken pipe",
+        "timeout",
+        "timed out",
+        "deadline exceeded",
+        "network is unreachable",
+        "try again",
+        "grpc-status header missing",
+    )
+    return any(token in lowered for token in retryable_tokens)
 
 
 def _summarize_stream_error(error: Exception) -> str:

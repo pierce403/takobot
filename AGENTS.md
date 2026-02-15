@@ -72,10 +72,16 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Slash command discovery moved into in-input dropdown
+
+- What happened: slash command discovery was shown in the transcript/system output area, which added noise during normal chat.
+- Fix: moved slash discovery into a dedicated dropdown panel under the input field, driven by prefix matching while typing `/...`.
+- Prevention: keep command discovery UI state in dedicated widgets and avoid writing suggestion lists into conversation logs.
+
 ### 2026-02-15 — TUI slash command discovery + quick runtime controls
 
 - What happened: operators wanted faster in-app command discovery and direct shortcuts for model inspection, updates, runtime stats, and DOSE tuning.
-- Fix: added slash-command discovery (`/` prints available command shortcuts), added `/models`, `/stats`, and `/upgrade` command paths, and extended `dose` command parsing to accept direct level setting (`dose <channel> <0..1>`).
+- Fix: added slash-command discovery (`/` opens an in-input dropdown with command shortcuts), added `/models`, `/stats`, and `/upgrade` command paths, and extended `dose` command parsing to accept direct level setting (`dose <channel> <0..1>`).
 - Prevention: keep high-frequency runtime controls exposed as concise slash-friendly commands and document them in README/FEATURES/docs together.
 
 ### 2026-02-15 — Direct inference auth/provider controls (pi oauth + ollama + API keys)

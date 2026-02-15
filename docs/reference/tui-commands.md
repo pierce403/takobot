@@ -19,7 +19,7 @@ Common commands:
 - `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`
 - `install`, `review pending`, `enable`, `draft`, `extensions`
 - `safe on`, `safe off`
-- Type `/` in the input box to print the available slash-command shortcuts.
+- Type `/` in the input box to open the slash-command dropdown under the input field.
 
 Clipboard helpers:
 

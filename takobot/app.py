@@ -100,9 +100,46 @@ STREAM_BOX_MAX_STATUS_LINES = 40
 INPUT_HISTORY_MAX = 200
 CHAT_CONTEXT_USER_TURNS = 12
 CHAT_CONTEXT_MAX_CHARS = 8_000
+SLASH_MENU_MAX_ITEMS = 12
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
+    ("/help", "Show command reference"),
+    ("/status", "Show runtime status"),
+    ("/stats", "Show counters and metrics"),
+    ("/health", "Show health summary"),
+    ("/config", "Explain tako.toml settings"),
+    ("/models", "Show pi and inference auth config"),
+    ("/dose", "Show or tune DOSE levels"),
+    ("/task", "Create a task"),
+    ("/tasks", "List tasks"),
+    ("/done", "Mark a task done"),
+    ("/morning", "Set today's outcomes"),
+    ("/outcomes", "Show or update outcomes"),
+    ("/compress", "Write daily summary"),
+    ("/weekly", "Run weekly review"),
+    ("/promote", "Promote note into MEMORY.md"),
+    ("/inference", "Inference provider controls"),
+    ("/doctor", "Run diagnostics"),
+    ("/pair", "Start XMTP pairing"),
+    ("/setup", "Run identity/routines onboarding"),
+    ("/update", "Apply update or run check"),
+    ("/upgrade", "Alias for /update"),
+    ("/web", "Fetch webpage"),
+    ("/run", "Run shell command in code/"),
+    ("/install", "Install skill or tool"),
+    ("/review", "Review pending installs"),
+    ("/enable", "Enable extension"),
+    ("/draft", "Draft extension scaffold"),
+    ("/extensions", "List extensions"),
+    ("/copy", "Copy transcript or last line"),
+    ("/activity", "Show recent activity"),
+    ("/safe", "Toggle safe mode"),
+    ("/stop", "Alias safe on"),
+    ("/resume", "Alias safe off"),
+    ("/quit", "Quit app"),
+)
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -186,6 +223,14 @@ class TakoTerminalApp(App[None]):
 
     #input-box:focus {
         border: solid $border;
+    }
+
+    #slash-menu {
+        height: auto;
+        max-height: 8;
+        border: solid $secondary;
+        margin: 0 0 1 0;
+        padding: 0 1;
     }
 
     #stream-box {
@@ -320,12 +365,12 @@ class TakoTerminalApp(App[None]):
         self.stream_reply = ""
         self.stream_active = False
         self.stream_last_render_at = 0.0
-        self.slash_hint_shown = False
 
         self.status_bar: Static
         self.transcript: TextArea
         self.stream_box: TextArea
         self.input_box: Input
+        self.slash_menu: Static
         self.octo_panel: Static
         self.tasks_panel: Static
         self.memory_panel: Static
@@ -360,6 +405,7 @@ class TakoTerminalApp(App[None]):
             placeholder="bubble stream: inference + tools will appear here while I'm working",
         )
         yield Input(id="input-box", placeholder="Type here. During onboarding, answer the current question.")
+        yield Static("", id="slash-menu")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -367,11 +413,13 @@ class TakoTerminalApp(App[None]):
         self.transcript = self.query_one("#transcript", TextArea)
         self.stream_box = self.query_one("#stream-box", TextArea)
         self.input_box = self.query_one("#input-box", Input)
+        self.slash_menu = self.query_one("#slash-menu", Static)
         self.octo_panel = self.query_one("#panel-octo", Static)
         self.tasks_panel = self.query_one("#panel-tasks", Static)
         self.memory_panel = self.query_one("#panel-memory", Static)
         self.sensors_panel = self.query_one("#panel-sensors", Static)
         self.activity_panel = self.query_one("#panel-activity", Static)
+        self.slash_menu.display = False
         self._ensure_input_focus()
         self.set_interval(0.5, self._refresh_status)
         self._refresh_panels()
@@ -388,13 +436,7 @@ class TakoTerminalApp(App[None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "input-box":
             return
-        value = event.value.strip()
-        if value == "/":
-            if not self.slash_hint_shown:
-                self._write_system(_slash_commands_help_line())
-                self.slash_hint_shown = True
-            return
-        self.slash_hint_shown = False
+        self._update_slash_menu(event.value)
 
     async def on_unmount(self) -> None:
         await self._shutdown_background_tasks()
@@ -495,6 +537,7 @@ class TakoTerminalApp(App[None]):
                 self._write_system("ignored terminal control-sequence noise; input focus restored.")
             self._ensure_input_focus()
             return
+        self._hide_slash_menu()
         self.input_history.add(text)
         event.input.value = ""
 
@@ -2069,7 +2112,7 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd == "":
             if text.strip().startswith("/"):
-                self._write_tako(_slash_commands_help_line())
+                self._write_tako("empty slash command. keep typing after `/` or use `/help`.")
                 return
             self._write_tako("unknown local command. type `help`. plain text chat always works here.")
             return
@@ -3580,6 +3623,33 @@ class TakoTerminalApp(App[None]):
         with contextlib.suppress(Exception):
             input_box.focus()
 
+    def _hide_slash_menu(self) -> None:
+        if not hasattr(self, "slash_menu"):
+            return
+        self.slash_menu.display = False
+        self.slash_menu.update("")
+
+    def _update_slash_menu(self, raw_text: str) -> None:
+        if not hasattr(self, "slash_menu"):
+            return
+        value = raw_text.strip()
+        if not value.startswith("/"):
+            self._hide_slash_menu()
+            return
+        token = value[1:]
+        if " " in token:
+            self._hide_slash_menu()
+            return
+        matches = _slash_command_matches(token, limit=SLASH_MENU_MAX_ITEMS)
+        if not matches:
+            self._hide_slash_menu()
+            return
+        lines = ["Slash commands"]
+        for command, summary in matches:
+            lines.append(f"- {command}  {summary}")
+        self.slash_menu.update("\n".join(lines))
+        self.slash_menu.display = True
+
     def _refresh_status(self) -> None:
         uptime_s = int(time.monotonic() - self.started_at)
         safe = "on" if self.safe_mode else "off"
@@ -3929,12 +3999,15 @@ def _mask_sensitive_inference_command(text: str) -> str:
     return text
 
 
-def _slash_commands_help_line() -> str:
-    return (
-        "slash commands: /help /status /stats /health /config /models /dose /inference /update /upgrade "
-        "/task /tasks /done /morning /outcomes /compress /weekly /promote /doctor /pair /setup /install "
-        "/review /enable /draft /extensions /web /run /copy /activity /safe /stop /resume /quit"
-    )
+def _slash_command_matches(query: str, *, limit: int = SLASH_MENU_MAX_ITEMS) -> list[tuple[str, str]]:
+    needle = query.strip().lower()
+    results: list[tuple[str, str]] = []
+    for command, summary in SLASH_COMMAND_SPECS:
+        key = command[1:].lower()
+        if needle and not key.startswith(needle):
+            continue
+        results.append((command, summary))
+    return results[: max(1, int(limit))]
 
 
 def _parse_dose_set_request(action: str) -> tuple[str, float] | None:

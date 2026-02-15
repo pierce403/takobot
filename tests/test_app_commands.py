@@ -7,7 +7,7 @@ from takobot.app import (
     _looks_like_local_command,
     _parse_command,
     _parse_dose_set_request,
-    _slash_commands_help_line,
+    _slash_command_matches,
 )
 
 
@@ -40,12 +40,15 @@ class TestAppCommands(unittest.TestCase):
         self.assertTrue(_looks_like_local_command("dose o 0.4"))
         self.assertTrue(_looks_like_local_command("/"))
 
-    def test_slash_help_line_lists_new_commands(self) -> None:
-        line = _slash_commands_help_line()
-        self.assertIn("/models", line)
-        self.assertIn("/upgrade", line)
-        self.assertIn("/stats", line)
-        self.assertIn("/dose", line)
+    def test_slash_command_matches_lists_new_commands(self) -> None:
+        items = _slash_command_matches("", limit=128)
+        commands = {command for command, _summary in items}
+        self.assertIn("/models", commands)
+        self.assertIn("/upgrade", commands)
+        self.assertIn("/stats", commands)
+
+        dose_items = _slash_command_matches("dose")
+        self.assertTrue(any(command == "/dose" for command, _summary in dose_items))
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ The supported "fresh start" is:
 - It creates a local `.venv/`.
 - It attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is already present, it clones the engine source into `.tako/tmp/src/` and installs from there.
 - It materializes the workspace from templates shipped inside the installed engine (`takobot/templates/**`) without overwriting existing files.
-- If `git` is available and `.git/` is missing, it initializes git, writes `.gitignore`, and commits the initial workspace.
+- If `git` is available and `.git/` is missing, it initializes git, writes `.gitignore`, and commits the initial workspace (auto-configuring repo-local fallback identity if needed).
 - It ensures a git-ignored `code/` directory exists for cloned repos and ephemeral code work.
 - It ends by running `.venv/bin/takobot` (interactive TUI main loop).
 
@@ -27,6 +27,7 @@ From the workspace root:
 - Heartbeat loops (`takobot` app and `takobot run`) auto-commit pending workspace changes (`git add -A` + `git commit`) and verify repo cleanliness after commit.
 - If git identity is missing during heartbeat commits, Tako auto-configures local repo identity (`Takobot <takobot@local>`) and retries.
 - Local/XMTP `run` commands execute in `code/` by default.
+- `takobot doctor` performs offline inference diagnostics (CLI probes + recent inference error scan) and records detected issues into `tasks/`.
 
 ## Update Model
 

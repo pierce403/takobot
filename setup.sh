@@ -181,7 +181,13 @@ EOF
   if git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then
     log "git: committed initial workspace"
   else
-    log "git: commit skipped (operator action requested: configure git user.name/user.email, then retry commit)"
+    if git config user.name "Takobot" >/dev/null 2>&1 \
+      && git config user.email "takobot@local" >/dev/null 2>&1 \
+      && git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then
+      log "git: committed initial workspace (local identity auto-configured: Takobot <takobot@local>)"
+    else
+      log "git: commit skipped (operator action requested: configure git user.name/user.email, then retry commit)"
+    fi
   fi
 }
 

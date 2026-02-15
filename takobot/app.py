@@ -47,6 +47,7 @@ from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
 from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
+from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
@@ -858,14 +859,23 @@ class TakoTerminalApp(App[None]):
             self._write_system(f"health issue [{severity}]: {message}")
             self._record_event("health.check.issue", message, severity=severity, source="health")
 
+        issue_problems = [message for severity, message in issues if severity in {"warn", "error", "critical"}]
+        if issue_problems:
+            records = ensure_problem_tasks(repo_root(), issue_problems, source="startup-health")
+            created = [record for record in records if record.created]
+            if created:
+                self._add_activity("tasks", f"problem tasks created: {', '.join(record.task_id for record in created[:3])}")
+            elif records:
+                self._add_activity("tasks", "problem tasks already open")
+
         if not git_identity_ok:
             self._request_operator_configuration(
                 key="git.identity",
-                reason="could you please configure git `user.name` and `user.email` so heartbeat auto-commit can run?",
+                reason="could you please configure git `user.name` and `user.email` for clean commit attribution?",
                 next_steps=[
                     "run `git config --global user.name \"Your Name\"`",
                     "run `git config --global user.email \"you@example.com\"`",
-                    "or set repo-local values without `--global`",
+                    "or set repo-local values: `git config user.name \"Your Name\"` + `git config user.email \"you@example.com\"`",
                 ],
             )
         if not xmtp_import_ok:
@@ -1930,13 +1940,19 @@ class TakoTerminalApp(App[None]):
                 severity="warn",
                 source="runtime",
             )
+        if not result.ok:
+            records = ensure_problem_tasks(repo_root(), [result.summary], source="heartbeat-git")
+            created = [record for record in records if record.created]
+            if created:
+                self._add_activity("tasks", f"problem task created: {created[0].task_id}")
         if not result.ok and _is_git_identity_error(result.summary):
             self._request_operator_configuration(
                 key="git.identity",
-                reason="could you please configure git `user.name` and `user.email` so I can keep auto-committing pending changes?",
+                reason="could you please configure git `user.name` and `user.email` so commits use your preferred identity?",
                 next_steps=[
                     "run `git config --global user.name \"Your Name\"`",
                     "run `git config --global user.email \"you@example.com\"`",
+                    "or set repo-local values: `git config user.name \"Your Name\"` + `git config user.email \"you@example.com\"`",
                 ],
             )
 
@@ -2433,6 +2449,13 @@ class TakoTerminalApp(App[None]):
             self._write_tako("\n".join(lines))
             if problems:
                 self._write_tako("Problems:\n" + "\n".join(f"- {p}" for p in problems))
+                task_records = ensure_problem_tasks(repo_root(), problems, source="doctor")
+                if task_records:
+                    created = [record for record in task_records if record.created]
+                    if created:
+                        self._write_tako("Problem tasks created:\n" + "\n".join(f"- {record.task_id}: {record.title}" for record in created))
+                    else:
+                        self._write_tako("Problem tasks already open:\n" + "\n".join(f"- {record.task_id}: {record.title}" for record in task_records))
             return
 
         if cmd == "pair":

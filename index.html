@@ -806,6 +806,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes and verifies no tracked changes remain.</li>
               <li>If git identity is missing, heartbeat auto-configures local repo identity (<code>Takobot &lt;takobot@local&gt;</code>) and retries commit.</li>
+              <li>If runtime health detects actionable problems, Tako auto-creates/reuses matching follow-up tasks under <code>tasks/</code>.</li>
               <li>Ensures a git-ignored <code>code/</code> directory exists for repo clones and code-work sandboxes.</li>
               <li>If required setup is missing (for example git identity), asks the operator in-app with concrete fix steps.</li>
               <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
@@ -839,6 +840,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><code>run</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>
+              <li><code>doctor</code> runs offline inference diagnostics (provider CLI probes + recent inference error scan), so it can diagnose inference issues without using inference.</li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, and plain-text chat stays available there.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>

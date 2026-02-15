@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Problem-to-task automation + offline doctor diagnostics
+
+- What happened: operators could see runtime warnings (especially git/inference issues) without a durable follow-up list, and `doctor` needed better inference failure diagnosis when inference itself was down.
+- Fix: mapped runtime/doctor problems into deduped committed tasks under `tasks/`, added daemon startup git-identity operator-request messaging, and expanded `doctor` with offline inference probes + recent inference-error log inspection.
+- Prevention: treat recurring runtime warnings as tracked work items and keep doctor diagnostics independent from model availability.
+
 ### 2026-02-14 — Code-work isolation + config identity alignment
 
 - What happened: code operations could run in workspace root, identity naming lived mainly in `SOUL.md`, and operators wanted clearer `tako.toml` guidance/security defaults.

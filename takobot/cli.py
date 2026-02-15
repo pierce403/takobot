@@ -5,9 +5,11 @@ import argparse
 import contextlib
 from collections import deque
 from dataclasses import dataclass, replace
+import json
 from pathlib import Path
 import random
 import re
+import subprocess
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -24,6 +26,7 @@ from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
+from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
 from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
@@ -195,9 +198,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     lines, problems = _doctor_report(root, paths, env)
     print("\n".join(lines))
     if problems:
+        records = ensure_problem_tasks(root, problems, source="doctor")
         print("\nProblems:", file=sys.stderr)
         for problem in problems:
             print(f"- {problem}", file=sys.stderr)
+        if records:
+            created = [record for record in records if record.created]
+            if created:
+                print("\nProblem tasks created:", file=sys.stderr)
+                for record in created:
+                    print(f"- {record.task_id}: {record.title}", file=sys.stderr)
+            else:
+                print("\nProblem tasks already open:", file=sys.stderr)
+                for record in records:
+                    print(f"- {record.task_id}: {record.title}", file=sys.stderr)
         return 1
     return 0
 
@@ -253,8 +267,131 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
 
     inference_runtime = discover_inference_runtime()
     lines.extend(f"- {line}" for line in format_runtime_lines(inference_runtime))
+    inference_lines, inference_problems = _doctor_inference_diagnostics(inference_runtime, paths)
+    lines.extend(inference_lines)
+    problems.extend(inference_problems)
 
     return lines, problems
+
+
+def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[list[str], list[str]]:
+    lines: list[str] = []
+    problems: list[str] = []
+
+    lines.append("- inference doctor: local offline diagnostics")
+    for provider in ("codex", "claude", "gemini"):
+        status = runtime.statuses.get(provider)
+        if status is None:
+            continue
+
+        if not status.cli_installed:
+            problems.append(f"{provider} CLI missing from PATH.")
+            lines.append(f"- {provider} probe: CLI missing")
+            continue
+
+        version_ok, version_detail = _probe_cli_command([status.cli_name, "--version"], timeout_s=7.0)
+        lines.append(f"- {provider} probe: --version {'ok' if version_ok else 'failed'} ({version_detail})")
+        if not version_ok:
+            problems.append(f"{provider} CLI appears installed but --version failed: {version_detail}")
+
+        if provider == "codex":
+            command_probe = ["codex", "exec", "--help"]
+        else:
+            command_probe = [status.cli_name, "--help"]
+        command_ok, command_detail = _probe_cli_command(command_probe, timeout_s=7.0)
+        lines.append(
+            f"- {provider} probe: {' '.join(command_probe[1:])} "
+            f"{'ok' if command_ok else 'failed'} ({command_detail})"
+        )
+        if not command_ok:
+            problems.append(f"{provider} CLI command probe failed: {command_detail}")
+
+        if status.auth_kind == "none" or not status.key_present:
+            problems.append(_provider_auth_problem(provider))
+        elif status.key_source:
+            lines.append(f"- {provider} auth source: {status.key_source}")
+        if status.note:
+            lines.append(f"- {provider} note: {status.note}")
+
+    if not runtime.ready:
+        problems.append("inference is unavailable: no ready provider found (see probes above).")
+
+    recent = _recent_inference_error_lines(paths.state_dir / "events.jsonl", limit=3)
+    for item in recent:
+        lines.append(f"- inference recent error: {item}")
+    if recent:
+        problems.append("recent inference runtime errors were detected in the event log.")
+
+    return lines, problems
+
+
+def _provider_auth_problem(provider: str) -> str:
+    if provider == "codex":
+        return "codex auth missing: run `codex login` or set `OPENAI_API_KEY`."
+    if provider == "claude":
+        return "claude auth missing: set `ANTHROPIC_API_KEY`/`CLAUDE_API_KEY` or run Claude CLI auth."
+    if provider == "gemini":
+        return "gemini auth missing: run Gemini CLI auth or set `GEMINI_API_KEY`/`GOOGLE_API_KEY`."
+    return f"{provider} auth missing."
+
+
+def _probe_cli_command(command: list[str], *, timeout_s: float) -> tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except FileNotFoundError:
+        return False, "not found"
+    except subprocess.TimeoutExpired:
+        return False, "timed out"
+    except Exception as exc:  # noqa: BLE001
+        return False, _summarize_stream_error(exc)
+
+    detail = (proc.stdout or "").strip() or (proc.stderr or "").strip() or f"exit={proc.returncode}"
+    detail = " ".join(detail.split())
+    if len(detail) > 180:
+        detail = detail[:177] + "..."
+    return proc.returncode == 0, detail
+
+
+def _recent_inference_error_lines(path: Path, *, limit: int) -> list[str]:
+    if not path.exists():
+        return []
+    tail = deque(maxlen=400)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                tail.append(line)
+    except Exception:
+        return []
+
+    results: list[str] = []
+    for raw in tail:
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        event_type = str(payload.get("type", "")).strip().lower()
+        severity = str(payload.get("severity", "info")).strip().lower()
+        message = str(payload.get("message", "")).strip()
+        if not event_type.startswith("inference."):
+            continue
+        if severity not in {"warn", "error", "critical"} and "error" not in event_type:
+            continue
+        summary = " ".join(f"{event_type}: {message}".split())
+        if summary:
+            results.append(summary)
+
+    if len(results) > limit:
+        return results[-limit:]
+    return results
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
@@ -334,6 +471,27 @@ async def _run_daemon(
         f"ready={'yes' if inference_runtime.ready else 'no'}",
         hooks=hooks,
     )
+    git_identity_ok, git_identity_detail = git_identity_status(repo_root())
+    if not git_identity_ok:
+        _emit_runtime_log(f"git identity: {git_identity_detail}", level="warn", stderr=True, hooks=hooks)
+        _emit_runtime_log(
+            "operator request: configure git identity for commit attribution "
+            "(`git config --global user.name \"Your Name\"` + "
+            "`git config --global user.email \"you@example.com\"`, "
+            "or repo-local `git config user.name ...` + `git config user.email ...`).",
+            level="warn",
+            stderr=True,
+            hooks=hooks,
+        )
+        records = ensure_problem_tasks(repo_root(), [f"git identity unavailable; {git_identity_detail}"], source="startup-health")
+        created = [record for record in records if record.created]
+        if created:
+            _emit_runtime_log(
+                f"tasks: created problem task {created[0].task_id} ({created[0].title})",
+                level="warn",
+                stderr=True,
+                hooks=hooks,
+            )
 
     if operator_inbox_id:
         clear_pending(paths.state_dir / "pairing.json")
@@ -632,6 +790,17 @@ async def _handle_incoming_message(
         report = "\n".join(lines)
         if problems:
             report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
+            records = ensure_problem_tasks(repo_root(), problems, source="doctor")
+            if records:
+                created = [record for record in records if record.created]
+                if created:
+                    report += "\n\nProblem tasks created:\n" + "\n".join(
+                        f"- {record.task_id}: {record.title}" for record in created
+                    )
+                else:
+                    report += "\n\nProblem tasks already open:\n" + "\n".join(
+                        f"- {record.task_id}: {record.title}" for record in records
+                    )
         await convo.send(report)
         return
     if cmd in {"config", "toml"}:
@@ -1097,11 +1266,21 @@ async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | Non
         elif not result.ok and result.summary != last_autocommit_error:
             last_autocommit_error = result.summary
             _emit_runtime_log(result.summary, level="warn", stderr=True, hooks=hooks)
+            records = ensure_problem_tasks(repo_root(), [result.summary], source="heartbeat-git")
+            created = [record for record in records if record.created]
+            if created:
+                _emit_runtime_log(
+                    f"tasks: created problem task {created[0].task_id} ({created[0].title})",
+                    level="warn",
+                    stderr=True,
+                    hooks=hooks,
+                )
             if _is_git_identity_error(result.summary):
                 request = (
-                    "operator request: please configure git identity so auto-commit can run "
+                    "operator request: please configure git identity for commit attribution "
                     "(`git config --global user.name \"Your Name\"` + "
-                    "`git config --global user.email \"you@example.com\"`)."
+                    "`git config --global user.email \"you@example.com\"`, "
+                    "or repo-local `git config user.name ...` + `git config user.email ...`)."
                 )
                 if request != last_operator_request:
                     last_operator_request = request

@@ -86,7 +86,10 @@
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.
   - App heartbeat performs git auto-commit for pending workspace changes (`git add -A` + `git commit`).
   - If git identity is missing, heartbeat auto-configures local repo identity (`Takobot <takobot@local>`) and retries commit.
+  - Daemon startup and heartbeat emit explicit operator-request guidance when git identity is missing.
   - When required setup is missing (for example git identity or XMTP dependency), app mode emits a polite operator request with concrete next steps.
+  - Runtime and `doctor`-detected problems are converted into committed follow-up tasks under `tasks/` (deduped by issue key).
+  - `doctor` includes offline inference diagnostics (CLI version/help probes + recent inference-error scan from `.tako/state/events.jsonl`).
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
   - Local `config` command explains `tako.toml` options and current values.
@@ -122,6 +125,8 @@
   - [x] App/daemon heartbeat can auto-commit pending workspace changes when git identity is configured.
   - [x] Missing git identity triggers an operator-facing request with concrete `git config` remediation commands.
   - [x] Heartbeat auto-commit can recover from missing git identity by setting local repo identity and retrying.
+  - [x] Runtime/doctor problem detection auto-creates (or reuses) matching tasks under `tasks/`.
+  - [x] `doctor` can diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
   - [x] `config` command explains `tako.toml` sections/options and live values.

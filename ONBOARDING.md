@@ -15,6 +15,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] Open loops index exists at `.tako/state/open_loops.json` and is surfaced in the UI sidebar.
 - [ ] Heartbeat can auto-commit pending workspace changes (git repo + `user.name`/`user.email` configured).
 - [ ] If required setup is missing (for example git identity), Tako emits an operator request with concrete fix steps.
+- [ ] Health/doctor-detected problems are reflected as committed tasks under `tasks/` (deduped by issue).
 - [ ] Auto-update policy is set (`tako.toml` `[updates].auto_apply`), defaulting to `true`.
 - [ ] TUI mind indicator visibly animates during thinking/responding, and XMTP typing indicators appear when supported by runtime SDK.
 - [ ] `code/` exists and is git-ignored for repo clones/code work.
@@ -54,6 +55,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During periodic update checks, if `[updates].auto_apply = true`, Tako applies package updates and restarts app mode automatically.
 - During `RUNNING`, Tako keeps a small runtime-only DOSE model (D/O/S/E) ticking on heartbeat and reflecting mode in the UI.
 - During `RUNNING`, `run` command execution uses `code/` as working directory and reports that `cwd` in responses.
+- During `RUNNING`, health/doctor issues create or reuse matching follow-up tasks in `tasks/`.
+- `doctor` performs offline inference diagnostics (CLI probes + recent inference-error scan) without requiring inference calls.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**
 

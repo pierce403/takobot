@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — OpenClaw-style session context + pi runtime fallback
+
+- What happened: chat inference in Takobot was mostly single-turn, so longer conversations felt forgetful; operators also wanted OpenClaw-style pi stack alignment.
+- Fix: added session-backed chat transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts (local + XMTP), and added local pi runtime detection/inference fallback (`pi`, then `codex`/`claude`/`gemini`) with workspace-scoped `PI_CODING_AGENT_DIR`.
+- Prevention: keep session transcript and provider-fallback behavior explicit in docs/tests so context regressions and runtime drift are caught early.
+
 ### 2026-02-15 — TUI input history recall with arrow keys
 
 - What happened: operators expected shell-style input recall in the TUI so repeated prompts/commands do not require retyping.

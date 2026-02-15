@@ -17,6 +17,7 @@ from typing import Callable
 
 from . import __version__
 from .config import explain_tako_toml, load_tako_toml, set_workspace_name
+from .conversation import ConversationStore
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, git_identity_status, panic_check_runtime_secrets
@@ -53,6 +54,8 @@ MESSAGE_HISTORY_PER_CONVERSATION = 80
 SEEN_MESSAGE_CACHE_MAX = 4096
 CHAT_INFERENCE_TIMEOUT_S = 75.0
 CHAT_REPLY_MAX_CHARS = 700
+CHAT_CONTEXT_USER_TURNS = 12
+CHAT_CONTEXT_MAX_CHARS = 8_000
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 XMTP_TYPING_LEAD_S = 0.35
@@ -453,6 +456,7 @@ async def _run_daemon(
     hooks = _hooks_with_log_file(hooks, paths.logs_dir / "runtime.log")
     root = repo_root()
     code_dir = ensure_code_dir(root)
+    conversations = ConversationStore(paths.state_dir)
     _emit_runtime_log(f"workspace code dir: {code_dir}", hooks=hooks)
     registry_path = paths.state_dir / "extensions.json"
     seeded = seed_openclaw_starter_skills(root, registry_path=registry_path)
@@ -550,6 +554,7 @@ async def _run_daemon(
                             env,
                             start,
                             inference_runtime,
+                            conversations,
                             hooks=hooks,
                         )
                     poll_successes += 1
@@ -616,6 +621,7 @@ async def _run_daemon(
                             env,
                             start,
                             inference_runtime,
+                            conversations,
                             hooks=hooks,
                         )
             except asyncio.CancelledError:
@@ -710,6 +716,7 @@ async def _handle_incoming_message(
     env: str,
     start: float,
     inference_runtime: InferenceRuntime,
+    conversations: ConversationStore,
     hooks: RuntimeHooks | None = None,
 ) -> None:
     sender_inbox_id = getattr(item, "sender_inbox_id", None)
@@ -730,6 +737,7 @@ async def _handle_incoming_message(
     convo_id = getattr(item, "conversation_id", None)
     if not isinstance(convo_id, (bytes, bytearray)):
         return
+    session_key = f"xmtp:{bytes(convo_id).hex()}"
 
     raw_convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
     if raw_convo is None:
@@ -750,10 +758,13 @@ async def _handle_incoming_message(
             reply = await _chat_reply(
                 text,
                 inference_runtime,
+                conversations=conversations,
+                session_key=session_key,
                 is_operator=False,
                 operator_paired=False,
                 hooks=hooks,
             )
+            _record_chat_turn(conversations, session_key, text, reply, hooks=hooks)
             await convo.send(reply)
         return
 
@@ -764,10 +775,13 @@ async def _handle_incoming_message(
             reply = await _chat_reply(
                 text,
                 inference_runtime,
+                conversations=conversations,
+                session_key=session_key,
                 is_operator=False,
                 operator_paired=True,
                 hooks=hooks,
             )
+            _record_chat_turn(conversations, session_key, text, reply, hooks=hooks)
             await convo.send(reply)
         return
 
@@ -777,10 +791,13 @@ async def _handle_incoming_message(
         reply = await _chat_reply(
             text,
             inference_runtime,
+            conversations=conversations,
+            session_key=session_key,
             is_operator=True,
             operator_paired=True,
             hooks=hooks,
         )
+        _record_chat_turn(conversations, session_key, text, reply, hooks=hooks)
         await convo.send(reply)
         return
 
@@ -1454,6 +1471,8 @@ async def _chat_reply(
     text: str,
     inference_runtime: InferenceRuntime,
     *,
+    conversations: ConversationStore,
+    session_key: str,
     is_operator: bool,
     operator_paired: bool,
     hooks: RuntimeHooks | None,
@@ -1469,7 +1488,14 @@ async def _chat_reply(
     if not inference_runtime.ready:
         return fallback
 
-    prompt = _chat_prompt(text, is_operator=is_operator, operator_paired=operator_paired)
+    history = conversations.format_prompt_context(
+        session_key,
+        user_turn_limit=CHAT_CONTEXT_USER_TURNS,
+        max_chars=CHAT_CONTEXT_MAX_CHARS,
+        user_label="User",
+        assistant_label="Takobot",
+    )
+    prompt = _chat_prompt(text, history=history, is_operator=is_operator, operator_paired=operator_paired)
     try:
         provider, reply = await asyncio.to_thread(
             run_inference_prompt_with_fallback,
@@ -1488,9 +1514,10 @@ async def _chat_reply(
     return cleaned
 
 
-def _chat_prompt(text: str, *, is_operator: bool, operator_paired: bool) -> str:
+def _chat_prompt(text: str, *, history: str, is_operator: bool, operator_paired: bool) -> str:
     role = "operator" if is_operator else "non-operator"
     paired = "yes" if operator_paired else "no"
+    history_block = f"{history}\n" if history else "(none)\n"
     return (
         "You are Tako, a cute but practical octopus assistant.\n"
         "Reply with plain text only (no markdown), max 4 short lines.\n"
@@ -1500,6 +1527,8 @@ def _chat_prompt(text: str, *, is_operator: bool, operator_paired: bool) -> str:
         "If user asks for restricted changes and they are non-operator, say operator-only clearly.\n"
         f"sender_role={role}\n"
         f"operator_paired={paired}\n"
+        "recent_conversation=\n"
+        f"{history_block}"
         f"user_message={text}\n"
     )
 
@@ -1519,6 +1548,24 @@ def _clean_chat_reply(text: str) -> str:
     if len(value) > CHAT_REPLY_MAX_CHARS:
         return value[: CHAT_REPLY_MAX_CHARS - 3] + "..."
     return value
+
+
+def _record_chat_turn(
+    conversations: ConversationStore,
+    session_key: str,
+    user_text: str,
+    assistant_text: str,
+    *,
+    hooks: RuntimeHooks | None,
+) -> None:
+    try:
+        conversations.append_user_assistant(session_key, user_text, assistant_text)
+    except Exception as exc:  # noqa: BLE001
+        _emit_runtime_log(
+            f"conversation history save warning: {_summarize_stream_error(exc)}",
+            level="warn",
+            hooks=hooks,
+        )
 
 
 def _is_git_identity_error(text: str) -> bool:

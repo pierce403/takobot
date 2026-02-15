@@ -28,6 +28,7 @@ from textual.widgets import Footer, Input, Static, TextArea
 
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
+from .conversation import ConversationStore
 from .config import TakoConfig, explain_tako_toml, load_tako_toml, set_updates_auto_apply, set_workspace_name
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
@@ -89,6 +90,8 @@ TRANSCRIPT_LOG_MAX = 2000
 STREAM_BOX_MAX_CHARS = 8000
 STREAM_BOX_MAX_STATUS_LINES = 40
 INPUT_HISTORY_MAX = 200
+CHAT_CONTEXT_USER_TURNS = 12
+CHAT_CONTEXT_MAX_CHARS = 8_000
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
@@ -300,6 +303,7 @@ class TakoTerminalApp(App[None]):
         self.prompt_step = 0
         self.prompt_values: list[str] = []
         self.input_history = InputHistory(max_items=INPUT_HISTORY_MAX)
+        self.conversations: ConversationStore | None = None
 
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
@@ -494,6 +498,7 @@ class TakoTerminalApp(App[None]):
         try:
             self.paths = ensure_runtime_dirs(runtime_paths())
             self.app_log_path = self.paths.logs_dir / "app.log"
+            self.conversations = ConversationStore(self.paths.state_dir)
             root = repo_root()
             self.code_dir = ensure_code_dir(root)
             self._add_activity("workspace", f"code dir ready: {self.code_dir}")
@@ -2025,6 +2030,7 @@ class TakoTerminalApp(App[None]):
             if await self._maybe_handle_inline_name_change(text):
                 return
             reply = await self._local_chat_reply(text)
+            self._record_local_chat_turn(user_text=text, assistant_text=reply)
             self._write_tako(reply)
             return
 
@@ -3107,11 +3113,22 @@ class TakoTerminalApp(App[None]):
         if self.inference_runtime is None or not self.inference_runtime.ready:
             return fallback
 
+        history = ""
+        if self.conversations is not None:
+            history = self.conversations.format_prompt_context(
+                "terminal:main",
+                user_turn_limit=CHAT_CONTEXT_USER_TURNS,
+                max_chars=CHAT_CONTEXT_MAX_CHARS,
+                user_label="User",
+                assistant_label="Takobot",
+            )
+
         prompt = _build_terminal_chat_prompt(
             text=text,
             mode=self.mode,
             state=self.state.value,
             operator_paired=self.operator_paired,
+            history=history,
         )
         self._add_activity("inference", "terminal chat inference requested")
         self._stream_begin()
@@ -3152,6 +3169,14 @@ class TakoTerminalApp(App[None]):
             metadata={"provider": provider},
         )
         return cleaned
+
+    def _record_local_chat_turn(self, *, user_text: str, assistant_text: str) -> None:
+        if self.conversations is None:
+            return
+        try:
+            self.conversations.append_user_assistant("terminal:main", user_text, assistant_text)
+        except Exception as exc:  # noqa: BLE001
+            self._add_activity("memory", f"conversation save warning: {_summarize_error(exc)}")
 
     async def _infer_identity_name(self, text: str) -> str:
         if self.inference_runtime is None or not self.inference_runtime.ready:
@@ -3739,8 +3764,9 @@ def _looks_like_tako_toml_question(text: str) -> bool:
     return toml_hint and explain_hint
 
 
-def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_paired: bool) -> str:
+def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_paired: bool, history: str) -> str:
     paired = "yes" if operator_paired else "no"
+    history_block = f"{history}\n" if history else "(none)\n"
     return (
         "You are Tako, a super cute octopus assistant with pragmatic engineering judgment.\n"
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
@@ -3750,6 +3776,8 @@ def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_pa
         f"session_mode={mode}\n"
         f"session_state={state}\n"
         f"operator_paired={paired}\n"
+        "recent_conversation=\n"
+        f"{history_block}"
         f"user_message={text}\n"
     )
 

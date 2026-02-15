@@ -32,6 +32,7 @@
   - Refuses to run unless the directory is empty, or already looks like a Tako workspace (`SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
   - Creates `.venv/` in the workspace directory.
   - Attempts `pip install --upgrade takobot`. If PyPI install fails and no engine is already present, clones source into `.tako/tmp/src/` and installs from there.
+  - When `npm` is available, installs a local pi runtime under `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) for inference compatibility.
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
@@ -69,6 +70,7 @@
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
   - Runs startup health checks (instance context, lock state, writable paths, dependency/network probes) before onboarding.
   - Detects inference providers from local CLI installs (`codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
+  - Detects OpenClaw-aligned local `pi` runtime first, then falls back to `codex`/`claude`/`gemini` by readiness.
   - Codex inference subprocesses are invoked with sandbox/approval bypass flags to avoid false read-only replies during agentic chat.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
@@ -102,6 +104,7 @@
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.
   - Terminal update controls expose setting state and toggles: `update auto status|on|off`.
   - Streams in-progress inference output into a scrollable "bubble stream" panel above the input box (Cursor/Claude style).
+  - Persists chat sessions as JSONL transcripts under `.tako/state/conversations/` and injects recent history windows into inference prompts.
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
   - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
@@ -132,6 +135,7 @@
   - [x] Heartbeat auto-commit can recover from missing git identity by setting local repo identity and retrying.
   - [x] Runtime/doctor problem detection auto-creates (or reuses) matching tasks under `tasks/`.
   - [x] `doctor` can diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
+  - [x] Plain-text chat includes recent same-session history in model prompts (local + XMTP), not only the current message.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
   - [x] Local `web` command writes a daily-log note for each successful fetch.

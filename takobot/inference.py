@@ -15,11 +15,26 @@ from typing import Any, Callable
 from .paths import ensure_runtime_dirs, runtime_paths
 
 
-PROVIDER_PRIORITY = ("codex", "claude", "gemini")
+PROVIDER_PRIORITY = ("pi", "codex", "claude", "gemini")
 CODEX_AGENTIC_EXEC_ARGS = [
     "--skip-git-repo-check",
     "--dangerously-bypass-approvals-and-sandbox",
 ]
+PI_KEY_ENV_VARS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "XAI_API_KEY",
+    "GROQ_API_KEY",
+    "CEREBRAS_API_KEY",
+    "MISTRAL_API_KEY",
+    "AI_GATEWAY_API_KEY",
+    "ZAI_API_KEY",
+    "MINIMAX_API_KEY",
+    "KIMI_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+)
 
 StreamEventHook = Callable[[str, str], None]
 
@@ -73,6 +88,11 @@ def discover_inference_runtime() -> InferenceRuntime:
     env = os.environ
     statuses: dict[str, InferenceProviderStatus] = {}
     api_keys: dict[str, str] = {}
+
+    pi_status, pi_key = _detect_pi(home, env)
+    statuses["pi"] = pi_status
+    if pi_key:
+        api_keys["pi"] = pi_key
 
     codex_status, codex_key = _detect_codex(home, env)
     statuses["codex"] = codex_status
@@ -243,6 +263,76 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
             f"source={status.key_source or 'none'}"
         )
     return lines
+
+
+def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStatus, str | None]:
+    cli_name = "pi"
+    workspace_cli = _workspace_pi_cli_path()
+    if workspace_cli.exists():
+        cli_path = str(workspace_cli)
+    else:
+        cli_path = shutil.which(cli_name)
+    cli_installed = cli_path is not None
+
+    for env_var in PI_KEY_ENV_VARS:
+        env_key = _env_non_empty(env, env_var)
+        if env_key:
+            return (
+                InferenceProviderStatus(
+                    provider="pi",
+                    cli_name=cli_name,
+                    cli_path=cli_path,
+                    cli_installed=cli_installed,
+                    auth_kind="api_key",
+                    key_env_var=env_var,
+                    key_source=f"env:{env_var}",
+                    key_present=True,
+                    ready=cli_installed,
+                    note="pi runtime detected; key sourced from environment.",
+                ),
+                env_key,
+            )
+
+    workspace_auth = _workspace_pi_agent_dir() / "auth.json"
+    candidates = [
+        workspace_auth,
+        home / ".pi" / "agent" / "auth.json",
+        home / ".pi" / "auth.json",
+    ]
+    for path in candidates:
+        payload = _read_json(path)
+        if _has_pi_auth(payload):
+            return (
+                InferenceProviderStatus(
+                    provider="pi",
+                    cli_name=cli_name,
+                    cli_path=cli_path,
+                    cli_installed=cli_installed,
+                    auth_kind="oauth_or_profile",
+                    key_env_var=None,
+                    key_source=f"file:{_tilde_path(path)}",
+                    key_present=True,
+                    ready=cli_installed,
+                    note="pi auth profile detected.",
+                ),
+                None,
+            )
+
+    return (
+        InferenceProviderStatus(
+            provider="pi",
+            cli_name=cli_name,
+            cli_path=cli_path,
+            cli_installed=cli_installed,
+            auth_kind="none",
+            key_env_var=None,
+            key_source=None,
+            key_present=False,
+            ready=False,
+            note="install pi runtime and configure auth to enable.",
+        ),
+        None,
+    )
 
 
 def _detect_codex(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStatus, str | None]:
@@ -628,6 +718,8 @@ def _tilde_path(path: Path) -> str:
 
 def _run_with_provider(runtime: InferenceRuntime, provider: str, prompt: str, *, timeout_s: float) -> str:
     env = _provider_env(runtime, provider)
+    if provider == "pi":
+        return _run_pi(runtime, prompt, env=env, timeout_s=timeout_s)
     if provider == "codex":
         return _run_codex(prompt, env=env, timeout_s=timeout_s)
     if provider == "claude":
@@ -647,6 +739,10 @@ async def _stream_with_provider(
 ) -> str:
     env = _provider_env(runtime, provider)
 
+    if provider == "pi":
+        text = await asyncio.to_thread(_run_pi, runtime, prompt, env=env, timeout_s=timeout_s)
+        await _simulate_stream(text, on_event=on_event)
+        return text
     if provider == "gemini":
         return await _stream_gemini(prompt, env=env, timeout_s=timeout_s, on_event=on_event)
     if provider == "codex":
@@ -881,6 +977,34 @@ def _summarize_error_text(text: str) -> str:
     return f"{value[:217]}..."
 
 
+def _run_pi(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], timeout_s: float) -> str:
+    status = runtime.statuses.get("pi")
+    cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
+    cmd = [
+        cli,
+        "--print",
+        "--mode",
+        "text",
+        "--no-session",
+        "--no-tools",
+        "--no-extensions",
+        "--no-skills",
+        prompt,
+    ]
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=timeout_s,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+    raise RuntimeError(f"pi inference failed: {detail}")
+
+
 def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
     env = os.environ.copy()
     env.update(runtime.env_overrides_for(provider))
@@ -889,12 +1013,64 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
     env["TMPDIR"] = tmp_value
     env["TMP"] = tmp_value
     env["TEMP"] = tmp_value
+    if provider == "pi":
+        pi_agent_dir = _workspace_pi_agent_dir()
+        _ensure_workspace_pi_auth(pi_agent_dir)
+        env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
     return env
 
 
 def _workspace_tmp_dir() -> Path:
     paths = ensure_runtime_dirs(runtime_paths())
     return paths.tmp_dir
+
+
+def _workspace_pi_cli_path() -> Path:
+    paths = ensure_runtime_dirs(runtime_paths())
+    root = paths.root / "pi" / "node" / "node_modules" / ".bin"
+    executable = "pi.cmd" if os.name == "nt" else "pi"
+    return root / executable
+
+
+def _workspace_pi_agent_dir() -> Path:
+    paths = ensure_runtime_dirs(runtime_paths())
+    agent_dir = paths.root / "pi" / "agent"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    return agent_dir
+
+
+def _ensure_workspace_pi_auth(agent_dir: Path) -> None:
+    target = agent_dir / "auth.json"
+    if target.exists():
+        return
+    home = Path.home()
+    candidates = (
+        home / ".pi" / "agent" / "auth.json",
+        home / ".pi" / "auth.json",
+    )
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(candidate.read_text(encoding="utf-8"), encoding="utf-8")
+            return
+        except Exception:
+            continue
+
+
+def _has_pi_auth(payload: dict[str, Any] | list[Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if not payload:
+        return False
+    for value in payload.values():
+        if isinstance(value, dict):
+            if _find_first_key(value, {"apiKey", "api_key", "access_token", "refresh_token"}):
+                return True
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
 
 
 def _new_workspace_temp_file(*, prefix: str, suffix: str) -> Path:

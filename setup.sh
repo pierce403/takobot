@@ -9,6 +9,7 @@ set -euo pipefail
 
 ENGINE_PYPI_NAME="takobot"
 ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/takobot.git"
+PI_PACKAGE_VERSION="0.52.12"
 
 WORKDIR="$(pwd -P)"
 VENV_DIR="$WORKDIR/.venv"
@@ -110,6 +111,41 @@ install_engine() {
   fi
 
   "$VENV_DIR/bin/python" -m pip install "$src_dir" >/dev/null || die "engine install from source failed"
+}
+
+install_pi_runtime() {
+  if ! command -v npm >/dev/null 2>&1; then
+    log "inference(pi): npm not found; skipping local pi runtime install"
+    return 0
+  fi
+
+  local prefix="$WORKDIR/.tako/pi/node"
+  local pi_bin="$prefix/node_modules/.bin/pi"
+  local pi_bin_win="$prefix/node_modules/.bin/pi.cmd"
+  if [[ -e "$pi_bin" || -e "$pi_bin_win" ]]; then
+    log "inference(pi): local pi runtime already present"
+    return 0
+  fi
+
+  log "inference(pi): installing local pi runtime (@mariozechner/pi-ai + @mariozechner/pi-coding-agent)"
+  mkdir -p "$prefix"
+  if npm --prefix "$prefix" install --no-audit --no-fund --silent \
+    "@mariozechner/pi-ai@$PI_PACKAGE_VERSION" \
+    "@mariozechner/pi-coding-agent@$PI_PACKAGE_VERSION" >/dev/null 2>&1; then
+    mkdir -p "$WORKDIR/.tako/pi/agent"
+    if [[ ! -f "$WORKDIR/.tako/pi/agent/auth.json" ]]; then
+      for source_auth in "$HOME/.pi/agent/auth.json" "$HOME/.pi/auth.json"; do
+        if [[ -f "$source_auth" ]]; then
+          cp "$source_auth" "$WORKDIR/.tako/pi/agent/auth.json" >/dev/null 2>&1 || true
+          break
+        fi
+      done
+    fi
+    log "inference(pi): local runtime ready"
+    return 0
+  fi
+
+  log "inference(pi): install failed; continuing with other inference providers"
 }
 
 materialize_templates() {
@@ -215,6 +251,7 @@ main() {
   ensure_venv
   upgrade_pip
   install_engine
+  install_pi_runtime
   materialize_templates
   ensure_git
   launch

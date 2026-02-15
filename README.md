@@ -4,8 +4,9 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
-- Inference-provider discovery for Codex / Claude / Gemini CLIs with key-source detection
+- Inference-provider discovery with ordered fallback (`pi`, Codex, Claude, Gemini) and key-source detection
 - Inference execution gate so first model call starts on the first interactive chat turn
+- OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
@@ -21,10 +22,12 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
+- OpenClaw-style docs tree in `docs/` (`start/`, `concepts/`, `reference/`)
 
 ## Docs
 
 - Website: https://tako.bot (or `index.html` in this repo)
+- Docs directory: `docs/` (OpenClaw-style `start/`, `concepts/`, `reference/`)
 - Features: `FEATURES.md`
 - Agent notes / lessons learned: `AGENTS.md`
 
@@ -95,6 +98,7 @@ Runtime-only (ignored):
 
 - Creates a local Python virtual environment in `.venv/`.
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
+- When `npm` is available, installs a local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) for inference compatibility with OpenClaw’s stack.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
 - If initial git commit is blocked by missing identity, bootstrap sets repo-local fallback identity (`Takobot <takobot@local>`) and retries.
@@ -106,6 +110,7 @@ Runtime-only (ignored):
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - If required setup is missing, emits an in-app operator request with direct remediation steps.
 - Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
+- Detects local `pi` runtime first (then `codex`/`claude`/`gemini`) and runs inference with ordered provider fallback.
 - Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
@@ -150,6 +155,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
 - Codex inference subprocesses are launched with sandbox/approval bypass flags so agentic chat does not falsely assume a read-only environment.
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
+- Chat context is persisted in `.tako/state/conversations/` (`sessions.json` + per-session JSONL transcripts) and recent turns are injected into prompt context.
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.
 - If git auto-commit encounters missing git identity, Tako auto-configures local repo identity (`Takobot <takobot@local>`) and retries the commit.
 - When runtime/doctor detects actionable problems (git/inference/dependency/runtime), Tako opens/maintains matching tasks under `tasks/` automatically.

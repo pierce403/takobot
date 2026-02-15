@@ -1,0 +1,45 @@
+---
+summary: "Reference for workspace configuration in tako.toml"
+read_when:
+  - You want to tune defaults safely
+  - You need exact meanings of each section
+title: "tako.toml Reference"
+---
+
+# tako.toml Reference
+
+`tako.toml` is file-based workspace config (no secrets).
+
+## `[workspace]`
+
+- `name` — bot identity name (synced with rename flows)
+- `version` — workspace schema version
+
+## `[dose.baseline]`
+
+- `d`, `o`, `s`, `e` in `[0..1]`
+- baseline emotional channels for runtime DOSE drift
+
+## `[productivity]`
+
+- `daily_outcomes` — default number of morning outcomes
+- `weekly_review_day` — informational review day token
+
+## `[updates]`
+
+- `auto_apply` — auto-apply package updates and restart app mode
+
+## `[security.download]`
+
+- `max_bytes` — max extension package size
+- `allowlist_domains` — optional domain allowlist
+- non-HTTPS downloads are never allowed
+
+## `[security.defaults]`
+
+Default permissions for enabled extensions:
+
+- `network`
+- `shell`
+- `xmtp`
+- `filesystem`

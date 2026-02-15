@@ -35,11 +35,19 @@ from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import (
+    CONFIGURABLE_API_KEY_VARS,
+    SUPPORTED_PROVIDER_PREFERENCES,
     InferenceRuntime,
+    clear_inference_api_key,
     discover_inference_runtime,
+    format_inference_auth_inventory,
     format_runtime_lines,
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
+    set_inference_api_key,
+    set_inference_ollama_host,
+    set_inference_ollama_model,
+    set_inference_preferred_provider,
     stream_inference_prompt_with_fallback,
 )
 from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
@@ -883,7 +891,7 @@ class TakoTerminalApp(App[None]):
         if self.inference_runtime is None:
             issues.append(("warn", "Inference runtime discovery was not initialized."))
         elif not self.inference_runtime.ready:
-            issues.append(("warn", "No ready inference provider found (Codex/Claude/Gemini)."))
+            issues.append(("warn", "No ready inference provider found (pi/ollama/codex/claude/gemini)."))
             for hint in _inference_setup_hints(self.inference_runtime):
                 issues.append(("info", f"inference hint: {hint}"))
         elif not self.inference_gate_open:
@@ -2050,6 +2058,7 @@ class TakoTerminalApp(App[None]):
         if cmd in {"help", "h", "?"}:
             self._write_tako(
                 "local cockpit commands: help, status, health, config, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "inference controls: `inference refresh`, `inference auth`, `inference provider <...>`, `inference ollama model <name>`, `inference key list|set|clear`\n"
                 "update controls: `update`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
@@ -2482,10 +2491,89 @@ class TakoTerminalApp(App[None]):
             return
 
         if cmd == "inference":
-            action = rest.strip().lower()
+            action_raw = rest.strip()
+            action = action_raw.lower()
+            if action in {"help", "?"}:
+                supported = ", ".join(SUPPORTED_PROVIDER_PREFERENCES)
+                keys = ", ".join(CONFIGURABLE_API_KEY_VARS)
+                self._write_tako(
+                    "inference commands:\n"
+                    "- inference\n"
+                    "- inference refresh\n"
+                    "- inference auth\n"
+                    "- inference provider <auto|pi|ollama|codex|claude|gemini>\n"
+                    "- inference ollama model <name> (or empty to clear)\n"
+                    "- inference ollama host <url> (or empty to clear)\n"
+                    "- inference key list\n"
+                    "- inference key set <ENV_VAR> <value>\n"
+                    "- inference key clear <ENV_VAR>\n"
+                    f"supported providers: {supported}\n"
+                    f"supported key names: {keys}"
+                )
+                return
+
             if action in {"refresh", "rescan", "scan", "reload"}:
                 self._initialize_inference_runtime()
                 self._write_tako("inference scan refreshed.")
+                return
+
+            if action in {"auth", "tokens"}:
+                self._write_tako("\n".join(format_inference_auth_inventory()))
+                return
+
+            if action.startswith("provider "):
+                target = action_raw.split(maxsplit=1)[1] if len(action_raw.split(maxsplit=1)) == 2 else "auto"
+                ok, summary = set_inference_preferred_provider(target)
+                if ok:
+                    self._initialize_inference_runtime()
+                self._write_tako(summary)
+                return
+
+            if action.startswith("ollama model"):
+                model = ""
+                parts = action_raw.split(maxsplit=2)
+                if len(parts) == 3:
+                    model = parts[2]
+                ok, summary = set_inference_ollama_model(model)
+                if ok:
+                    self._initialize_inference_runtime()
+                self._write_tako(summary)
+                return
+
+            if action.startswith("ollama host"):
+                host = ""
+                parts = action_raw.split(maxsplit=2)
+                if len(parts) == 3:
+                    host = parts[2]
+                ok, summary = set_inference_ollama_host(host)
+                if ok:
+                    self._initialize_inference_runtime()
+                self._write_tako(summary)
+                return
+
+            if action.startswith("key "):
+                parts = action_raw.split(maxsplit=3)
+                if len(parts) >= 2 and parts[1].lower() == "list":
+                    self._write_tako("\n".join(format_inference_auth_inventory()))
+                    return
+                if len(parts) == 4 and parts[1].lower() == "set":
+                    env_var = parts[2]
+                    key_value = parts[3]
+                    ok, summary = set_inference_api_key(env_var, key_value)
+                    if ok:
+                        self._initialize_inference_runtime()
+                    self._write_tako(summary)
+                    return
+                if len(parts) >= 3 and parts[1].lower() == "clear":
+                    env_var = parts[2]
+                    ok, summary = clear_inference_api_key(env_var)
+                    if ok:
+                        self._initialize_inference_runtime()
+                    self._write_tako(summary)
+                    return
+                self._write_tako("usage: `inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>`")
+                return
+
             if self.inference_runtime is None:
                 self._write_tako("inference runtime is not initialized.")
                 return
@@ -3299,13 +3387,14 @@ class TakoTerminalApp(App[None]):
 
     def _on_runtime_inbound(self, sender_inbox_id: str, text: str) -> None:
         short_sender = sender_inbox_id[:10]
-        self._write_system(f"xmtp<{short_sender}>: {text}")
+        safe_text = _mask_sensitive_inference_command(text)
+        self._write_system(f"xmtp<{short_sender}>: {safe_text}")
         self._add_activity("xmtp", f"inbound from {short_sender}")
         self._record_event(
             "xmtp.inbound.message",
             "Inbound XMTP message received.",
             source="xmtp",
-            metadata={"sender_inbox_id": sender_inbox_id, "preview": _summarize_text(text)},
+            metadata={"sender_inbox_id": sender_inbox_id, "preview": _summarize_text(safe_text)},
         )
 
     async def _shutdown_background_tasks(self) -> None:
@@ -3705,6 +3794,16 @@ def _parse_command(text: str) -> tuple[str, str]:
     return cmd, rest
 
 
+def _mask_sensitive_inference_command(text: str) -> str:
+    cmd, rest = _parse_command(text)
+    if cmd != "inference":
+        return text
+    parts = rest.strip().split(maxsplit=3)
+    if len(parts) == 4 and parts[0].lower() == "key" and parts[1].lower() == "set":
+        return f"inference key set {parts[2]} ********"
+    return text
+
+
 def _looks_like_local_command(text: str) -> bool:
     value = text.strip()
     if not value:
@@ -3738,7 +3837,7 @@ def _looks_like_local_command(text: str) -> bool:
     if cmd == "promote":
         return True
     if cmd == "inference":
-        return tail in {"", "refresh", "rescan", "scan", "reload"}
+        return True
     if cmd == "update":
         return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
     if cmd == "reimprint":
@@ -3805,6 +3904,20 @@ def _clean_chat_reply(text: str) -> str:
 
 def _inference_setup_hints(runtime: InferenceRuntime) -> list[str]:
     hints: list[str] = []
+
+    pi = runtime.statuses.get("pi")
+    if pi and not pi.ready:
+        if not pi.cli_installed:
+            hints.append("pi runtime missing; run bootstrap/setup to install workspace-local pi tooling.")
+        else:
+            hints.append("run `inference auth` to inspect pi oauth tokens, or set API keys via `inference key set ...`.")
+
+    ollama = runtime.statuses.get("ollama")
+    if ollama and not ollama.ready:
+        if not ollama.cli_installed:
+            hints.append("install Ollama and pull a model (or use another provider).")
+        else:
+            hints.append("set `inference ollama model <name>` (or `OLLAMA_MODEL`) so ollama can answer prompts.")
 
     codex = runtime.statuses.get("codex")
     if codex and not codex.ready:

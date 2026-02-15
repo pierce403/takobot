@@ -4,7 +4,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
-- Inference-provider discovery with ordered fallback (`pi`, Codex, Claude, Gemini) and key-source detection
+- Inference-provider discovery with ordered fallback (`pi`, `ollama`, Codex, Claude, Gemini) and key-source detection
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
@@ -112,8 +112,8 @@ Runtime-only (ignored):
 - Launches the interactive terminal app main loop (`takobot`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - If required setup is missing, emits an in-app operator request with direct remediation steps.
-- Detects available inference CLIs (`codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
-- Detects local `pi` runtime first (then `codex`/`claude`/`gemini`) and runs inference with ordered provider fallback.
+- Detects available inference CLIs (`pi`, `ollama`, `codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
+- Detects local `pi` runtime first (then `ollama`/`codex`/`claude`/`gemini`) and runs inference with ordered provider fallback.
 - Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
@@ -131,6 +131,7 @@ Workspace configuration lives in `tako.toml` (no secrets).
 - `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
 - Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
+- Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference, ollama host/model, API keys, pi OAuth inventory).
 - `doctor` runs local/offline inference diagnostics (CLI probes + recent inference error scan) and does not depend on inference being available.
 - Extension downloads are always HTTPS; non-HTTPS is not allowed.
 - Security permission defaults for enabled extensions are now permissive by default (`network/shell/xmtp/filesystem = true`), and can be tightened in `tako.toml`.

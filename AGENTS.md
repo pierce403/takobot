@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Direct inference auth/provider controls (pi oauth + ollama + API keys)
+
+- What happened: operators needed explicit control over inference auth/provider setup from Takobot itself (including pi OAuth visibility and ollama selection), without relying on shell env setup.
+- Fix: added runtime-local inference settings (`.tako/state/inference-settings.json`) with direct commands for provider preference, ollama host/model, and persisted API keys; added pi OAuth token inventory reporting and ollama provider detection/execution.
+- Prevention: keep inference control surfaces first-class in both local and XMTP command paths and ensure secrets stay under runtime-only `.tako/state/**`.
+
 ### 2026-02-15 — Workspace-local Node runtime for default pi tooling
 
 - What happened: bootstrap previously skipped pi tooling when system `npm` was missing, which left inference setup dependent on host-level Node installs.

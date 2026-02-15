@@ -21,7 +21,20 @@ from .conversation import ConversationStore
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
-from .inference import InferenceRuntime, discover_inference_runtime, format_runtime_lines, run_inference_prompt_with_fallback
+from .inference import (
+    CONFIGURABLE_API_KEY_VARS,
+    SUPPORTED_PROVIDER_PREFERENCES,
+    InferenceRuntime,
+    clear_inference_api_key,
+    discover_inference_runtime,
+    format_inference_auth_inventory,
+    format_runtime_lines,
+    run_inference_prompt_with_fallback,
+    set_inference_api_key,
+    set_inference_ollama_host,
+    set_inference_ollama_model,
+    set_inference_preferred_provider,
+)
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, load_operator
@@ -302,7 +315,7 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
     problems: list[str] = []
 
     lines.append("- inference doctor: local offline diagnostics")
-    for provider in ("pi", "codex", "claude", "gemini"):
+    for provider in ("pi", "ollama", "codex", "claude", "gemini"):
         status = runtime.statuses.get(provider)
         if status is None:
             continue
@@ -320,6 +333,8 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
 
         if provider == "codex":
             command_probe = [cli_exec, "exec", "--help"]
+        elif provider == "ollama":
+            command_probe = [cli_exec, "list"]
         else:
             command_probe = [cli_exec, "--help"]
         command_ok, command_detail = _probe_cli_command(command_probe, timeout_s=7.0)
@@ -352,6 +367,8 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
 def _provider_auth_problem(provider: str) -> str:
     if provider == "pi":
         return "pi auth missing: configure pi auth profile or set one supported API key."
+    if provider == "ollama":
+        return "ollama model missing: set `inference ollama model <name>` or set `OLLAMA_MODEL`."
     if provider == "codex":
         return "codex auth missing: run `codex login` or set `OPENAI_API_KEY`."
     if provider == "claude":
@@ -1083,6 +1100,88 @@ async def _handle_incoming_message(
         append_daily_note(daily_root(), date.today(), "Promoted a durable note into MEMORY.md via XMTP.")
         await convo.send("inked into MEMORY.md.")
         return
+    if cmd == "inference":
+        action_raw = rest.strip()
+        action = action_raw.lower()
+        if action in {"help", "?"}:
+            supported = ", ".join(SUPPORTED_PROVIDER_PREFERENCES)
+            keys = ", ".join(CONFIGURABLE_API_KEY_VARS)
+            await convo.send(
+                "inference commands:\n"
+                "- inference\n"
+                "- inference refresh\n"
+                "- inference auth\n"
+                "- inference provider <auto|pi|ollama|codex|claude|gemini>\n"
+                "- inference ollama model <name> (or empty to clear)\n"
+                "- inference ollama host <url> (or empty to clear)\n"
+                "- inference key list\n"
+                "- inference key set <ENV_VAR> <value>\n"
+                "- inference key clear <ENV_VAR>\n"
+                f"supported providers: {supported}\n"
+                f"supported key names: {keys}"
+            )
+            return
+        if action in {"refresh", "rescan", "scan", "reload"}:
+            _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+            await convo.send("inference scan refreshed.")
+            return
+        if action in {"auth", "tokens"}:
+            await convo.send("\n".join(format_inference_auth_inventory()))
+            return
+        if action.startswith("provider "):
+            target = action_raw.split(maxsplit=1)[1] if len(action_raw.split(maxsplit=1)) == 2 else "auto"
+            ok, summary = set_inference_preferred_provider(target)
+            if ok:
+                _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+            await convo.send(summary)
+            return
+        if action.startswith("ollama model"):
+            model = ""
+            parts = action_raw.split(maxsplit=2)
+            if len(parts) == 3:
+                model = parts[2]
+            ok, summary = set_inference_ollama_model(model)
+            if ok:
+                _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+            await convo.send(summary)
+            return
+        if action.startswith("ollama host"):
+            host = ""
+            parts = action_raw.split(maxsplit=2)
+            if len(parts) == 3:
+                host = parts[2]
+            ok, summary = set_inference_ollama_host(host)
+            if ok:
+                _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+            await convo.send(summary)
+            return
+        if action.startswith("key "):
+            parts = action_raw.split(maxsplit=3)
+            if len(parts) >= 2 and parts[1].lower() == "list":
+                await convo.send("\n".join(format_inference_auth_inventory()))
+                return
+            if len(parts) == 4 and parts[1].lower() == "set":
+                env_var = parts[2]
+                key_value = parts[3]
+                ok, summary = set_inference_api_key(env_var, key_value)
+                if ok:
+                    _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+                await convo.send(summary)
+                return
+            if len(parts) >= 3 and parts[1].lower() == "clear":
+                env_var = parts[2]
+                ok, summary = clear_inference_api_key(env_var)
+                if ok:
+                    _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+                await convo.send(summary)
+                return
+            await convo.send("usage: `inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>`")
+            return
+
+        lines = ["inference status:"]
+        lines.extend(format_runtime_lines(inference_runtime))
+        await convo.send("\n".join(lines))
+        return
     if cmd == "update":
         action = rest.strip().lower()
         if action in {"help", "?"}:
@@ -1423,6 +1522,16 @@ def _parse_command(text: str) -> tuple[str, str]:
     return cmd, rest
 
 
+def _replace_inference_runtime(target: InferenceRuntime, source: InferenceRuntime) -> None:
+    target.statuses = source.statuses
+    target.selected_provider = source.selected_provider
+    target.selected_auth_kind = source.selected_auth_kind
+    target.selected_key_env_var = source.selected_key_env_var
+    target.selected_key_source = source.selected_key_source
+    target._api_keys = source._api_keys
+    target._provider_env_overrides = source._provider_env_overrides
+
+
 def _help_text() -> str:
     return (
         "takobot commands:\n"
@@ -1438,6 +1547,11 @@ def _help_text() -> str:
         "- compress\n"
         "- weekly (or `review weekly`)\n"
         "- promote <durable note>\n"
+        "- inference (status)\n"
+        "- inference auth\n"
+        "- inference provider <auto|pi|ollama|codex|claude|gemini>\n"
+        "- inference ollama model <name> / inference ollama host <url>\n"
+        "- inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>\n"
         "- update (or `update check`)\n"
         "- web <https://...>\n"
         "- run <shell command> (runs in `code/`)\n"
@@ -1475,6 +1589,8 @@ def _looks_like_command(text: str) -> bool:
     if cmd == "review":
         return tail_lower in {"weekly", "week"}
     if cmd == "promote":
+        return True
+    if cmd == "inference":
         return True
     if cmd == "update":
         return tail_lower in {"", "check", "status", "dry-run", "dryrun", "help", "?"}

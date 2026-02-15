@@ -15,9 +15,10 @@ Takobot discovers provider runtimes at startup and keeps ordered fallback.
 Current priority:
 
 1. `pi`
-2. `codex`
-3. `claude`
-4. `gemini`
+2. `ollama`
+3. `codex`
+4. `claude`
+5. `gemini`
 
 The first ready provider is selected; failures fall through to the next ready provider.
 
@@ -52,10 +53,20 @@ This keeps responses deterministic and prevents unintended tool-side effects.
 Readiness checks include:
 
 - common provider API-key env vars
+- runtime-local API keys from `.tako/state/inference-settings.json` (set via `inference key set ...`)
 - workspace-local `.tako/pi/agent/auth.json`
 - fallback auth files in `~/.pi/**` (copied into workspace on first use when possible)
+
+For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.json` and surfaces them through `inference auth`.
+
+## Ollama integration
+
+- `ollama` is treated as a first-class local inference provider.
+- Takobot resolves model in this order: `inference-settings.ollama_model` → `OLLAMA_MODEL` → first model from `ollama list`.
+- Optional host override can be stored via `inference ollama host <url>` (sets `OLLAMA_HOST` at runtime).
 
 ## Diagnostics
 
 - `inference` command in TUI reports selected provider and readiness.
+- `inference auth` reports persisted API keys (masked) plus detected pi OAuth providers.
 - `doctor` includes offline inference probes and recent inference error scan.

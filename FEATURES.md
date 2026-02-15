@@ -71,8 +71,9 @@
 - **Properties**:
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
   - Runs startup health checks (instance context, lock state, writable paths, dependency/network probes) before onboarding.
-  - Detects inference providers from local CLI installs (`codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
-  - Detects OpenClaw-aligned local `pi` runtime first, then falls back to `codex`/`claude`/`gemini` by readiness.
+  - Detects inference providers from local CLI installs (`pi`, `ollama`, `codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
+  - Detects OpenClaw-aligned local `pi` runtime first, then falls back to `ollama`/`codex`/`claude`/`gemini` by readiness.
+  - Supports runtime-local inference configuration via `inference ...` commands (provider preference, ollama host/model, persisted API keys, pi OAuth inventory).
   - Codex inference subprocesses are invoked with sandbox/approval bypass flags to avoid false read-only replies during agentic chat.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
@@ -124,7 +125,7 @@
   - [x] In running chat, “call yourself SILLYTAKO” updates `SOUL.md` without entering a special setup mode.
   - [x] Outbound XMTP pairing can auto-complete without code copyback confirmation.
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
-  - [x] Runtime can report Codex/Claude/Gemini CLI+auth discovery status via `inference` command.
+  - [x] Runtime can report pi/ollama/codex/claude/gemini discovery and readiness via `inference` command.
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.

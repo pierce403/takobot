@@ -7,19 +7,21 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .paths import ensure_runtime_dirs, runtime_paths
 
 
-PROVIDER_PRIORITY = ("pi", "codex", "claude", "gemini")
+PROVIDER_PRIORITY = ("pi", "ollama", "codex", "claude", "gemini")
+SUPPORTED_PROVIDER_PREFERENCES = ("auto", *PROVIDER_PRIORITY)
 CODEX_AGENTIC_EXEC_ARGS = [
     "--skip-git-repo-check",
     "--dangerously-bypass-approvals-and-sandbox",
 ]
+INFERENCE_SETTINGS_FILENAME = "inference-settings.json"
 PI_KEY_ENV_VARS = (
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -35,8 +37,230 @@ PI_KEY_ENV_VARS = (
     "KIMI_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
 )
+CONFIGURABLE_API_KEY_VARS = tuple(
+    sorted(
+        {
+            *PI_KEY_ENV_VARS,
+            "CLAUDE_API_KEY",
+            "GOOGLE_API_KEY",
+        }
+    )
+)
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
 StreamEventHook = Callable[[str, str], None]
+
+
+@dataclass(frozen=True)
+class InferenceSettings:
+    preferred_provider: str = "auto"
+    ollama_model: str = ""
+    ollama_host: str = ""
+    api_keys: dict[str, str] = field(default_factory=dict)
+
+
+def load_inference_settings(path: Path | None = None) -> InferenceSettings:
+    settings_path = path or inference_settings_path()
+    if not settings_path.exists():
+        return InferenceSettings()
+    payload = _read_json(settings_path)
+    if not isinstance(payload, dict):
+        return InferenceSettings()
+
+    preferred = str(payload.get("preferred_provider") or "").strip().lower()
+    if preferred not in SUPPORTED_PROVIDER_PREFERENCES:
+        preferred = "auto"
+    ollama_model = " ".join(str(payload.get("ollama_model") or "").split()).strip()
+    ollama_host = " ".join(str(payload.get("ollama_host") or "").split()).strip()
+
+    raw_keys = payload.get("api_keys")
+    api_keys: dict[str, str] = {}
+    if isinstance(raw_keys, dict):
+        for key, value in raw_keys.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            env_var = key.strip().upper()
+            if env_var not in CONFIGURABLE_API_KEY_VARS:
+                continue
+            cleaned = value.strip()
+            if cleaned:
+                api_keys[env_var] = cleaned
+
+    return InferenceSettings(
+        preferred_provider=preferred or "auto",
+        ollama_model=ollama_model,
+        ollama_host=ollama_host,
+        api_keys=api_keys,
+    )
+
+
+def save_inference_settings(settings: InferenceSettings, path: Path | None = None) -> tuple[bool, str]:
+    settings_path = path or inference_settings_path()
+    payload = {
+        "preferred_provider": settings.preferred_provider,
+        "ollama_model": settings.ollama_model,
+        "ollama_host": settings.ollama_host,
+        "api_keys": dict(sorted(settings.api_keys.items())),
+    }
+    try:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with contextlib.suppress(Exception):
+            os.chmod(settings_path, 0o600)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed writing inference settings: {exc}"
+    return True, f"inference settings saved: {settings_path}"
+
+
+def inference_settings_path() -> Path:
+    paths = ensure_runtime_dirs(runtime_paths())
+    return paths.state_dir / INFERENCE_SETTINGS_FILENAME
+
+
+def set_inference_preferred_provider(provider: str, path: Path | None = None) -> tuple[bool, str]:
+    candidate = " ".join((provider or "").split()).strip().lower() or "auto"
+    if candidate not in SUPPORTED_PROVIDER_PREFERENCES:
+        supported = ", ".join(SUPPORTED_PROVIDER_PREFERENCES)
+        return False, f"unsupported provider `{candidate}` (expected: {supported})"
+    settings = load_inference_settings(path)
+    updated = InferenceSettings(
+        preferred_provider=candidate,
+        ollama_model=settings.ollama_model,
+        ollama_host=settings.ollama_host,
+        api_keys=dict(settings.api_keys),
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    return True, f"inference preferred provider set to `{candidate}`"
+
+
+def set_inference_ollama_model(model: str, path: Path | None = None) -> tuple[bool, str]:
+    cleaned = " ".join((model or "").split()).strip()
+    settings = load_inference_settings(path)
+    updated = InferenceSettings(
+        preferred_provider=settings.preferred_provider,
+        ollama_model=cleaned,
+        ollama_host=settings.ollama_host,
+        api_keys=dict(settings.api_keys),
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    if cleaned:
+        return True, f"ollama model set to `{cleaned}`"
+    return True, "ollama model preference cleared (auto-detect will be used)"
+
+
+def set_inference_ollama_host(host: str, path: Path | None = None) -> tuple[bool, str]:
+    cleaned = " ".join((host or "").split()).strip()
+    settings = load_inference_settings(path)
+    updated = InferenceSettings(
+        preferred_provider=settings.preferred_provider,
+        ollama_model=settings.ollama_model,
+        ollama_host=cleaned,
+        api_keys=dict(settings.api_keys),
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    if cleaned:
+        return True, f"ollama host set to `{cleaned}`"
+    return True, "ollama host preference cleared"
+
+
+def set_inference_api_key(env_var: str, value: str, path: Path | None = None) -> tuple[bool, str]:
+    key_name = (env_var or "").strip().upper()
+    if key_name not in CONFIGURABLE_API_KEY_VARS:
+        supported = ", ".join(CONFIGURABLE_API_KEY_VARS)
+        return False, f"unsupported API key name `{key_name}` (supported: {supported})"
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return False, f"{key_name} value cannot be empty"
+
+    settings = load_inference_settings(path)
+    api_keys = dict(settings.api_keys)
+    api_keys[key_name] = cleaned
+    updated = InferenceSettings(
+        preferred_provider=settings.preferred_provider,
+        ollama_model=settings.ollama_model,
+        ollama_host=settings.ollama_host,
+        api_keys=api_keys,
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    return True, f"inference API key saved for `{key_name}`"
+
+
+def clear_inference_api_key(env_var: str, path: Path | None = None) -> tuple[bool, str]:
+    key_name = (env_var or "").strip().upper()
+    if key_name not in CONFIGURABLE_API_KEY_VARS:
+        supported = ", ".join(CONFIGURABLE_API_KEY_VARS)
+        return False, f"unsupported API key name `{key_name}` (supported: {supported})"
+    settings = load_inference_settings(path)
+    api_keys = dict(settings.api_keys)
+    removed = api_keys.pop(key_name, None)
+    updated = InferenceSettings(
+        preferred_provider=settings.preferred_provider,
+        ollama_model=settings.ollama_model,
+        ollama_host=settings.ollama_host,
+        api_keys=api_keys,
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    if removed is None:
+        return True, f"no persisted key found for `{key_name}`"
+    return True, f"inference API key cleared for `{key_name}`"
+
+
+def format_inference_auth_inventory() -> list[str]:
+    settings = load_inference_settings()
+    lines = ["inference auth inventory:"]
+    lines.append(f"preferred provider: {settings.preferred_provider}")
+    lines.append(f"ollama model: {settings.ollama_model or '(auto)'}")
+    lines.append(f"ollama host: {settings.ollama_host or '(default)'}")
+
+    if settings.api_keys:
+        lines.append("persisted API keys:")
+        for env_var in sorted(settings.api_keys):
+            masked = _mask_secret(settings.api_keys[env_var])
+            lines.append(f"- {env_var}: {masked}")
+    else:
+        lines.append("persisted API keys: (none)")
+
+    oauth_entries = enumerate_pi_oauth_tokens()
+    if oauth_entries:
+        lines.append("pi oauth providers:")
+        for entry in oauth_entries:
+            lines.append(f"- {entry}")
+    else:
+        lines.append("pi oauth providers: (none detected)")
+    return lines
+
+
+def enumerate_pi_oauth_tokens() -> list[str]:
+    home = Path.home()
+    sources = [
+        _workspace_pi_agent_dir() / "auth.json",
+        home / ".pi" / "agent" / "auth.json",
+        home / ".pi" / "auth.json",
+    ]
+    results: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        payload = _read_json(source)
+        if not isinstance(payload, dict):
+            continue
+        for provider, details in _pi_oauth_entries(payload):
+            stamp = _format_epoch_ms(details.get("expires")) if isinstance(details, dict) else "unknown"
+            key = f"{provider}|{_tilde_path(source)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(f"{provider} (expires={stamp}, source={_tilde_path(source)})")
+    return results
 
 
 @dataclass(frozen=True)
@@ -61,6 +285,7 @@ class InferenceRuntime:
     selected_key_env_var: str | None
     selected_key_source: str | None
     _api_keys: dict[str, str]
+    _provider_env_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
@@ -75,17 +300,33 @@ class InferenceRuntime:
         return self.env_overrides_for(self.selected_provider)
 
     def env_overrides_for(self, provider: str) -> dict[str, str]:
+        env: dict[str, str] = {}
+        extras = self._provider_env_overrides.get(provider)
+        if extras:
+            env.update(extras)
         if provider not in self._api_keys:
-            return {}
+            return env
         status = self.statuses.get(provider)
         if not status or not status.key_env_var:
-            return {}
-        return {status.key_env_var: self._api_keys[provider]}
+            return env
+        env[status.key_env_var] = self._api_keys[provider]
+        return env
 
 
 def discover_inference_runtime() -> InferenceRuntime:
     home = Path.home()
-    env = os.environ
+    settings = load_inference_settings()
+    env: dict[str, str] = dict(os.environ)
+    env.update(settings.api_keys)
+    provider_env_overrides: dict[str, dict[str, str]] = {}
+    ollama_host = settings.ollama_host or _env_non_empty(env, "OLLAMA_HOST")
+    if ollama_host:
+        env["OLLAMA_HOST"] = ollama_host
+        provider_env_overrides["ollama"] = {"OLLAMA_HOST": ollama_host}
+    elif _env_non_empty(env, "OLLAMA_HOST"):
+        provider_env_overrides["ollama"] = {"OLLAMA_HOST": _env_non_empty(env, "OLLAMA_HOST")}
+    if settings.ollama_model:
+        env["OLLAMA_MODEL"] = settings.ollama_model
     statuses: dict[str, InferenceProviderStatus] = {}
     api_keys: dict[str, str] = {}
 
@@ -93,6 +334,11 @@ def discover_inference_runtime() -> InferenceRuntime:
     statuses["pi"] = pi_status
     if pi_key:
         api_keys["pi"] = pi_key
+
+    ollama_status, ollama_key = _detect_ollama(home, env)
+    statuses["ollama"] = ollama_status
+    if ollama_key:
+        api_keys["ollama"] = ollama_key
 
     codex_status, codex_key = _detect_codex(home, env)
     statuses["codex"] = codex_status
@@ -110,9 +356,14 @@ def discover_inference_runtime() -> InferenceRuntime:
         api_keys["gemini"] = gemini_key
 
     requested_provider = os.environ.get("TAKO_INFERENCE_PROVIDER", "").strip().lower()
+    preferred_provider = settings.preferred_provider if settings.preferred_provider in SUPPORTED_PROVIDER_PREFERENCES else "auto"
     selected_provider = None
     if requested_provider in statuses and statuses[requested_provider].ready:
         selected_provider = requested_provider
+    if not selected_provider and preferred_provider != "auto":
+        status = statuses.get(preferred_provider)
+        if status and status.ready:
+            selected_provider = preferred_provider
     for provider in PROVIDER_PRIORITY:
         if selected_provider:
             break
@@ -129,6 +380,7 @@ def discover_inference_runtime() -> InferenceRuntime:
         selected_key_env_var=selected_status.key_env_var if selected_status else None,
         selected_key_source=selected_status.key_source if selected_status else None,
         _api_keys=api_keys,
+        _provider_env_overrides=provider_env_overrides,
     )
 
 
@@ -244,9 +496,11 @@ async def stream_inference_prompt_with_fallback(
 
 def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
     selected = runtime.selected_provider or "none"
+    settings = load_inference_settings()
     lines = [
         f"inference selected: {selected}",
         f"inference ready: {'yes' if runtime.ready else 'no'}",
+        f"inference preferred: {settings.preferred_provider}",
     ]
     if runtime.selected_provider:
         lines.append(f"inference auth: {runtime.selected_auth_kind}")
@@ -265,7 +519,7 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
     return lines
 
 
-def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStatus, str | None]:
+def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
     cli_name = "pi"
     workspace_cli = _workspace_pi_cli_path()
     if workspace_cli.exists():
@@ -307,6 +561,12 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
     for path in candidates:
         payload = _read_json(path)
         if _has_pi_auth(payload):
+            oauth_inventory = _pi_oauth_entries(payload) if isinstance(payload, dict) else []
+            oauth_hint = ""
+            if oauth_inventory:
+                labels = ", ".join(provider for provider, _details in oauth_inventory[:4])
+                extra = f" (+{len(oauth_inventory) - 4})" if len(oauth_inventory) > 4 else ""
+                oauth_hint = f" oauth providers: {labels}{extra}."
             return (
                 InferenceProviderStatus(
                     provider="pi",
@@ -319,9 +579,9 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
                     key_present=True,
                     ready=cli_installed and node_ready,
                     note=(
-                        "pi auth profile detected."
+                        "pi auth profile detected." + oauth_hint
                         if node_ready
-                        else "pi auth profile detected but node runtime is unavailable."
+                        else "pi auth profile detected but node runtime is unavailable." + oauth_hint
                     ),
                 ),
                 None,
@@ -348,7 +608,71 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
     )
 
 
-def _detect_codex(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStatus, str | None]:
+def _detect_ollama(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
+    del home
+    cli_name = "ollama"
+    cli_path = shutil.which(cli_name)
+    cli_installed = cli_path is not None
+
+    host = _env_non_empty(env, "OLLAMA_HOST") or DEFAULT_OLLAMA_HOST
+    model = _env_non_empty(env, "OLLAMA_MODEL")
+    if cli_installed and not model:
+        models = _list_ollama_models(cli_path or cli_name, env=env)
+        if models:
+            model = models[0]
+
+    if cli_installed and model:
+        return (
+            InferenceProviderStatus(
+                provider="ollama",
+                cli_name=cli_name,
+                cli_path=cli_path,
+                cli_installed=True,
+                auth_kind="local_model",
+                key_env_var=None,
+                key_source=f"model:{model}",
+                key_present=True,
+                ready=True,
+                note=f"ollama host={host}",
+            ),
+            None,
+        )
+
+    if cli_installed:
+        return (
+            InferenceProviderStatus(
+                provider="ollama",
+                cli_name=cli_name,
+                cli_path=cli_path,
+                cli_installed=True,
+                auth_kind="local_model",
+                key_env_var=None,
+                key_source=None,
+                key_present=False,
+                ready=False,
+                note="ollama is installed but no model is configured. Set `OLLAMA_MODEL` or run `inference ollama model <name>`.",
+            ),
+            None,
+        )
+
+    return (
+        InferenceProviderStatus(
+            provider="ollama",
+            cli_name=cli_name,
+            cli_path=cli_path,
+            cli_installed=False,
+            auth_kind="local_model",
+            key_env_var=None,
+            key_source=None,
+            key_present=False,
+            ready=False,
+            note="install Ollama and pull a model, or choose another provider.",
+        ),
+        None,
+    )
+
+
+def _detect_codex(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
     cli_name = "codex"
     cli_path = shutil.which(cli_name)
     cli_installed = cli_path is not None
@@ -429,7 +753,7 @@ def _detect_codex(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderS
     )
 
 
-def _detect_claude(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStatus, str | None]:
+def _detect_claude(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
     cli_name = "claude"
     cli_path = shutil.which(cli_name)
     cli_installed = cli_path is not None
@@ -515,7 +839,7 @@ def _detect_claude(home: Path, env: os._Environ[str]) -> tuple[InferenceProvider
     )
 
 
-def _detect_gemini(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStatus, str | None]:
+def _detect_gemini(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
     cli_name = "gemini"
     cli_path = shutil.which(cli_name)
     cli_installed = cli_path is not None
@@ -688,6 +1012,34 @@ def _safe_help_text(command: str) -> str:
     return f"{proc.stdout}\n{proc.stderr}".strip()
 
 
+def _list_ollama_models(command: str, *, env: Mapping[str, str]) -> list[str]:
+    try:
+        proc = subprocess.run(
+            [command, "list"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=dict(env),
+            timeout=8.0,
+        )
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if not lines:
+        return []
+    models: list[str] = []
+    for line in lines:
+        lowered = line.lower()
+        if lowered.startswith("name"):
+            continue
+        model = line.split(maxsplit=1)[0].strip()
+        if model:
+            models.append(model)
+    return models
+
+
 def _read_json(path: Path) -> dict[str, Any] | list[Any] | None:
     if not path.exists():
         return None
@@ -716,8 +1068,8 @@ def _find_first_key(payload: Any, candidates: set[str]) -> str:
     return ""
 
 
-def _env_non_empty(env: os._Environ[str], key: str) -> str:
-    value = env.get(key, "").strip()
+def _env_non_empty(env: Mapping[str, str], key: str) -> str:
+    value = str(env.get(key, "")).strip()
     return value if value else ""
 
 
@@ -733,6 +1085,8 @@ def _run_with_provider(runtime: InferenceRuntime, provider: str, prompt: str, *,
     env = _provider_env(runtime, provider)
     if provider == "pi":
         return _run_pi(runtime, prompt, env=env, timeout_s=timeout_s)
+    if provider == "ollama":
+        return _run_ollama(runtime, prompt, env=env, timeout_s=timeout_s)
     if provider == "codex":
         return _run_codex(prompt, env=env, timeout_s=timeout_s)
     if provider == "claude":
@@ -754,6 +1108,10 @@ async def _stream_with_provider(
 
     if provider == "pi":
         text = await asyncio.to_thread(_run_pi, runtime, prompt, env=env, timeout_s=timeout_s)
+        await _simulate_stream(text, on_event=on_event)
+        return text
+    if provider == "ollama":
+        text = await asyncio.to_thread(_run_ollama, runtime, prompt, env=env, timeout_s=timeout_s)
         await _simulate_stream(text, on_event=on_event)
         return text
     if provider == "gemini":
@@ -1018,6 +1376,36 @@ def _run_pi(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], time
     raise RuntimeError(f"pi inference failed: {detail}")
 
 
+def _run_ollama(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], timeout_s: float) -> str:
+    status = runtime.statuses.get("ollama")
+    cli = (status.cli_path if status and status.cli_path else "ollama") or "ollama"
+    model = _ollama_model_for_runtime(status)
+    if not model:
+        raise RuntimeError("ollama model is not configured")
+    cmd = [cli, "run", model, prompt]
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=timeout_s,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+    raise RuntimeError(f"ollama inference failed: {detail}")
+
+
+def _ollama_model_for_runtime(status: InferenceProviderStatus | None) -> str:
+    if status is None:
+        return ""
+    source = status.key_source or ""
+    if source.startswith("model:"):
+        return source[len("model:") :].strip()
+    return ""
+
+
 def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
     env = os.environ.copy()
     env.update(runtime.env_overrides_for(provider))
@@ -1128,6 +1516,46 @@ def _has_pi_auth(payload: dict[str, Any] | list[Any] | None) -> bool:
         if isinstance(value, str) and value.strip():
             return True
     return False
+
+
+def _pi_oauth_entries(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    entries: list[tuple[str, dict[str, Any]]] = []
+    for provider, raw in payload.items():
+        if not isinstance(provider, str) or not isinstance(raw, dict):
+            continue
+        entry_type = str(raw.get("type") or "").strip().lower()
+        if entry_type == "oauth":
+            entries.append((provider, raw))
+            continue
+        has_refresh = isinstance(raw.get("refresh"), str) and bool(str(raw.get("refresh")).strip())
+        has_access = isinstance(raw.get("access"), str) and bool(str(raw.get("access")).strip())
+        if has_refresh or has_access:
+            entries.append((provider, raw))
+    return entries
+
+
+def _format_epoch_ms(value: Any) -> str:
+    try:
+        stamp = int(value)
+    except Exception:
+        return "unknown"
+    if stamp <= 0:
+        return "unknown"
+    if stamp > 10_000_000_000:
+        stamp = stamp / 1000
+    try:
+        return datetime.fromtimestamp(float(stamp), tz=timezone.utc).replace(microsecond=0).isoformat()
+    except Exception:
+        return "unknown"
+
+
+def _mask_secret(value: str) -> str:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return "(empty)"
+    if len(cleaned) <= 8:
+        return "*" * len(cleaned)
+    return f"{cleaned[:4]}...{cleaned[-4:]}"
 
 
 def _new_workspace_temp_file(*, prefix: str, suffix: str) -> Path:

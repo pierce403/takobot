@@ -25,6 +25,7 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 - [ ] `workspace.name` in `tako.toml` matches Tako’s active identity name.
 - [ ] Starter skill pack is present in `skills/` (disabled by default), including `agent-cli-inferencing`, and appears in extension listings.
 - [ ] `doctor` runs offline inference diagnostics (CLI probes + recent inference-error scan) without requiring inference calls.
+- [ ] `inference auth` shows persisted API keys (masked) and detected pi OAuth providers; `inference provider|ollama|key ...` commands update runtime-local inference settings directly.
 
 ## Operator Control Channel (XMTP)
 

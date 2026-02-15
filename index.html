@@ -765,7 +765,6 @@ curl -fsSL https://tako.bot/setup.sh | bash
               </li>
               <li>Creates the local XMTP database in <code>.tako/xmtp-db/</code>.</li>
               <li>Creates runtime logs/temp dirs at <code>.tako/logs/</code> and <code>.tako/tmp/</code>.</li>
-              <li>When <code>npm</code> is available, installs a local pi runtime in <code>.tako/pi/node</code> (<code>@mariozechner/pi-ai</code> + <code>@mariozechner/pi-coding-agent</code>).</li>
               <li>
                 Initializes the memory system by ensuring today’s daily log exists at <code>memory/dailies/YYYY-MM-DD.md</code>.
               </li>
@@ -773,7 +772,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Runs a startup health check to classify environment state (brand-new vs established), verify lock/safety, and probe resources.
               </li>
               <li>
-                Detects local inference providers in priority order (<code>pi</code>, <code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
+                Detects local inference providers in priority order (<code>pi</code>, <code>ollama</code>, <code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
               </li>
               <li>Loads auto-update policy from <code>tako.toml</code> (<code>[updates].auto_apply</code>, default <code>true</code>).</li>
               <li>
@@ -781,6 +780,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               </li>
               <li>Installs pi runtime by default under <code>.tako/pi/node</code>; if Node/npm are missing, bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
+              <li>Supports direct inference configuration from commands: provider preference, ollama host/model, persisted API keys, and pi OAuth inventory.</li>
               <li>Pins inference subprocess temp output and <code>TMPDIR/TMP/TEMP</code> to <code>.tako/tmp/</code> (workspace-local only).</li>
               <li>
                 Keeps inference execution gated until the first interactive chat turn, so startup remains deterministic.

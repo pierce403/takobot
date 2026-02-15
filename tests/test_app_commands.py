@@ -10,6 +10,7 @@ from takobot.app import (
     _parse_command,
     _parse_dose_set_request,
     _slash_command_matches,
+    _stream_focus_summary,
 )
 
 
@@ -73,6 +74,13 @@ class TestAppCommands(unittest.TestCase):
         slash = _command_completion_matches("up", slash=True)
         self.assertIn("update", slash)
         self.assertIn("upgrade", slash)
+
+    def test_stream_focus_summary_is_sanitized_and_truncated(self) -> None:
+        self.assertEqual("hello world", _stream_focus_summary(" hello   world "))
+        long_text = "x" * 200
+        summarized = _stream_focus_summary(long_text)
+        self.assertTrue(len(summarized) <= 120)
+        self.assertTrue(summarized.endswith("..."))
 
 
 if __name__ == "__main__":

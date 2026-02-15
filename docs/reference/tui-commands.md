@@ -32,6 +32,10 @@ Input history:
 
 - `Up` / `Down` cycles previously submitted local messages
 
+Thinking visibility:
+
+- Bubble stream shows current request focus and elapsed time while the model is thinking/responding.
+
 ## XMTP operator command surface
 
 Primary commands:

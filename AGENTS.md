@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Bubble stream now exposes request focus during long thinking
+
+- What happened: during long inference turns, the UI could show “responding” without clear visibility into what request was being worked.
+- Fix: bubble stream now shows a concise focus line (from current user request), elapsed thinking/responding time, and a waiting status when tokens are delayed.
+- Prevention: keep long-running inference UX explicit by surfacing active objective context directly in the stream panel.
+
 ### 2026-02-15 — TUI tab completion for commands
 
 - What happened: command typing in the TUI was still manual after slash dropdown discovery, slowing frequent operator command entry.

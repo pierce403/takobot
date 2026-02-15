@@ -405,6 +405,8 @@ class TakoTerminalApp(App[None]):
         self.stream_status_lines: list[str] = []
         self.stream_reply = ""
         self.stream_active = False
+        self.stream_focus = ""
+        self.stream_started_at: float | None = None
         self.stream_last_render_at = 0.0
         self._applying_tab_completion = False
         self.command_completion_seed = ""
@@ -3367,15 +3369,19 @@ class TakoTerminalApp(App[None]):
         self.stream_provider = "none"
         self.stream_status_lines = []
         self.stream_reply = ""
+        self.stream_focus = ""
+        self.stream_started_at = None
         self.stream_last_render_at = 0.0
         if hasattr(self, "stream_box"):
             self.stream_box.load_text("")
 
-    def _stream_begin(self) -> None:
+    def _stream_begin(self, *, focus: str = "") -> None:
         self.stream_active = True
         self.stream_provider = "starting"
         self.stream_status_lines = []
         self.stream_reply = ""
+        self.stream_focus = _stream_focus_summary(focus)
+        self.stream_started_at = time.monotonic()
         self.stream_last_render_at = 0.0
         self._stream_render(force=True)
 
@@ -3411,15 +3417,23 @@ class TakoTerminalApp(App[None]):
             return
         self.stream_last_render_at = now
 
-        header = f"bubble stream: provider={self.stream_provider} | mind={self._thinking_visual()}\n"
+        elapsed_s = 0
+        if self.stream_started_at is not None:
+            elapsed_s = int(max(0.0, time.monotonic() - self.stream_started_at))
+        header = (
+            f"bubble stream: provider={self.stream_provider} | mind={self._thinking_visual()} | elapsed={elapsed_s}s\n"
+        )
+        focus = f"focus: {self.stream_focus}\n" if self.stream_focus else ""
         status = ""
         if self.stream_status_lines:
             status = "\n".join(self.stream_status_lines) + "\n\n"
+        elif self.stream_active and elapsed_s >= 3:
+            status = "thinking about the current request...\n\n"
 
         caret = "|" if self.stream_active else ""
         body = self.stream_reply + caret
 
-        self.stream_box.load_text(header + status + body)
+        self.stream_box.load_text(header + focus + status + body)
         self.stream_box.scroll_end(animate=False)
 
     async def _local_chat_reply(self, text: str) -> str:
@@ -3452,7 +3466,7 @@ class TakoTerminalApp(App[None]):
             history=history,
         )
         self._add_activity("inference", "terminal chat inference requested")
-        self._stream_begin()
+        self._stream_begin(focus=text)
 
         try:
             provider, reply = await stream_inference_prompt_with_fallback(
@@ -4370,6 +4384,15 @@ def _summarize_text(text: str) -> str:
     if len(value) <= 220:
         return value
     return f"{value[:217]}..."
+
+
+def _stream_focus_summary(text: str) -> str:
+    value = " ".join(_sanitize_for_display(text).split())
+    if not value:
+        return ""
+    if len(value) <= 120:
+        return value
+    return f"{value[:117]}..."
 
 
 def _utc_now_iso() -> str:

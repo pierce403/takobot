@@ -28,6 +28,7 @@ from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
+from .skillpacks import seed_openclaw_starter_skills
 from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmtp_import, send_dm_sync, set_typing_indicator
@@ -447,8 +448,19 @@ async def _run_daemon(
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
     hooks = _hooks_with_log_file(hooks, paths.logs_dir / "runtime.log")
-    code_dir = ensure_code_dir(repo_root())
+    root = repo_root()
+    code_dir = ensure_code_dir(root)
     _emit_runtime_log(f"workspace code dir: {code_dir}", hooks=hooks)
+    registry_path = paths.state_dir / "extensions.json"
+    seeded = seed_openclaw_starter_skills(root, registry_path=registry_path)
+    if seeded.created_skills or seeded.registered_skills:
+        _emit_runtime_log(
+            (
+                "starter skills synced "
+                f"(created={len(seeded.created_skills)} registered={len(seeded.registered_skills)})"
+            ),
+            hooks=hooks,
+        )
 
     try:
         client = await create_client(env, paths.xmtp_db_dir, wallet_key, db_encryption_key)

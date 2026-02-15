@@ -4,6 +4,25 @@ Skills are operator-approved playbooks, prompts, and helpers that make Tako bett
 
 Core rule: **installed != enabled**.
 
+## Built-In Starter Pack
+
+Takobot now seeds an OpenClaw-informed starter pack (disabled by default) into `skills/` at runtime.
+
+Included skills:
+
+- `atxp`
+- `gog`
+- `self-improving-agent`
+- `wacli`
+- `tavily-search`
+- `find-skills`
+- `agent-browser`
+- `summarize`
+- `github`
+- `byterover`
+- `skill-creator` (priority add)
+- `mcporter-mcp` (priority add)
+
 ## Layout (v1)
 
 - `skills/<name>/playbook.md` (the skill itself)
@@ -18,4 +37,3 @@ Skills installed from URLs go through:
 2. static analysis + permission diff + risk rating
 3. install into `skills/<name>/` (disabled)
 4. operator enables explicitly (hashes verified again)
-

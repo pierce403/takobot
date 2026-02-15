@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — OpenClaw starter skills seeded by default
+
+- What happened: operators asked for the most-used OpenClaw skills to be available out of the box, with explicit priority on skill creation and MCP tooling.
+- Fix: added an OpenClaw-informed starter skill seeding module (top downloads + `skill-creator` + `mcporter`) that writes disabled skills into `skills/` and registers them as installed extensions at startup.
+- Prevention: keep ecosystem-derived starter capabilities materialized automatically, but disabled by default, so operators can enable only what they approve.
+
 ### 2026-02-15 — Problem-to-task automation + offline doctor diagnostics
 
 - What happened: operators could see runtime warnings (especially git/inference issues) without a durable follow-up list, and `doctor` needed better inference failure diagnosis when inference itself was down.

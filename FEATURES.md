@@ -93,6 +93,7 @@
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
   - Local `config` command explains `tako.toml` options and current values.
+  - Runtime auto-seeds an OpenClaw starter skill pack into `skills/` (disabled) and registers those skills in extension registry.
   - `workspace.name` in `tako.toml` is treated as the bot identity name and kept synced on rename flows.
   - Auto-update policy is configurable in `tako.toml` under `[updates].auto_apply` (default `true`).
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.
@@ -130,6 +131,7 @@
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
   - [x] `config` command explains `tako.toml` sections/options and live values.
+  - [x] OpenClaw starter skills are auto-seeded and extension-registered as installed-but-disabled.
   - [x] Auto-update setting defaults to on and is visible/toggleable from the TUI.
   - [x] App mode auto-applies available package updates and restarts when update changes are applied.
   - [x] Terminal chat inference streams output to the bubble-stream panel while generating.

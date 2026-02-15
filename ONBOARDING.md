@@ -20,6 +20,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] TUI mind indicator visibly animates during thinking/responding, and XMTP typing indicators appear when supported by runtime SDK.
 - [ ] `code/` exists and is git-ignored for repo clones/code work.
 - [ ] `workspace.name` in `tako.toml` matches Tako’s current identity name.
+- [ ] OpenClaw starter skill pack is present in `skills/` (disabled by default) and visible in extension listings.
 - [ ] Skill/tool install pipeline works (quarantine → analyze → install disabled → enable requires operator approval).
 - [ ] `SOUL.md`, `MEMORY.md`, `tako.toml`, and `FEATURES.md` exist and are consistent with current behavior.
 
@@ -57,6 +58,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During `RUNNING`, `run` command execution uses `code/` as working directory and reports that `cwd` in responses.
 - During `RUNNING`, health/doctor issues create or reuse matching follow-up tasks in `tasks/`.
 - `doctor` performs offline inference diagnostics (CLI probes + recent inference-error scan) without requiring inference calls.
+- During startup, Tako seeds the OpenClaw starter skill pack and registers it as installed-but-disabled extensions.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**
 

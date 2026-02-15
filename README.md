@@ -16,6 +16,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
+- Built-in OpenClaw starter skills are auto-seeded into `skills/` (disabled): top-10 by downloads plus priority `skill-creator` and MCP-focused `mcporter-mcp`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
@@ -110,6 +111,7 @@ Runtime-only (ignored):
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
 - Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
 - Type 2 escalation uses discovered inference providers with fallback across ready CLIs after the first interactive chat turn, then falls back to heuristic guidance if inference calls fail.
+- Seeds starter skills into `skills/` and registers them as installed-but-disabled runtime extensions.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit with plain-text chat still available.
 
 ## Configuration

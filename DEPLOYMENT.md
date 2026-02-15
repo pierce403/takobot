@@ -28,6 +28,7 @@ From the workspace root:
 - If git identity is missing during heartbeat commits, Tako auto-configures local repo identity (`Takobot <takobot@local>`) and retries.
 - Local/XMTP `run` commands execute in `code/` by default.
 - `takobot doctor` performs offline inference diagnostics (CLI probes + recent inference error scan) and records detected issues into `tasks/`.
+- App/daemon startup seeds an OpenClaw starter skill pack into `skills/` and registers entries as installed but disabled.
 
 ## Update Model
 

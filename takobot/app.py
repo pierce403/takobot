@@ -49,6 +49,7 @@ from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
+from .skillpacks import seed_openclaw_starter_skills
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, hint_for_xmtp_error, probe_xmtp_import
@@ -558,6 +559,24 @@ class TakoTerminalApp(App[None]):
             self.extensions_registry_path = self.paths.state_dir / "extensions.json"
             self.quarantine_root = self.paths.root / "quarantine"
             self.quarantine_root.mkdir(parents=True, exist_ok=True)
+            seeded = seed_openclaw_starter_skills(root, registry_path=self.extensions_registry_path)
+            if seeded.created_skills or seeded.registered_skills:
+                self._add_activity(
+                    "skills",
+                    (
+                        "starter skills synced "
+                        f"(created={len(seeded.created_skills)} registered={len(seeded.registered_skills)})"
+                    ),
+                )
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    (
+                        "OpenClaw starter skills synced: "
+                        f"created={len(seeded.created_skills)} "
+                        f"registered={len(seeded.registered_skills)}"
+                    ),
+                )
 
             self.identity_name, self.identity_role = read_identity()
             config_path = root / "tako.toml"

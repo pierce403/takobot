@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — TUI slash command discovery + quick runtime controls
+
+- What happened: operators wanted faster in-app command discovery and direct shortcuts for model inspection, updates, runtime stats, and DOSE tuning.
+- Fix: added slash-command discovery (`/` prints available command shortcuts), added `/models`, `/stats`, and `/upgrade` command paths, and extended `dose` command parsing to accept direct level setting (`dose <channel> <0..1>`).
+- Prevention: keep high-frequency runtime controls exposed as concise slash-friendly commands and document them in README/FEATURES/docs together.
+
 ### 2026-02-15 — Direct inference auth/provider controls (pi oauth + ollama + API keys)
 
 - What happened: operators needed explicit control over inference auth/provider setup from Takobot itself (including pi OAuth visibility and ollama selection), without relying on shell env setup.

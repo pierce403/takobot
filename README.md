@@ -21,6 +21,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Built-in starter skills are auto-seeded into `skills/` (disabled): OpenClaw top-10, priority `skill-creator` + MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
+- Slash-command UX in the TUI: type `/` for command shortcuts, use `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 - OpenClaw-style docs tree in `docs/` (`start/`, `concepts/`, `reference/`)

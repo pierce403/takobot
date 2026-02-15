@@ -110,6 +110,7 @@
   - Persists chat sessions as JSONL transcripts under `.tako/state/conversations/` and injects recent history windows into inference prompts.
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
+  - Slash shortcuts are surfaced in-app (`/` prints command list) and include `/models`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
   - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.

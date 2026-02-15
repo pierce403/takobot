@@ -320,6 +320,7 @@ class TakoTerminalApp(App[None]):
         self.stream_reply = ""
         self.stream_active = False
         self.stream_last_render_at = 0.0
+        self.slash_hint_shown = False
 
         self.status_bar: Static
         self.transcript: TextArea
@@ -383,6 +384,17 @@ class TakoTerminalApp(App[None]):
         if self.input_box.disabled:
             return
         self.call_after_refresh(self._ensure_input_focus)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "input-box":
+            return
+        value = event.value.strip()
+        if value == "/":
+            if not self.slash_hint_shown:
+                self._write_system(_slash_commands_help_line())
+                self.slash_hint_shown = True
+            return
+        self.slash_hint_shown = False
 
     async def on_unmount(self) -> None:
         await self._shutdown_background_tasks()
@@ -2055,11 +2067,18 @@ class TakoTerminalApp(App[None]):
             return
 
         cmd, rest = _parse_command(text)
+        if cmd == "":
+            if text.strip().startswith("/"):
+                self._write_tako(_slash_commands_help_line())
+                return
+            self._write_tako("unknown local command. type `help`. plain text chat always works here.")
+            return
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, config, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "local cockpit commands: help, status, stats, health, config, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
                 "inference controls: `inference refresh`, `inference auth`, `inference provider <...>`, `inference ollama model <name>`, `inference key list|set|clear`\n"
-                "update controls: `update`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
+                "slash commands: type `/` to show available command shortcuts (`/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
+                "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
             return
@@ -2103,6 +2122,48 @@ class TakoTerminalApp(App[None]):
             )
             return
 
+        if cmd == "stats":
+            uptime = int(time.monotonic() - self.started_at)
+            heartbeat_age = (
+                f"{int(time.monotonic() - self.last_heartbeat_at)}s ago"
+                if self.last_heartbeat_at is not None
+                else "n/a"
+            )
+            update_check_age = (
+                f"{int(time.monotonic() - self.last_update_check_at)}s ago"
+                if self.last_update_check_at is not None
+                else "n/a"
+            )
+            loops_count = int(self.open_loops_summary.get("count") or 0)
+            inference_provider = self.inference_runtime.selected_provider if self.inference_runtime else "none"
+            inference_ready = "yes" if self.inference_runtime and self.inference_runtime.ready else "no"
+            lines = [
+                "stats:",
+                f"version: {__version__}",
+                f"uptime_s: {uptime}",
+                f"heartbeat_ticks: {self.heartbeat_ticks}",
+                f"last_heartbeat: {heartbeat_age}",
+                f"events_written: {self.event_total_written}",
+                f"events_ingested: {self.event_total_ingested}",
+                f"type1_processed: {self.type1_processed}",
+                f"type2_escalations: {self.type2_escalations}",
+                f"open_tasks: {self.open_tasks_count}",
+                f"open_loops: {loops_count}",
+                f"inference_provider: {inference_provider}",
+                f"inference_ready: {inference_ready}",
+                f"last_update_check: {update_check_age}",
+                f"auto_updates: {'on' if self.auto_updates_enabled else 'off'}",
+                f"operator_paired: {'yes' if self.operator_paired else 'no'}",
+            ]
+            if self.dose is None:
+                lines.append("dose: not ready")
+            else:
+                lines.append(
+                    f"dose: D={self.dose.d:.2f} O={self.dose.o:.2f} S={self.dose.s:.2f} E={self.dose.e:.2f} ({self.dose_label})"
+                )
+            self._write_tako("\n".join(lines))
+            return
+
         if cmd == "health":
             if not self.health_summary:
                 self._write_tako("health summary is not available yet.")
@@ -2117,13 +2178,46 @@ class TakoTerminalApp(App[None]):
             self._write_tako(explain_tako_toml(self.config, path=repo_root() / "tako.toml"))
             return
 
+        if cmd == "models":
+            if self.inference_runtime is None:
+                self._initialize_inference_runtime()
+            if self.inference_runtime is None:
+                self._write_tako("models unavailable: inference runtime is not initialized.")
+                return
+            pi_status = self.inference_runtime.statuses.get("pi")
+            lines = [
+                "models (pi + inference):",
+                f"selected provider: {self.inference_runtime.selected_provider or 'none'}",
+                f"inference ready: {'yes' if self.inference_runtime.ready else 'no'}",
+            ]
+            if pi_status is None:
+                lines.append("pi: unavailable")
+            else:
+                lines.extend(
+                    [
+                        f"pi cli installed: {'yes' if pi_status.cli_installed else 'no'}",
+                        f"pi ready: {'yes' if pi_status.ready else 'no'}",
+                        f"pi auth kind: {pi_status.auth_kind}",
+                        f"pi source: {pi_status.key_source or 'none'}",
+                    ]
+                )
+                if pi_status.note:
+                    lines.append(f"pi note: {pi_status.note}")
+            lines.append("")
+            lines.extend(format_inference_auth_inventory())
+            self._write_tako("\n".join(lines))
+            return
+
         if cmd == "dose":
             action = rest.strip().lower()
             if self.dose is None:
                 self._write_tako("dose engine isn't awake yet. give me a moment.")
                 return
             if action in {"help", "?"}:
-                self._write_tako("usage: `dose` (show), `dose calm`, `dose explore`")
+                self._write_tako(
+                    "usage: `dose` (show), `dose calm`, `dose explore`, "
+                    "`dose <d|o|s|e|dopamine|oxytocin|serotonin|endorphins> <0..1>`"
+                )
                 return
             if action in {"calm", "explore"}:
                 if self.operator_paired and not self.safe_mode:
@@ -2145,8 +2239,39 @@ class TakoTerminalApp(App[None]):
                         dose.save(self.dose_path, self.dose)
                 self._write_tako(f"okie! current dose: D={self.dose.d:.2f} O={self.dose.o:.2f} S={self.dose.s:.2f} E={self.dose.e:.2f} ({self.dose_label})")
                 return
+            set_target = _parse_dose_set_request(action)
+            if set_target is not None:
+                if self.operator_paired and not self.safe_mode:
+                    self._write_tako(
+                        "dose tuning is operator-only over XMTP when paired. "
+                        "if you need an emergency local nudge, enable safe mode first (`safe on`)."
+                    )
+                    return
+                channel, value = set_target
+                setattr(self.dose, channel, value)
+                self.dose.clamp()
+                self.dose.last_updated_ts = time.time()
+                self.dose_label = self.dose.label()
+                self.dose_last_emitted_label = self.dose_label
+                if self.dose_path is not None:
+                    with contextlib.suppress(Exception):
+                        dose.save(self.dose_path, self.dose)
+                label = _dose_channel_label(channel)
+                level = _format_level(value)
+                self._record_event(
+                    "dose.operator.set",
+                    f"Operator set {label} level to {level}.",
+                    source="terminal",
+                    metadata={"channel": channel, "value": level},
+                )
+                self._add_activity("dose", f"{label} set to {level}")
+                self._write_tako(f"{label} levels set to {level}.")
+                return
             if action not in {"", "show", "status"}:
-                self._write_tako("usage: `dose` (show), `dose calm`, `dose explore`")
+                self._write_tako(
+                    "usage: `dose` (show), `dose calm`, `dose explore`, "
+                    "`dose <d|o|s|e|dopamine|oxytocin|serotonin|endorphins> <0..1>`"
+                )
                 return
             bias = self.dose.behavior_bias()
             self._write_tako(
@@ -2649,12 +2774,12 @@ class TakoTerminalApp(App[None]):
             self._write_tako("whoosh. operator imprint cleared. when you're ready, type `pair` to set a new XMTP control channel.")
             return
 
-        if cmd == "update":
+        if cmd in {"update", "upgrade"}:
             action = rest.strip().lower()
             if action in {"help", "?"}:
                 self._write_tako(
                     "usage:\n"
-                    "- `update` (apply update)\n"
+                    "- `update` or `upgrade` (apply update)\n"
                     "- `update check` (check only)\n"
                     "- `update auto status`\n"
                     "- `update auto on`\n"
@@ -3804,6 +3929,64 @@ def _mask_sensitive_inference_command(text: str) -> str:
     return text
 
 
+def _slash_commands_help_line() -> str:
+    return (
+        "slash commands: /help /status /stats /health /config /models /dose /inference /update /upgrade "
+        "/task /tasks /done /morning /outcomes /compress /weekly /promote /doctor /pair /setup /install "
+        "/review /enable /draft /extensions /web /run /copy /activity /safe /stop /resume /quit"
+    )
+
+
+def _parse_dose_set_request(action: str) -> tuple[str, float] | None:
+    parts = action.strip().split()
+    if len(parts) != 2:
+        return None
+    channel = _normalize_dose_channel(parts[0])
+    if channel is None:
+        return None
+    try:
+        value = float(parts[1])
+    except Exception:
+        return None
+    value = max(0.0, min(1.0, value))
+    return channel, value
+
+
+def _normalize_dose_channel(token: str) -> str | None:
+    value = token.strip().lower()
+    aliases = {
+        "d": "d",
+        "dop": "d",
+        "dopamine": "d",
+        "o": "d",
+        "ox": "o",
+        "oxy": "o",
+        "oxytocin": "o",
+        "s": "s",
+        "ser": "s",
+        "serotonin": "s",
+        "e": "e",
+        "endo": "e",
+        "endorphin": "e",
+        "endorphins": "e",
+    }
+    return aliases.get(value)
+
+
+def _dose_channel_label(channel: str) -> str:
+    names = {
+        "d": "dopamine",
+        "o": "oxytocin",
+        "s": "serotonin",
+        "e": "endorphins",
+    }
+    return names.get(channel, "dose")
+
+
+def _format_level(value: float) -> str:
+    return f"{max(0.0, min(1.0, value)):.2f}".rstrip("0").rstrip(".")
+
+
 def _looks_like_local_command(text: str) -> bool:
     value = text.strip()
     if not value:
@@ -3814,10 +3997,10 @@ def _looks_like_local_command(text: str) -> bool:
 
     cmd, rest = _parse_command(value)
     tail = rest.strip().lower()
-    if cmd in {"help", "h", "?", "status", "health", "doctor", "config", "toml", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
+    if cmd in {"help", "h", "?", "status", "stats", "health", "doctor", "config", "toml", "models", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
         return tail == ""
     if cmd == "dose":
-        return tail in {"", "show", "status", "calm", "explore", "help", "?"}
+        return tail in {"", "show", "status", "calm", "explore", "help", "?"} or _parse_dose_set_request(tail) is not None
     if cmd == "morning":
         return tail == ""
     if cmd == "task":
@@ -3839,6 +4022,8 @@ def _looks_like_local_command(text: str) -> bool:
     if cmd == "inference":
         return True
     if cmd == "update":
+        return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
+    if cmd == "upgrade":
         return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
     if cmd == "reimprint":
         return True

@@ -853,6 +853,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>
               <li>TUI input supports history recall: <code>↑</code>/<code>↓</code> cycles previously submitted local messages.</li>
               <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>
+              <li>TUI command input supports <code>Tab</code> autocomplete for command names and cycles matching candidates on repeated <code>Tab</code>.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">

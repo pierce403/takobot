@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from takobot.app import (
+    _command_completion_context,
+    _command_completion_matches,
     _dose_channel_label,
     _looks_like_local_command,
     _parse_command,
@@ -49,6 +51,28 @@ class TestAppCommands(unittest.TestCase):
 
         dose_items = _slash_command_matches("dose")
         self.assertTrue(any(command == "/dose" for command, _summary in dose_items))
+
+    def test_command_completion_context_handles_prefixes(self) -> None:
+        base, token, slash = _command_completion_context("/st") or ("", "", False)
+        self.assertEqual("/", base)
+        self.assertEqual("st", token)
+        self.assertTrue(slash)
+
+        base2, token2, slash2 = _command_completion_context("takobot sta") or ("", "", True)
+        self.assertEqual("takobot ", base2)
+        self.assertEqual("sta", token2)
+        self.assertFalse(slash2)
+
+        self.assertIsNone(_command_completion_context("status now"))
+
+    def test_command_completion_matches_for_plain_and_slash(self) -> None:
+        plain = _command_completion_matches("sta", slash=False)
+        self.assertIn("status", plain)
+        self.assertIn("stats", plain)
+
+        slash = _command_completion_matches("up", slash=True)
+        self.assertIn("update", slash)
+        self.assertIn("upgrade", slash)
 
 
 if __name__ == "__main__":

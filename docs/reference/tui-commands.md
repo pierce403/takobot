@@ -20,6 +20,7 @@ Common commands:
 - `install`, `review pending`, `enable`, `draft`, `extensions`
 - `safe on`, `safe off`
 - Type `/` in the input box to open the slash-command dropdown under the input field.
+- Press `Tab` in the input box to autocomplete command names (and cycle candidates).
 
 Clipboard helpers:
 

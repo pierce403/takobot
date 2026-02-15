@@ -22,6 +22,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
+- TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 - OpenClaw-style docs tree in `docs/` (`start/`, `concepts/`, `reference/`)

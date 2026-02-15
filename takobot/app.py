@@ -140,6 +140,47 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/resume", "Alias safe off"),
     ("/quit", "Quit app"),
 )
+LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
+    "activity",
+    "compress",
+    "config",
+    "copy",
+    "doctor",
+    "done",
+    "dose",
+    "draft",
+    "enable",
+    "exit",
+    "extensions",
+    "h",
+    "health",
+    "help",
+    "inference",
+    "install",
+    "models",
+    "morning",
+    "outcomes",
+    "pair",
+    "profile",
+    "promote",
+    "quit",
+    "reimprint",
+    "resume",
+    "review",
+    "run",
+    "safe",
+    "setup",
+    "stats",
+    "status",
+    "stop",
+    "task",
+    "tasks",
+    "toml",
+    "update",
+    "upgrade",
+    "web",
+    "weekly",
+)
 
 SEVERITY_ORDER = {
     "info": 0,
@@ -365,6 +406,10 @@ class TakoTerminalApp(App[None]):
         self.stream_reply = ""
         self.stream_active = False
         self.stream_last_render_at = 0.0
+        self._applying_tab_completion = False
+        self.command_completion_seed = ""
+        self.command_completion_matches: list[str] = []
+        self.command_completion_index = -1
 
         self.status_bar: Static
         self.transcript: TextArea
@@ -436,6 +481,8 @@ class TakoTerminalApp(App[None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "input-box":
             return
+        if not self._applying_tab_completion:
+            self._reset_tab_completion_state()
         self._update_slash_menu(event.value)
 
     async def on_unmount(self) -> None:
@@ -513,9 +560,14 @@ class TakoTerminalApp(App[None]):
         self._add_activity("clipboard", "sanitized pasted text")
 
     def on_key(self, event: events.Key) -> None:
-        if event.key not in {"up", "down"}:
+        if event.key not in {"up", "down", "tab"}:
             return
         if self.input_box.disabled or self.input_box.has_focus is False:
+            return
+
+        if event.key == "tab":
+            event.stop()
+            self._apply_tab_completion()
             return
 
         if event.key == "up":
@@ -538,6 +590,7 @@ class TakoTerminalApp(App[None]):
             self._ensure_input_focus()
             return
         self._hide_slash_menu()
+        self._reset_tab_completion_state()
         self.input_history.add(text)
         event.input.value = ""
 
@@ -3629,6 +3682,45 @@ class TakoTerminalApp(App[None]):
         self.slash_menu.display = False
         self.slash_menu.update("")
 
+    def _reset_tab_completion_state(self) -> None:
+        self.command_completion_seed = ""
+        self.command_completion_matches = []
+        self.command_completion_index = -1
+
+    def _apply_tab_completion(self) -> None:
+        context = _command_completion_context(self.input_box.value)
+        if context is None:
+            return
+        base, token, slash = context
+        matches = _command_completion_matches(token, slash=slash)
+        if not matches:
+            return
+
+        seed = f"{base}|{token}|{'slash' if slash else 'plain'}"
+        index = 0
+        if (
+            seed == self.command_completion_seed
+            and matches == self.command_completion_matches
+            and 0 <= self.command_completion_index < len(matches)
+        ):
+            current = token.strip().lower()
+            if current == matches[self.command_completion_index]:
+                index = (self.command_completion_index + 1) % len(matches)
+        elif token.strip().lower() in matches:
+            current_index = matches.index(token.strip().lower())
+            index = (current_index + 1) % len(matches)
+
+        completed = f"{base}{matches[index]} "
+        self.command_completion_seed = seed
+        self.command_completion_matches = matches
+        self.command_completion_index = index
+
+        self._applying_tab_completion = True
+        self.input_box.value = completed
+        self.input_box.cursor_position = len(completed)
+        self._applying_tab_completion = False
+        self._update_slash_menu(completed)
+
     def _update_slash_menu(self, raw_text: str) -> None:
         if not hasattr(self, "slash_menu"):
             return
@@ -4008,6 +4100,42 @@ def _slash_command_matches(query: str, *, limit: int = SLASH_MENU_MAX_ITEMS) -> 
             continue
         results.append((command, summary))
     return results[: max(1, int(limit))]
+
+
+def _command_completion_context(value: str) -> tuple[str, str, bool] | None:
+    raw = value.rstrip("\n")
+    if not raw.strip():
+        return None
+    leading = raw[: len(raw) - len(raw.lstrip())]
+    rest = raw[len(leading) :]
+    prefix = ""
+    lowered = rest.lower()
+    if lowered.startswith("takobot "):
+        prefix = rest[:8]
+        rest = rest[8:]
+    elif lowered.startswith("tako "):
+        prefix = rest[:5]
+        rest = rest[5:]
+    slash = rest.startswith("/")
+    if slash:
+        rest = rest[1:]
+    if any(ch.isspace() for ch in rest):
+        return None
+    if not slash and not rest:
+        return None
+    base = f"{leading}{prefix}{'/' if slash else ''}"
+    return base, rest.strip().lower(), slash
+
+
+def _command_completion_matches(query: str, *, slash: bool) -> list[str]:
+    needle = query.strip().lower()
+    if slash:
+        candidates = [command[1:].lower() for command, _summary in SLASH_COMMAND_SPECS]
+    else:
+        candidates = list(LOCAL_COMMAND_COMPLETIONS)
+    if not needle:
+        return sorted(candidates)
+    return sorted(candidate for candidate in candidates if candidate.startswith(needle))
 
 
 def _parse_dose_set_request(action: str) -> tuple[str, float] | None:

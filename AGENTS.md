@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — TUI tab completion for commands
+
+- What happened: command typing in the TUI was still manual after slash dropdown discovery, slowing frequent operator command entry.
+- Fix: added `Tab` autocomplete in the input box for command names (plain and slash-prefixed) with candidate cycling on repeated `Tab`.
+- Prevention: keep high-frequency command entry ergonomic and test helper logic for completion context + candidate matching.
+
 ### 2026-02-15 — Slash command discovery moved into in-input dropdown
 
 - What happened: slash command discovery was shown in the transcript/system output area, which added noise during normal chat.

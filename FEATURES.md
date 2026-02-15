@@ -111,6 +111,7 @@
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
   - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
+  - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.
   - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.

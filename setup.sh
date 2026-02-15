@@ -217,10 +217,35 @@ EOF
   if git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then
     log "git: committed initial workspace"
   else
-    if git config user.name "Takobot" >/dev/null 2>&1 \
-      && git config user.email "takobot@local" >/dev/null 2>&1 \
+    local identity_name identity_slug identity_email
+    identity_name="$(
+      awk -F= '
+        BEGIN { in_workspace=0 }
+        /^\[workspace\][[:space:]]*$/ { in_workspace=1; next }
+        /^\[[^]]+\][[:space:]]*$/ { in_workspace=0 }
+        in_workspace && $1 ~ /^[[:space:]]*name[[:space:]]*$/ {
+          value=$2
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+          gsub(/^"/, "", value)
+          gsub(/"$/, "", value)
+          print value
+          exit
+        }
+      ' "$WORKDIR/tako.toml" 2>/dev/null || true
+    )"
+    if [[ -z "$identity_name" ]]; then
+      identity_name="Takobot"
+    fi
+    identity_slug="$(printf "%s" "$identity_name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+    if [[ -z "$identity_slug" ]]; then
+      identity_slug="takobot"
+    fi
+    identity_email="${identity_slug}.tako.eth@xmtp.mx"
+
+    if git config user.name "$identity_name" >/dev/null 2>&1 \
+      && git config user.email "$identity_email" >/dev/null 2>&1 \
       && git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then
-      log "git: committed initial workspace (local identity auto-configured: Takobot <takobot@local>)"
+      log "git: committed initial workspace (local identity auto-configured: $identity_name <$identity_email>)"
     else
       log "git: commit skipped (operator action requested: configure git user.name/user.email, then retry commit)"
     fi

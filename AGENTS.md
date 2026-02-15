@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Git identity auto-defaults from bot name
+
+- What happened: startup could repeatedly raise health issues for missing git identity and ask for manual `git config`, even though Takobot already had a known identity name.
+- Fix: startup/doctor/heartbeat now auto-configure missing repo-local `user.name`/`user.email` from bot identity (`<name>.tako.eth@xmtp.mx`) and only request operator action if that automatic setup fails.
+- Prevention: keep git identity remediation automatic-first and keep fallback/manual path explicit in docs and tests.
+
 ### 2026-02-15 — OpenClaw-style session context + pi runtime fallback
 
 - What happened: chat inference in Takobot was mostly single-turn, so longer conversations felt forgetful; operators also wanted OpenClaw-style pi stack alignment.

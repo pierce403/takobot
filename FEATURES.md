@@ -88,9 +88,9 @@
   - App transcript/system lines are appended to `.tako/logs/app.log`.
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.
   - App heartbeat performs git auto-commit for pending workspace changes (`git add -A` + `git commit`).
-  - If git identity is missing, heartbeat auto-configures local repo identity (`Takobot <takobot@local>`) and retries commit.
-  - Daemon startup and heartbeat emit explicit operator-request guidance when git identity is missing.
-  - When required setup is missing (for example git identity or XMTP dependency), app mode emits a polite operator request with concrete next steps.
+  - If git identity is missing, startup/heartbeat auto-configure repo-local identity from the bot name (email pattern: `<name>.tako.eth@xmtp.mx`) and retry commit.
+  - Daemon startup and heartbeat only emit operator-request guidance when automatic local git identity setup fails.
+  - When required setup is missing (for example XMTP dependency or failed git identity auto-setup), app mode emits a polite operator request with concrete next steps.
   - Runtime and `doctor`-detected problems are converted into committed follow-up tasks under `tasks/` (deduped by issue key).
   - `doctor` includes offline inference diagnostics (CLI version/help probes + recent inference-error scan from `.tako/state/events.jsonl`).
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
@@ -130,9 +130,9 @@
   - [x] Octopus panel shows Takobot version and live DOSE indicators.
   - [x] Runtime logs are persisted under `.tako/logs/runtime.log` and app transcript/system logs under `.tako/logs/app.log`.
   - [x] Inference provider subprocesses use workspace-local temp files under `.tako/tmp/`.
-  - [x] App/daemon heartbeat can auto-commit pending workspace changes when git identity is configured.
-  - [x] Missing git identity triggers an operator-facing request with concrete `git config` remediation commands.
-  - [x] Heartbeat auto-commit can recover from missing git identity by setting local repo identity and retrying.
+  - [x] App/daemon heartbeat can auto-commit pending workspace changes.
+  - [x] Missing git identity is auto-remediated with repo-local config derived from the bot name.
+  - [x] Operator-facing `git config` remediation prompts appear only if automatic local git identity setup fails.
   - [x] Runtime/doctor problem detection auto-creates (or reuses) matching tasks under `tasks/`.
   - [x] `doctor` can diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
   - [x] Plain-text chat includes recent same-session history in model prompts (local + XMTP), not only the current message.

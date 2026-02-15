@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import subprocess
 from pathlib import Path
+import re
+import subprocess
+
+
+DEFAULT_GIT_IDENTITY_NAME = "Takobot"
+GIT_IDENTITY_EMAIL_DOMAIN = "xmtp.mx"
 
 
 def _run_git(repo_root: Path, *args: str, timeout_s: float = 15.0) -> subprocess.CompletedProcess[str]:
@@ -50,20 +55,58 @@ def git_identity_status(repo_root: Path) -> tuple[bool, str]:
     return False, "git user.email is not configured"
 
 
-def _ensure_local_git_identity(repo_root: Path) -> tuple[bool, str, bool]:
+def _normalize_identity_name(value: str | None) -> str:
+    cleaned = " ".join((value or "").split()).strip()
+    return cleaned or DEFAULT_GIT_IDENTITY_NAME
+
+
+def _email_local_part(name: str) -> str:
+    lowered = (name or "").strip().lower()
+    token = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+    token = token or "takobot"
+    return f"{token}.tako.eth"
+
+
+def default_git_identity(identity_name: str | None) -> tuple[str, str]:
+    name = _normalize_identity_name(identity_name)
+    return name, f"{_email_local_part(name)}@{GIT_IDENTITY_EMAIL_DOMAIN}"
+
+
+def ensure_local_git_identity(repo_root: Path, *, identity_name: str | None = None) -> tuple[bool, str, bool]:
     ok, detail = git_identity_status(repo_root)
     if ok:
         return True, detail, False
-    set_name = _run_git(repo_root, "config", "user.name", "Takobot")
-    if set_name.returncode != 0:
-        err = " ".join(set_name.stderr.strip().split()) or f"exit={set_name.returncode}"
-        return False, f"failed to set local git user.name: {err}", False
-    set_email = _run_git(repo_root, "config", "user.email", "takobot@local")
-    if set_email.returncode != 0:
-        err = " ".join(set_email.stderr.strip().split()) or f"exit={set_email.returncode}"
-        return False, f"failed to set local git user.email: {err}", False
+
+    name_proc = _run_git(repo_root, "config", "--get", "user.name")
+    email_proc = _run_git(repo_root, "config", "--get", "user.email")
+    current_name = name_proc.stdout.strip() if name_proc.returncode == 0 else ""
+    current_email = email_proc.stdout.strip() if email_proc.returncode == 0 else ""
+    preferred_name, preferred_email = default_git_identity(identity_name)
+
+    changed = False
+    if not current_name:
+        set_name = _run_git(repo_root, "config", "user.name", preferred_name)
+        if set_name.returncode != 0:
+            err = " ".join(set_name.stderr.strip().split()) or f"exit={set_name.returncode}"
+            return False, f"failed to set local git user.name: {err}", False
+        current_name = preferred_name
+        changed = True
+
+    if not current_email:
+        email_name = current_name or preferred_name
+        _, auto_email = default_git_identity(email_name)
+        set_email = _run_git(repo_root, "config", "user.email", auto_email)
+        if set_email.returncode != 0:
+            err = " ".join(set_email.stderr.strip().split()) or f"exit={set_email.returncode}"
+            return False, f"failed to set local git user.email: {err}", False
+        changed = True
+
     ok2, detail2 = git_identity_status(repo_root)
-    return ok2, detail2, True
+    return ok2, detail2, changed
+
+
+def _ensure_local_git_identity(repo_root: Path) -> tuple[bool, str, bool]:
+    return ensure_local_git_identity(repo_root)
 
 
 def assert_not_tracked(repo_root: Path, path: Path) -> None:
@@ -87,7 +130,7 @@ def panic_check_runtime_secrets(repo_root: Path, runtime_root: Path) -> None:
         raise RuntimeError("Refusing to run: files under .tako/ are tracked by git.")
 
 
-def auto_commit_pending(repo_root: Path, *, message: str) -> GitAutoCommitResult:
+def auto_commit_pending(repo_root: Path, *, message: str, identity_name: str | None = None) -> GitAutoCommitResult:
     if not is_git_repo(repo_root):
         return GitAutoCommitResult(False, False, "auto-commit skipped: not a git repo")
 
@@ -115,7 +158,7 @@ def auto_commit_pending(repo_root: Path, *, message: str) -> GitAutoCommitResult
         detail = " ".join(commit.stderr.strip().split()) or "commit failed"
         detail_lower = detail.lower()
         if "author identity unknown" in detail_lower or "unable to auto-detect email address" in detail_lower:
-            ensured, ensured_detail, changed = _ensure_local_git_identity(repo_root)
+            ensured, ensured_detail, changed = ensure_local_git_identity(repo_root, identity_name=identity_name)
             if not ensured:
                 return GitAutoCommitResult(False, False, f"auto-commit failed: {ensured_detail}")
             retry = _run_git(repo_root, "commit", "-m", message)

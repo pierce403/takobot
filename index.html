@@ -807,11 +807,11 @@ curl -fsSL https://tako.bot/setup.sh | bash
               </li>
               <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes and verifies no tracked changes remain.</li>
-              <li>If git identity is missing, heartbeat auto-configures local repo identity (<code>Takobot &lt;takobot@local&gt;</code>) and retries commit.</li>
+              <li>If git identity is missing, startup/heartbeat auto-configure repo-local identity from bot name (<code>&lt;name&gt; &lt;name.tako.eth@xmtp.mx&gt;</code>) and retry commit.</li>
               <li>If runtime health detects actionable problems, Tako auto-creates/reuses matching follow-up tasks under <code>tasks/</code>.</li>
               <li>Ensures a git-ignored <code>code/</code> directory exists for repo clones and code-work sandboxes.</li>
               <li>Seeds an OpenClaw-informed starter skill pack into <code>skills/</code> (disabled by default) and registers those skills as installed extensions.</li>
-              <li>If required setup is missing (for example git identity), asks the operator in-app with concrete fix steps.</li>
+              <li>If required setup is missing and auto-remediation fails (for example git identity), asks the operator in-app with concrete fix steps.</li>
               <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
               <li>Uses XMTP typing indicators for outbound replies when supported by the installed XMTP SDK/runtime.</li>
               <li>Persists chat sessions in <code>.tako/state/conversations/</code> (<code>sessions.json</code> + per-session JSONL transcripts) and injects recent history into inference prompts.</li>

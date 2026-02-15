@@ -10,7 +10,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
-- Missing-setup prompts: when required config/deps are missing (for example git identity), Tako asks the operator with concrete fix steps
+- Missing-setup prompts: when required config/deps are missing and auto-remediation fails, Tako asks the operator with concrete fix steps
 - Runtime problem capture: detected warnings/errors are converted into committed `tasks/` items for follow-up
 - Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
@@ -101,7 +101,7 @@ Runtime-only (ignored):
 - When `npm` is available, installs a local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) for inference compatibility with OpenClaw’s stack.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
-- If initial git commit is blocked by missing identity, bootstrap sets repo-local fallback identity (`Takobot <takobot@local>`) and retries.
+- If initial git commit is blocked by missing identity, bootstrap sets repo-local fallback identity from `workspace.name` (email format: `<name>.tako.eth@xmtp.mx`) and retries.
 - Ensures a git-ignored `code/` directory exists for temporary repo clones/code work.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates runtime logs/temp directories at `.tako/logs/` and `.tako/tmp/`.
@@ -157,7 +157,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
 - Chat context is persisted in `.tako/state/conversations/` (`sessions.json` + per-session JSONL transcripts) and recent turns are injected into prompt context.
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.
-- If git auto-commit encounters missing git identity, Tako auto-configures local repo identity (`Takobot <takobot@local>`) and retries the commit.
+- If git auto-commit encounters missing git identity, Tako auto-configures repo-local identity from the bot name (`<name> <name.tako.eth@xmtp.mx>`) and retries the commit.
 - When runtime/doctor detects actionable problems (git/inference/dependency/runtime), Tako opens/maintains matching tasks under `tasks/` automatically.
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - XMTP replies now use a typing indicator when supported by the installed XMTP SDK/runtime.

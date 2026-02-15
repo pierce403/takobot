@@ -15,8 +15,8 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 - [ ] DOSE engine initialized (`.tako/state/dose.json`) and visible in the UI.
 - [ ] Productivity folders exist (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`).
 - [ ] Open loops index initialized (`.tako/state/open_loops.json`).
-- [ ] Heartbeat git auto-commit works (`git add -A` + `git commit`) when `user.name`/`user.email` are configured.
-- [ ] If required setup is missing (for example git identity), Tako asks the operator with concrete fix steps.
+- [ ] Heartbeat git auto-commit works (`git add -A` + `git commit`) and auto-configures missing local git identity from bot name.
+- [ ] If required setup is missing and auto-remediation fails (for example git identity), Tako asks the operator with concrete fix steps.
 - [ ] Health/doctor-detected problems are reflected as committed follow-up tasks under `tasks/` (deduped by issue).
 - [ ] Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`).
 - [ ] TUI mind indicator animates while thinking/responding; XMTP typing indicators are used when SDK/runtime support exists.

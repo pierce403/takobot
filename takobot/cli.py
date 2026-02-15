@@ -20,7 +20,7 @@ from .config import explain_tako_toml, load_tako_toml, set_workspace_name
 from .conversation import ConversationStore
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
-from .git_safety import assert_not_tracked, auto_commit_pending, git_identity_status, panic_check_runtime_secrets
+from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import InferenceRuntime, discover_inference_runtime, format_runtime_lines, run_inference_prompt_with_fallback
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
@@ -138,6 +138,15 @@ def _ens_rpc_urls_from_args(value: str | None) -> list[str]:
     return urls or list(DEFAULT_ENS_RPC_URLS)
 
 
+def _preferred_git_identity_name(root: Path) -> str:
+    cfg, _warn = load_tako_toml(root / "tako.toml")
+    configured = " ".join((cfg.workspace.name or "").split()).strip()
+    if configured and configured.lower() not in {"tako-workspace", "takobot-workspace"}:
+        return configured
+    identity_name, _identity_role = read_identity()
+    return " ".join((identity_name or "").split()).strip()
+
+
 def cmd_app(args: argparse.Namespace) -> int:
     try:
         from .app import run_terminal_app
@@ -247,11 +256,18 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
         f"- env: {env}",
         f"- keys: {'present' if paths.keys_json.exists() else 'missing'}",
     ]
-    git_identity_ok, git_identity_detail = git_identity_status(root)
-    lines.append(f"- git identity: {git_identity_detail}")
+    git_identity_name = _preferred_git_identity_name(root)
+    git_identity_ok, git_identity_detail, git_identity_auto_configured = ensure_local_git_identity(
+        root,
+        identity_name=git_identity_name,
+    )
+    if git_identity_auto_configured:
+        lines.append(f"- git identity: auto-configured local identity ({git_identity_detail})")
+    else:
+        lines.append(f"- git identity: {git_identity_detail}")
     if not git_identity_ok:
         problems.append(
-            "git identity missing: configure `git config --global user.name \"Your Name\"` and "
+            "git identity missing: automatic local setup failed; configure `git config --global user.name \"Your Name\"` and "
             "`git config --global user.email \"you@example.com\"`"
         )
 
@@ -490,11 +506,20 @@ async def _run_daemon(
         f"ready={'yes' if inference_runtime.ready else 'no'}",
         hooks=hooks,
     )
-    git_identity_ok, git_identity_detail = git_identity_status(repo_root())
+    git_identity_name = _preferred_git_identity_name(root)
+    git_identity_ok, git_identity_detail, git_identity_auto_configured = ensure_local_git_identity(
+        repo_root(),
+        identity_name=git_identity_name,
+    )
+    if git_identity_ok and git_identity_auto_configured:
+        _emit_runtime_log(
+            f"git identity: auto-configured local identity ({git_identity_detail})",
+            hooks=hooks,
+        )
     if not git_identity_ok:
         _emit_runtime_log(f"git identity: {git_identity_detail}", level="warn", stderr=True, hooks=hooks)
         _emit_runtime_log(
-            "operator request: configure git identity for commit attribution "
+            "operator request: automatic local git identity setup failed; configure git identity for commit attribution "
             "(`git config --global user.name \"Your Name\"` + "
             "`git config --global user.email \"you@example.com\"`, "
             "or repo-local `git config user.name ...` + `git config user.email ...`).",
@@ -526,7 +551,7 @@ async def _run_daemon(
     _emit_runtime_log("Daemon started. Press Ctrl+C to stop.", hooks=hooks)
 
     start = time.monotonic()
-    heartbeat = asyncio.create_task(_heartbeat_loop(args, hooks=hooks))
+    heartbeat = asyncio.create_task(_heartbeat_loop(args, hooks=hooks, identity_name=git_identity_name))
     update_check = asyncio.create_task(_periodic_update_check_loop(hooks=hooks))
     reconnect_attempt = 0
     error_burst_count = 0
@@ -1277,7 +1302,12 @@ async def _poll_new_messages(client, seen_ids: set[bytes], seen_order: deque[byt
     return new_items
 
 
-async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | None = None) -> None:
+async def _heartbeat_loop(
+    args: argparse.Namespace,
+    *,
+    hooks: RuntimeHooks | None = None,
+    identity_name: str = "",
+) -> None:
     first_tick = True
     last_autocommit_error = ""
     last_operator_request = ""
@@ -1289,6 +1319,7 @@ async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | Non
             auto_commit_pending,
             repo_root(),
             message="Heartbeat auto-commit: capture pending workspace changes",
+            identity_name=identity_name,
         )
         if result.committed:
             tail = f" ({result.commit})" if result.commit else ""
@@ -1309,7 +1340,7 @@ async def _heartbeat_loop(args: argparse.Namespace, *, hooks: RuntimeHooks | Non
                 )
             if _is_git_identity_error(result.summary):
                 request = (
-                    "operator request: please configure git identity for commit attribution "
+                    "operator request: automatic local git identity setup failed; please configure git identity for commit attribution "
                     "(`git config --global user.name \"Your Name\"` + "
                     "`git config --global user.email \"you@example.com\"`, "
                     "or repo-local `git config user.name ...` + `git config user.email ...`)."

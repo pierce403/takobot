@@ -33,7 +33,7 @@ from .config import TakoConfig, explain_tako_toml, load_tako_toml, set_updates_a
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
-from .git_safety import assert_not_tracked, auto_commit_pending, git_identity_status, panic_check_runtime_secrets
+from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import (
     InferenceRuntime,
     discover_inference_runtime,
@@ -824,7 +824,17 @@ class TakoTerminalApp(App[None]):
         xmtp_import_ok, xmtp_import_status = probe_xmtp_import()
         web3_import_ok = importlib.util.find_spec("web3") is not None
         textual_import_ok = importlib.util.find_spec("textual") is not None
-        git_identity_ok, git_identity_detail = git_identity_status(repo_root())
+        git_identity_ok, git_identity_detail, git_identity_auto_configured = ensure_local_git_identity(
+            repo_root(),
+            identity_name=self.identity_name,
+        )
+        if git_identity_ok and git_identity_auto_configured:
+            self._add_activity("git", f"identity auto-configured ({git_identity_detail})")
+            self._record_event(
+                "git.identity.autoconfigured",
+                f"Git identity auto-configured: {git_identity_detail}",
+                source="runtime",
+            )
 
         self.health_summary = {
             "instance_kind": self.instance_kind,
@@ -842,6 +852,7 @@ class TakoTerminalApp(App[None]):
             "textual_import": _yes_no(textual_import_ok),
             "git_identity_configured": _yes_no(git_identity_ok),
             "git_identity_status": git_identity_detail,
+            "git_identity_auto_configured": _yes_no(git_identity_auto_configured),
             "dns_xmtp": _yes_no(dns_xmtp_ok),
             "python": platform.python_version(),
         }
@@ -917,7 +928,7 @@ class TakoTerminalApp(App[None]):
         if not git_identity_ok:
             self._request_operator_configuration(
                 key="git.identity",
-                reason="could you please configure git `user.name` and `user.email` for clean commit attribution?",
+                reason="I couldn't auto-configure git identity for clean commit attribution; could you please configure `user.name` and `user.email` manually?",
                 next_steps=[
                     "run `git config --global user.name \"Your Name\"`",
                     "run `git config --global user.email \"you@example.com\"`",
@@ -1965,6 +1976,7 @@ class TakoTerminalApp(App[None]):
             auto_commit_pending,
             repo_root(),
             message="Heartbeat auto-commit: capture pending workspace changes",
+            identity_name=self.identity_name,
         )
         if result.committed:
             commit_ref = result.commit or "unknown"
@@ -1994,7 +2006,7 @@ class TakoTerminalApp(App[None]):
         if not result.ok and _is_git_identity_error(result.summary):
             self._request_operator_configuration(
                 key="git.identity",
-                reason="could you please configure git `user.name` and `user.email` so commits use your preferred identity?",
+                reason="I couldn't auto-configure git identity for heartbeat commits; could you please configure `user.name` and `user.email` manually?",
                 next_steps=[
                     "run `git config --global user.name \"Your Name\"`",
                     "run `git config --global user.email \"you@example.com\"`",
@@ -3903,7 +3915,7 @@ def _type2_recommendation(event_type: str, message: str) -> str:
     if "xmtp import unavailable" in text or "no module named 'xmtp'" in text:
         return "XMTP dependency is missing. Install `takobot` (or `xmtp`) into `.venv`, then retry pairing/runtime startup."
     if "user.name" in text or "user.email" in text or "author identity unknown" in text:
-        return "Configure git identity (`git config --global user.name ...` and `git config --global user.email ...`) so heartbeat auto-commit can run."
+        return "Git identity setup failed. Takobot auto-configures repo-local identity from workspace name; if this persists, set `git config user.name ...` and `git config user.email ...`."
     if "dns lookup for xmtp" in text:
         return "Check network/DNS egress for XMTP hosts, then retry pairing or runtime startup."
     if "runtime crashed" in text or "runtime.crash" in kind:

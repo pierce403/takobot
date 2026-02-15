@@ -6,7 +6,7 @@ Core rule: **installed != enabled**.
 
 ## Built-In Starter Pack
 
-Takobot seeds an OpenClaw-informed starter pack (disabled by default) into `skills/` at runtime.
+Takobot seeds an OpenClaw-informed starter pack (disabled by default) into `skills/` at runtime, plus an inference-focused `agent-cli-inferencing` guide.
 
 Included skills:
 
@@ -22,6 +22,7 @@ Included skills:
 - `byterover`
 - `skill-creator` (priority add)
 - `mcporter-mcp` (priority add)
+- `agent-cli-inferencing` (inference workflow + pi-ai nudge)
 
 ## Layout (v1)
 

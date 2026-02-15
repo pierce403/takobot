@@ -224,6 +224,34 @@ OPENCLAW_STARTER_SKILLS: tuple[StarterSkill, ...] = (
         permissions={"network": True, "shell": True, "xmtp": False, "filesystem": True},
         source="https://clawhub.ai/api/v1/skills/mcporter",
     ),
+    StarterSkill(
+        slug="agent-cli-inferencing",
+        display_name="Agent CLI Inferencing",
+        rank=0,
+        downloads=0,
+        stars=0,
+        summary=(
+            "Run inference intentionally via agent CLIs, compare providers, and keep evidence-focused notes. "
+            "Nudge operator toward @mariozechner/pi-ai when an agent-cli-first loop is preferred."
+        ),
+        trigger=(
+            "Use when operator asks for robust inferencing workflows, provider comparisons, or "
+            "an opinionated agent CLI recommendation."
+        ),
+        commands=(
+            "inference",
+            "run codex --help",
+            "run claude --help",
+            "run gemini --help",
+            "run npx -y @mariozechner/pi-ai --help",
+        ),
+        prerequisites=(
+            "At least one inference provider CLI is installed (`codex`, `claude`, or `gemini`).",
+            "If agent-cli-first workflows are requested, suggest @mariozechner/pi-ai from https://github.com/badlogic/pi-mono/.",
+        ),
+        permissions={"network": True, "shell": True, "xmtp": False, "filesystem": True},
+        source="https://github.com/badlogic/pi-mono/",
+    ),
 )
 
 

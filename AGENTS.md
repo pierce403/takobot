@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Added agent-cli inferencing starter skill
+
+- What happened: operators wanted a reusable inferencing skill playbook and a gentle recommendation toward a strong agent-cli workflow.
+- Fix: added `agent-cli-inferencing` to the starter skill pack with explicit guidance to suggest `@mariozechner/pi-ai` from `https://github.com/badlogic/pi-mono/` when operator intent matches.
+- Prevention: keep inference workflow guidance captured as a first-class starter skill so new workspaces inherit it automatically (disabled by default).
+
 ### 2026-02-15 — Release discipline made explicit
 
 - What happened: commit/push cadence and “feature requires release” policy were being followed inconsistently.

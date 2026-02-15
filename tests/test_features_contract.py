@@ -263,6 +263,14 @@ def _probe_starter_skills() -> bool:
                 return False
             if bool(installed[key].get("enabled")):
                 return False
+        pi_skill = workspace / "skills" / "agent-cli-inferencing" / "playbook.md"
+        if not pi_skill.exists():
+            return False
+        pi_text = pi_skill.read_text(encoding="utf-8")
+        if "@mariozechner/pi-ai" not in pi_text:
+            return False
+        if "github.com/badlogic/pi-mono" not in pi_text:
+            return False
         return True
 
 

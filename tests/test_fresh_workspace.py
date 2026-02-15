@@ -78,6 +78,7 @@ class TestFreshWorkspace(unittest.TestCase):
         seeded = seed_openclaw_starter_skills(self.workspace, registry_path=self.registry_path)
         total = len(seeded.created_skills) + len(seeded.existing_skills)
         self.assertEqual(len(OPENCLAW_STARTER_SKILLS), total)
+        self.assertIn("agent-cli-inferencing", {skill.slug for skill in OPENCLAW_STARTER_SKILLS})
 
         second_seed = seed_openclaw_starter_skills(self.workspace, registry_path=self.registry_path)
         self.assertEqual(0, len(second_seed.created_skills))
@@ -99,6 +100,11 @@ class TestFreshWorkspace(unittest.TestCase):
             key = f"skill:{skill.slug}"
             self.assertIn(key, installed, f"missing registry entry {key}")
             self.assertFalse(bool(installed[key].get("enabled")), f"{key} should remain disabled")
+
+        pi_skill = self.workspace / "skills" / "agent-cli-inferencing" / "playbook.md"
+        pi_text = pi_skill.read_text(encoding="utf-8")
+        self.assertIn("@mariozechner/pi-ai", pi_text)
+        self.assertIn("github.com/badlogic/pi-mono", pi_text)
 
     def test_draft_skill_and_tool_create_disabled_extensions(self) -> None:
         skill = create_draft_extension(

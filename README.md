@@ -5,6 +5,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Inference-provider discovery with ordered fallback (`pi`, Codex, Claude, Gemini) and key-source detection
+- Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
@@ -89,6 +90,8 @@ Runtime-only (ignored):
 - `.tako/operator.json` (operator imprint metadata)
 - `.tako/logs/` (runtime and terminal logs)
 - `.tako/tmp/` (workspace-local temp files used by inference and bootstrap fallback)
+- `.tako/nvm/` (workspace-local Node runtime via nvm when system Node is unavailable)
+- `.tako/npm-cache/` (workspace-local npm cache for tool installs)
 - `.tako/xmtp-db/` (local XMTP DB)
 - `.tako/state/**` (runtime state: heartbeat/cognition/etc)
 - `.tako/quarantine/**` (download quarantine for skills/tools)
@@ -98,7 +101,7 @@ Runtime-only (ignored):
 
 - Creates a local Python virtual environment in `.venv/`.
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
-- When `npm` is available, installs a local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) for inference compatibility with OpenClaw’s stack.
+- Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing, bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
 - If initial git commit is blocked by missing identity, bootstrap sets repo-local fallback identity from `workspace.name` (email format: `<name>.tako.eth@xmtp.mx`) and retries.

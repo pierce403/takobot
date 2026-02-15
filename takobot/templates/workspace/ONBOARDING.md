@@ -11,6 +11,7 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 
 - [ ] Health check ran (workspace + runtime dirs + lock).
 - [ ] Inference runtime discovered (Codex / Claude / Gemini CLI if installed).
+- [ ] Pi runtime is installed by default under `.tako/pi/node` (and `.tako/nvm` exists if local Node bootstrap was needed).
 - [ ] Daily log created for today in `memory/dailies/YYYY-MM-DD.md`.
 - [ ] DOSE engine initialized (`.tako/state/dose.json`) and visible in the UI.
 - [ ] Productivity folders exist (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`).

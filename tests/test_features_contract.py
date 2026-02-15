@@ -73,9 +73,12 @@ def _probe_setup_script_contract() -> bool:
     required = (
         "git init -b main",
         "launch: no interactive TTY detected; starting command-line daemon mode",
-        "python -m takobot run",
+        "-m takobot run",
         "materialize_workspace",
         "interactive_tty_available",
+        "NVM_VERSION=",
+        "bootstrapping workspace-local nvm",
+        "--cache \"$npm_cache\"",
     )
     return all(token in text for token in required)
 

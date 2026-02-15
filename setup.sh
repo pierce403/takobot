@@ -10,6 +10,7 @@ set -euo pipefail
 ENGINE_PYPI_NAME="takobot"
 ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/takobot.git"
 PI_PACKAGE_VERSION="0.52.12"
+NVM_VERSION="v0.40.1"
 
 WORKDIR="$(pwd -P)"
 VENV_DIR="$WORKDIR/.venv"
@@ -114,8 +115,56 @@ install_engine() {
 }
 
 install_pi_runtime() {
+  local tmp_dir="$WORKDIR/.tako/tmp"
+  local npm_cache="$WORKDIR/.tako/npm-cache"
+  local nvm_dir="$WORKDIR/.tako/nvm"
+  mkdir -p "$tmp_dir" "$npm_cache"
+  export TMPDIR="$tmp_dir"
+  export TMP="$tmp_dir"
+  export TEMP="$tmp_dir"
+
   if ! command -v npm >/dev/null 2>&1; then
-    log "inference(pi): npm not found; skipping local pi runtime install"
+    log "inference(pi): npm not found; bootstrapping workspace-local nvm ($NVM_VERSION)"
+    local nvm_tar="$tmp_dir/nvm-${NVM_VERSION#v}.tar.gz"
+    local nvm_unpack="$tmp_dir/nvm-${NVM_VERSION#v}"
+    if [[ ! -s "$nvm_dir/nvm.sh" ]]; then
+      rm -f "$nvm_tar"
+      rm -rf "$nvm_unpack"
+      if ! curl -fsSL "https://github.com/nvm-sh/nvm/archive/refs/tags/$NVM_VERSION.tar.gz" -o "$nvm_tar"; then
+        log "inference(pi): failed to download nvm; continuing with other inference providers"
+        return 0
+      fi
+      if ! tar -xzf "$nvm_tar" -C "$tmp_dir"; then
+        log "inference(pi): failed to unpack nvm archive; continuing with other inference providers"
+        return 0
+      fi
+      rm -rf "$nvm_dir"
+      if ! mv "$nvm_unpack" "$nvm_dir"; then
+        log "inference(pi): failed to place nvm under workspace runtime; continuing with other inference providers"
+        return 0
+      fi
+    fi
+
+    export NVM_DIR="$nvm_dir"
+    # shellcheck disable=SC1090
+    source "$nvm_dir/nvm.sh"
+    if ! nvm install --lts >/dev/null 2>&1; then
+      log "inference(pi): local nvm could not install Node LTS; continuing with other inference providers"
+      return 0
+    fi
+    if ! nvm use --lts >/dev/null 2>&1; then
+      log "inference(pi): local nvm could not activate Node LTS; continuing with other inference providers"
+      return 0
+    fi
+    local node_path
+    node_path="$(command -v node || true)"
+    if [[ -n "$node_path" ]]; then
+      log "inference(pi): using workspace-local node runtime ($node_path)"
+    fi
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    log "inference(pi): npm still unavailable; continuing with other inference providers"
     return 0
   fi
 
@@ -129,7 +178,7 @@ install_pi_runtime() {
 
   log "inference(pi): installing local pi runtime (@mariozechner/pi-ai + @mariozechner/pi-coding-agent)"
   mkdir -p "$prefix"
-  if npm --prefix "$prefix" install --no-audit --no-fund --silent \
+  if npm --cache "$npm_cache" --prefix "$prefix" install --no-audit --no-fund --silent \
     "@mariozechner/pi-ai@$PI_PACKAGE_VERSION" \
     "@mariozechner/pi-coding-agent@$PI_PACKAGE_VERSION" >/dev/null 2>&1; then
     mkdir -p "$WORKDIR/.tako/pi/agent"

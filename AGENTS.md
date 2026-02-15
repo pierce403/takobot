@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — Workspace-local Node runtime for default pi tooling
+
+- What happened: bootstrap previously skipped pi tooling when system `npm` was missing, which left inference setup dependent on host-level Node installs.
+- Fix: setup now bootstraps workspace-local `nvm` + Node under `.tako/nvm` when needed, installs pi tooling by default under `.tako/pi/node`, and keeps npm cache inside `.tako/npm-cache`.
+- Prevention: keep Node toolchain and package artifacts workspace-contained so default inference tooling is reproducible without host-global dependencies.
+
 ### 2026-02-15 — Git identity auto-defaults from bot name
 
 - What happened: startup could repeatedly raise health issues for missing git identity and ask for manual `git config`, even though Takobot already had a known identity name.

@@ -28,7 +28,10 @@ Takobot follows OpenClaw’s pi stack direction by using `@mariozechner/pi-*` ru
 - Bootstrap installs local packages into `.tako/pi/node` (best-effort):
   - `@mariozechner/pi-ai`
   - `@mariozechner/pi-coding-agent`
+- If host Node/npm are missing, bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
+- npm cache is pinned to `.tako/npm-cache` so package-install artifacts stay in workspace.
 - Inference uses local `pi` binary when present (`.tako/pi/node/node_modules/.bin/pi`).
+- Inference prepends workspace-local Node bin from `.tako/nvm/versions/node/*/bin` to `PATH` for pi runs.
 - Runtime sets `PI_CODING_AGENT_DIR=.tako/pi/agent` so pi auth/session writes stay in workspace.
 
 ## pi invocation mode

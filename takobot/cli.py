@@ -302,25 +302,26 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
     problems: list[str] = []
 
     lines.append("- inference doctor: local offline diagnostics")
-    for provider in ("codex", "claude", "gemini"):
+    for provider in ("pi", "codex", "claude", "gemini"):
         status = runtime.statuses.get(provider)
         if status is None:
             continue
 
+        cli_exec = status.cli_path or status.cli_name
         if not status.cli_installed:
-            problems.append(f"{provider} CLI missing from PATH.")
+            problems.append(f"{provider} CLI missing.")
             lines.append(f"- {provider} probe: CLI missing")
             continue
 
-        version_ok, version_detail = _probe_cli_command([status.cli_name, "--version"], timeout_s=7.0)
+        version_ok, version_detail = _probe_cli_command([cli_exec, "--version"], timeout_s=7.0)
         lines.append(f"- {provider} probe: --version {'ok' if version_ok else 'failed'} ({version_detail})")
         if not version_ok:
             problems.append(f"{provider} CLI appears installed but --version failed: {version_detail}")
 
         if provider == "codex":
-            command_probe = ["codex", "exec", "--help"]
+            command_probe = [cli_exec, "exec", "--help"]
         else:
-            command_probe = [status.cli_name, "--help"]
+            command_probe = [cli_exec, "--help"]
         command_ok, command_detail = _probe_cli_command(command_probe, timeout_s=7.0)
         lines.append(
             f"- {provider} probe: {' '.join(command_probe[1:])} "
@@ -349,6 +350,8 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
 
 
 def _provider_auth_problem(provider: str) -> str:
+    if provider == "pi":
+        return "pi auth missing: configure pi auth profile or set one supported API key."
     if provider == "codex":
         return "codex auth missing: run `codex login` or set `OPENAI_API_KEY`."
     if provider == "claude":

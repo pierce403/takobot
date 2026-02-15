@@ -47,3 +47,4 @@ Directories:
 
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`), auto-configuring missing local git identity from bot name when needed.
 - Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`); when enabled, app mode auto-applies updates and restarts.
+- Node tooling for inference is workspace-contained: pi packages install under `.tako/pi/node`, and if host Node is missing, Tako can bootstrap local `nvm`/Node under `.tako/nvm`.

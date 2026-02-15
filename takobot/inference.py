@@ -273,6 +273,7 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
     else:
         cli_path = shutil.which(cli_name)
     cli_installed = cli_path is not None
+    node_ready = _pi_node_available()
 
     for env_var in PI_KEY_ENV_VARS:
         env_key = _env_non_empty(env, env_var)
@@ -287,8 +288,12 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
                     key_env_var=env_var,
                     key_source=f"env:{env_var}",
                     key_present=True,
-                    ready=cli_installed,
-                    note="pi runtime detected; key sourced from environment.",
+                    ready=cli_installed and node_ready,
+                    note=(
+                        "pi runtime detected; key sourced from environment."
+                        if node_ready
+                        else "pi CLI detected but node runtime is unavailable."
+                    ),
                 ),
                 env_key,
             )
@@ -312,8 +317,12 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
                     key_env_var=None,
                     key_source=f"file:{_tilde_path(path)}",
                     key_present=True,
-                    ready=cli_installed,
-                    note="pi auth profile detected.",
+                    ready=cli_installed and node_ready,
+                    note=(
+                        "pi auth profile detected."
+                        if node_ready
+                        else "pi auth profile detected but node runtime is unavailable."
+                    ),
                 ),
                 None,
             )
@@ -329,7 +338,11 @@ def _detect_pi(home: Path, env: os._Environ[str]) -> tuple[InferenceProviderStat
             key_source=None,
             key_present=False,
             ready=False,
-            note="install pi runtime and configure auth to enable.",
+            note=(
+                "install pi runtime and configure auth to enable."
+                if node_ready
+                else "node runtime missing; setup will install workspace-local nvm/node before pi runtime."
+            ),
         ),
         None,
     )
@@ -1017,6 +1030,11 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
         pi_agent_dir = _workspace_pi_agent_dir()
         _ensure_workspace_pi_auth(pi_agent_dir)
         env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
+        node_bin_dir = _workspace_node_bin_dir()
+        if node_bin_dir is not None:
+            current_path = env.get("PATH", "")
+            env["PATH"] = f"{node_bin_dir}{os.pathsep}{current_path}" if current_path else str(node_bin_dir)
+            env["NVM_DIR"] = str(_workspace_nvm_dir())
     return env
 
 
@@ -1037,6 +1055,45 @@ def _workspace_pi_agent_dir() -> Path:
     agent_dir = paths.root / "pi" / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
     return agent_dir
+
+
+def _workspace_nvm_dir() -> Path:
+    paths = ensure_runtime_dirs(runtime_paths())
+    return paths.root / "nvm"
+
+
+def _workspace_node_bin_dir() -> Path | None:
+    nvm_versions = _workspace_nvm_dir() / "versions" / "node"
+    if not nvm_versions.exists():
+        return None
+
+    node_name = "node.exe" if os.name == "nt" else "node"
+    candidates: list[tuple[tuple[int, ...], Path]] = []
+    for child in nvm_versions.iterdir():
+        if not child.is_dir():
+            continue
+        bin_dir = child / "bin"
+        if not (bin_dir / node_name).exists():
+            continue
+        version = child.name.lstrip("v")
+        parts: list[int] = []
+        for token in version.split("."):
+            if token.isdigit():
+                parts.append(int(token))
+            else:
+                break
+        candidates.append((tuple(parts), bin_dir))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[-1][1]
+
+
+def _pi_node_available() -> bool:
+    if shutil.which("node"):
+        return True
+    return _workspace_node_bin_dir() is not None
 
 
 def _ensure_workspace_pi_auth(agent_dir: Path) -> None:

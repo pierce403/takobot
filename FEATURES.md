@@ -32,13 +32,15 @@
   - Refuses to run unless the directory is empty, or already looks like a Tako workspace (`SOUL.md`, `AGENTS.md`, `MEMORY.md`, `tako.toml`).
   - Creates `.venv/` in the workspace directory.
   - Attempts `pip install --upgrade takobot`. If PyPI install fails and no engine is already present, clones source into `.tako/tmp/src/` and installs from there.
-  - When `npm` is available, installs a local pi runtime under `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) for inference compatibility.
+  - Installs local pi runtime under `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default.
+  - If Node/npm are missing, bootstraps workspace-local `nvm` + Node under `.tako/nvm` and keeps npm cache under `.tako/npm-cache`.
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
   - Launches `.venv/bin/takobot` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
   - Falls back to `.venv/bin/takobot run` (stdout CLI daemon mode) when no interactive TTY is available.
 - **Test Criteria**:
+  - [x] Setup script bootstraps workspace-local nvm/node when npm is missing and keeps npm cache in `.tako/`.
   - [ ] In an empty dir with an interactive TTY, `curl -fsSL https://tako.bot/setup.sh | bash` creates `.venv/`, materializes workspace files, initializes git on `main`, and launches the TUI.
   - [ ] In a non-interactive environment, the same command falls back to stdout daemon mode instead of exiting with a TTY error.
   - [ ] Re-running `setup.sh` is idempotent and does not overwrite edited files.

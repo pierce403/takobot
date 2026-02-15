@@ -779,6 +779,8 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>
                 Invokes Codex inference with sandbox/approval bypass flags so agentic chat reflects real workspace write capability.
               </li>
+              <li>Installs pi runtime by default under <code>.tako/pi/node</code>; if Node/npm are missing, bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
+              <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
               <li>Pins inference subprocess temp output and <code>TMPDIR/TMP/TEMP</code> to <code>.tako/tmp/</code> (workspace-local only).</li>
               <li>
                 Keeps inference execution gated until the first interactive chat turn, so startup remains deterministic.

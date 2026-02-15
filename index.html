@@ -846,6 +846,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, and plain-text chat stays available there.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>
+              <li>TUI input supports history recall: <code>↑</code>/<code>↓</code> cycles previously submitted local messages.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">

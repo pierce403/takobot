@@ -18,6 +18,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - Built-in starter skills are auto-seeded into `skills/` (disabled): OpenClaw top-10, priority `skill-creator` + MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
+- TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 
@@ -155,5 +156,6 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - XMTP replies now use a typing indicator when supported by the installed XMTP SDK/runtime.
 - Transcript view is now selectable (read-only text area), so mouse highlight/copy works directly in compatible terminals.
+- Input box supports shell-style history recall (`↑` / `↓`) for previously submitted local messages.
 - Web reads are fetched with the built-in `web` tool and logged into the daily notes stream for traceability.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

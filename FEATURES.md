@@ -103,6 +103,7 @@
   - Terminal update controls expose setting state and toggles: `update auto status|on|off`.
   - Streams in-progress inference output into a scrollable "bubble stream" panel above the input box (Cursor/Claude style).
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
+  - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
   - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.

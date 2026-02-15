@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-15 — TUI input history recall with arrow keys
+
+- What happened: operators expected shell-style input recall in the TUI so repeated prompts/commands do not require retyping.
+- Fix: added in-memory input history in app mode with `Up`/`Down` navigation over previously submitted local messages.
+- Prevention: keep keyboard ergonomics for chat loops explicit in docs/feature tracker and covered by a unit test for history navigation.
+
 ### 2026-02-15 — Added agent-cli inferencing starter skill
 
 - What happened: operators wanted a reusable inferencing skill playbook and a gentle recommendation toward a strong agent-cli workflow.

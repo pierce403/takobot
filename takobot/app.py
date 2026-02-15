@@ -42,6 +42,7 @@ from .inference import (
     stream_inference_prompt_with_fallback,
 )
 from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
+from .input_history import InputHistory
 from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
@@ -87,6 +88,7 @@ ACTIVITY_LOG_MAX = 80
 TRANSCRIPT_LOG_MAX = 2000
 STREAM_BOX_MAX_CHARS = 8000
 STREAM_BOX_MAX_STATUS_LINES = 40
+INPUT_HISTORY_MAX = 200
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
@@ -297,6 +299,7 @@ class TakoTerminalApp(App[None]):
         self.prompt_mode: str | None = None
         self.prompt_step = 0
         self.prompt_values: list[str] = []
+        self.input_history = InputHistory(max_items=INPUT_HISTORY_MAX)
 
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
@@ -443,15 +446,33 @@ class TakoTerminalApp(App[None]):
         self.input_box.insert_text_at_cursor(cleaned)
         self._add_activity("clipboard", "sanitized pasted text")
 
+    def on_key(self, event: events.Key) -> None:
+        if event.key not in {"up", "down"}:
+            return
+        if self.input_box.disabled or self.input_box.has_focus is False:
+            return
+
+        if event.key == "up":
+            replacement = self.input_history.navigate_up(self.input_box.value)
+        else:
+            replacement = self.input_history.navigate_down()
+        if replacement is None:
+            return
+
+        event.stop()
+        self.input_box.value = replacement
+        self.input_box.cursor_position = len(replacement)
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         raw_value = event.value
         text = _sanitize(event.value)
-        event.input.value = ""
         if not text:
             if raw_value and _contains_terminal_control(raw_value):
                 self._write_system("ignored terminal control-sequence noise; input focus restored.")
             self._ensure_input_focus()
             return
+        self.input_history.add(text)
+        event.input.value = ""
 
         self._write_user(text)
         self._set_indicator("thinking")

@@ -12,6 +12,9 @@ dist/
 # Runtime state (never commit)
 .tako/
 
+# Ephemeral code worktrees/clones used by tooling
+code/
+
 # Local databases (e.g., XMTP)
 *.db3
 *.db3-wal

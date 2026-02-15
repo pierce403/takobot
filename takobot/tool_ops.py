@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from pathlib import Path
 import subprocess
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -87,6 +88,7 @@ def run_local_command(
     *,
     timeout_s: float = COMMAND_TIMEOUT_S,
     output_limit: int = COMMAND_OUTPUT_LIMIT,
+    cwd: str | Path | None = None,
 ) -> CommandResult:
     cmd = command.strip()
     if not cmd:
@@ -95,12 +97,14 @@ def run_local_command(
         return CommandResult(False, cmd, -1, "", "multi-line command input is not allowed")
 
     try:
+        run_cwd = str(cwd) if cwd is not None else None
         proc = subprocess.run(
             ["bash", "-lc", cmd],
             capture_output=True,
             text=True,
             timeout=timeout_s,
             check=False,
+            cwd=run_cwd,
         )
     except Exception as exc:  # noqa: BLE001
         return CommandResult(False, cmd, -1, "", _short(str(exc), 220))

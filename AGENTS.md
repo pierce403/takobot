@@ -67,6 +67,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-14 — Code-work isolation + config identity alignment
+
+- What happened: code operations could run in workspace root, identity naming lived mainly in `SOUL.md`, and operators wanted clearer `tako.toml` guidance/security defaults.
+- Fix: moved `run` command working directory to git-ignored `code/`, synchronized `workspace.name` with identity rename flows, removed non-HTTPS download option, and added `config` explainers for TOML options.
+- Prevention: keep executable code work isolated from workspace docs/memory and keep identity/config as a synced pair.
+
 ### 2026-02-14 — Thinking visibility + XMTP typing signals
 
 - What happened: operators wanted a clear in-app signal for “thinking now,” plus outbound XMTP typing cues while replies are being emitted.

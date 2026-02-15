@@ -24,11 +24,11 @@ from typing import Any
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Input, RichLog, Static, TextArea
+from textual.widgets import Footer, Input, Static, TextArea
 
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
-from .config import TakoConfig, load_tako_toml, set_updates_auto_apply
+from .config import TakoConfig, explain_tako_toml, load_tako_toml, set_updates_auto_apply, set_workspace_name
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
@@ -46,7 +46,7 @@ from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
 from .pairing import clear_pending
-from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
+from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
 from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
@@ -206,6 +206,7 @@ class TakoTerminalApp(App[None]):
         self.safe_mode = False
 
         self.paths = None
+        self.code_dir: Path | None = None
         self.wallet_key = ""
         self.db_encryption_key = ""
         self.address = ""
@@ -303,7 +304,7 @@ class TakoTerminalApp(App[None]):
         self.stream_last_render_at = 0.0
 
         self.status_bar: Static
-        self.transcript: RichLog
+        self.transcript: TextArea
         self.stream_box: TextArea
         self.input_box: Input
         self.octo_panel: Static
@@ -315,7 +316,15 @@ class TakoTerminalApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Static("", id="status-bar")
         with Horizontal(id="main"):
-            yield RichLog(id="transcript", wrap=True, highlight=False, markup=False, auto_scroll=True)
+            yield TextArea(
+                "",
+                id="transcript",
+                read_only=True,
+                show_cursor=False,
+                highlight_cursor_line=False,
+                show_line_numbers=False,
+                language=None,
+            )
             with Vertical(id="sidebar"):
                 yield Static("", id="panel-octo")
                 yield Static("", id="panel-tasks", classes="panel")
@@ -336,7 +345,7 @@ class TakoTerminalApp(App[None]):
 
     def on_mount(self) -> None:
         self.status_bar = self.query_one("#status-bar", Static)
-        self.transcript = self.query_one("#transcript", RichLog)
+        self.transcript = self.query_one("#transcript", TextArea)
         self.stream_box = self.query_one("#stream-box", TextArea)
         self.input_box = self.query_one("#input-box", Input)
         self.octo_panel = self.query_one("#panel-octo", Static)
@@ -462,6 +471,8 @@ class TakoTerminalApp(App[None]):
             self.paths = ensure_runtime_dirs(runtime_paths())
             self.app_log_path = self.paths.logs_dir / "app.log"
             root = repo_root()
+            self.code_dir = ensure_code_dir(root)
+            self._add_activity("workspace", f"code dir ready: {self.code_dir}")
 
             cfg, warn = load_tako_toml(root / "tako.toml")
             self.config = cfg
@@ -548,6 +559,26 @@ class TakoTerminalApp(App[None]):
             self.quarantine_root.mkdir(parents=True, exist_ok=True)
 
             self.identity_name, self.identity_role = read_identity()
+            config_path = root / "tako.toml"
+            configured_name = _sanitize_for_display(str(self.config.workspace.name or "")).strip()
+            if configured_name.lower() in {"tako-workspace", "takobot-workspace"}:
+                configured_name = ""
+            if configured_name and configured_name != self.identity_name:
+                previous_name = self.identity_name
+                self.identity_name = configured_name
+                self.identity_name, self.identity_role = update_identity(self.identity_name, self.identity_role)
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"Identity name synced from tako.toml: {previous_name} -> {self.identity_name}",
+                )
+                self._add_activity("identity", f"name synced from config ({self.identity_name})")
+            elif self.identity_name:
+                ok, _summary = set_workspace_name(config_path, self.identity_name)
+                if ok:
+                    refreshed_cfg, _warn2 = load_tako_toml(config_path)
+                    self.config = refreshed_cfg
+                    self._add_activity("config", "workspace.name synced from identity")
             self.instance_kind = (
                 "established"
                 if keys_preexisting or operator_preexisting or xmtp_db_preexisting or state_preexisting
@@ -1265,6 +1296,12 @@ class TakoTerminalApp(App[None]):
 
         self.identity_role = text or self.identity_role
         self.identity_name, self.identity_role = update_identity(self.identity_name, self.identity_role)
+        ok_name, summary_name = set_workspace_name(repo_root() / "tako.toml", self.identity_name)
+        if not ok_name:
+            self._write_system(f"name sync warning: {summary_name}")
+        else:
+            refreshed_cfg, _warn2 = load_tako_toml(repo_root() / "tako.toml")
+            self.config = refreshed_cfg
         append_daily_note(
             daily_root(),
             date.today(),
@@ -1925,6 +1962,9 @@ class TakoTerminalApp(App[None]):
 
     async def _handle_running_input(self, text: str) -> None:
         if not _looks_like_local_command(text):
+            if _looks_like_tako_toml_question(text):
+                self._write_tako(explain_tako_toml(self.config, path=repo_root() / "tako.toml"))
+                return
             if await self._maybe_handle_inline_name_change(text):
                 return
             reply = await self._local_chat_reply(text)
@@ -1934,8 +1974,9 @@ class TakoTerminalApp(App[None]):
         cmd, rest = _parse_command(text)
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, health, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
-                "update controls: `update`, `update check`, `update auto status`, `update auto on`, `update auto off`"
+                "local cockpit commands: help, status, health, config, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "update controls: `update`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
+                "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
             return
 
@@ -1973,6 +2014,7 @@ class TakoTerminalApp(App[None]):
                 f"dose_label: {self.dose_label}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
+                f"code_dir: {self.code_dir or code_root(repo_root())}\n"
                 f"tako_address: {self.address}"
             )
             return
@@ -1985,6 +2027,10 @@ class TakoTerminalApp(App[None]):
             for key in sorted(self.health_summary):
                 lines.append(f"{key}: {self.health_summary[key]}")
             self._write_tako("\n".join(lines))
+            return
+
+        if cmd in {"config", "toml"}:
+            self._write_tako(explain_tako_toml(self.config, path=repo_root() / "tako.toml"))
             return
 
         if cmd == "dose":
@@ -2586,7 +2632,6 @@ class TakoTerminalApp(App[None]):
                         url,
                         quarantine_root=self.quarantine_root,
                         max_bytes=int(self.config.security.download.max_bytes),
-                        allow_non_https=bool(self.config.security.download.allow_non_https),
                         allowlist_domains=list(self.config.security.download.allowlist_domains),
                     )
                     qid = qdir.name
@@ -2949,11 +2994,12 @@ class TakoTerminalApp(App[None]):
             if not command:
                 self._write_tako("usage: `run <shell command>`")
                 return
+            workdir = self.code_dir or ensure_code_dir(repo_root())
             self._add_activity("tool:run", f"executing `{command}`")
             previous_indicator = self.indicator
             self._set_indicator("acting")
             try:
-                result = await asyncio.to_thread(run_local_command, command)
+                result = await asyncio.to_thread(run_local_command, command, cwd=workdir)
             finally:
                 if self.indicator == "acting":
                     self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
@@ -2961,7 +3007,12 @@ class TakoTerminalApp(App[None]):
                 self._add_activity("tool:run", f"failed: {result.error}")
                 self._write_tako(f"run failed: {result.error}")
                 return
-            self._write_tako(f"run: {result.command}\nexit_code: {result.exit_code}\n{result.output}")
+            self._write_tako(
+                f"run: {result.command}\n"
+                f"cwd: {workdir}\n"
+                f"exit_code: {result.exit_code}\n"
+                f"{result.output}"
+            )
             self._add_activity("tool:run", f"finished exit={result.exit_code}")
             return
 
@@ -3176,6 +3227,12 @@ class TakoTerminalApp(App[None]):
 
         self.identity_name = parsed_name
         self.identity_name, self.identity_role = update_identity(self.identity_name, self.identity_role)
+        ok_name, summary_name = set_workspace_name(repo_root() / "tako.toml", self.identity_name)
+        if not ok_name:
+            self._write_system(f"name sync warning: {summary_name}")
+        else:
+            refreshed_cfg, _warn2 = load_tako_toml(repo_root() / "tako.toml")
+            self.config = refreshed_cfg
         append_daily_note(
             daily_root(),
             date.today(),
@@ -3419,23 +3476,26 @@ class TakoTerminalApp(App[None]):
     def _write_tako(self, text: str) -> None:
         safe = _sanitize_for_display(text)
         line = f"Tako: {safe}"
-        self.transcript_lines.append(line)
-        self.transcript.write(line)
+        self._append_transcript_line(line)
         self._append_app_log("tako", safe)
 
     def _write_user(self, text: str) -> None:
         safe = _sanitize_for_display(text)
         line = f"You: {safe}"
-        self.transcript_lines.append(line)
-        self.transcript.write(line)
+        self._append_transcript_line(line)
         self._append_app_log("user", safe)
 
     def _write_system(self, text: str) -> None:
         safe = _sanitize_for_display(text)
         line = f"System: {safe}"
-        self.transcript_lines.append(line)
-        self.transcript.write(line)
+        self._append_transcript_line(line)
         self._append_app_log("system", safe)
+
+    def _append_transcript_line(self, line: str) -> None:
+        self.transcript_lines.append(line)
+        payload = "\n".join(self.transcript_lines)
+        self.transcript.load_text(payload)
+        self.transcript.scroll_end(animate=False)
 
     def _append_app_log(self, channel: str, message: str) -> None:
         if self.app_log_path is None:
@@ -3631,7 +3691,7 @@ def _looks_like_local_command(text: str) -> bool:
 
     cmd, rest = _parse_command(value)
     tail = rest.strip().lower()
-    if cmd in {"help", "h", "?", "status", "health", "doctor", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
+    if cmd in {"help", "h", "?", "status", "health", "doctor", "config", "toml", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
         return tail == ""
     if cmd == "dose":
         return tail in {"", "show", "status", "calm", "explore", "help", "?"}
@@ -3674,6 +3734,22 @@ def _looks_like_local_command(text: str) -> bool:
     if cmd == "extensions":
         return True
     return False
+
+
+def _looks_like_tako_toml_question(text: str) -> bool:
+    lowered = text.strip().lower()
+    if not lowered:
+        return False
+    toml_hint = "tako.toml" in lowered or "toml" in lowered or "config" in lowered
+    explain_hint = (
+        "option" in lowered
+        or "setting" in lowered
+        or "mean" in lowered
+        or "explain" in lowered
+        or "what is" in lowered
+        or "what does" in lowered
+    )
+    return toml_hint and explain_hint
 
 
 def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_paired: bool) -> str:

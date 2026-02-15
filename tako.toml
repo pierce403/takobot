@@ -1,5 +1,5 @@
 [workspace]
-name = "tako-workspace"
+name = "Tako"
 version = 1
 
 [dose.baseline]
@@ -18,8 +18,6 @@ weekly_review_day = "sun"
 auto_apply = true
 
 [security.download]
-# Default: HTTPS only.
-allow_non_https = false
 # Maximum download size for skill/tool packages (quarantine fetch).
 max_bytes = 15000000
 # Optional allowlist. Empty = allow any https domain.
@@ -28,7 +26,7 @@ allowlist_domains = []
 [security.defaults]
 # Default permissions for enabled workspace code (skills/tools).
 # Installed != enabled; enabled != unrestricted.
-network = false
-shell = false
-xmtp = false
-filesystem = false
+network = true
+shell = true
+xmtp = true
+filesystem = true

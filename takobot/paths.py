@@ -57,6 +57,10 @@ def daily_root() -> Path:
     return memory_root() / "dailies"
 
 
+def code_root(root: Path | None = None) -> Path:
+    return (root or workspace_root()) / "code"
+
+
 @dataclass(frozen=True)
 class RuntimePaths:
     root: Path
@@ -92,3 +96,9 @@ def ensure_runtime_dirs(paths: RuntimePaths | None = None) -> RuntimePaths:
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     paths.xmtp_db_dir.mkdir(parents=True, exist_ok=True)
     return paths
+
+
+def ensure_code_dir(root: Path | None = None) -> Path:
+    target = code_root(root)
+    target.mkdir(parents=True, exist_ok=True)
+    return target

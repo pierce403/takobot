@@ -14,6 +14,7 @@ from datetime import date, datetime, timezone
 from typing import Callable
 
 from . import __version__
+from .config import explain_tako_toml, load_tako_toml, set_workspace_name
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, git_identity_status, panic_check_runtime_secrets
@@ -22,7 +23,7 @@ from .keys import derive_eth_address, load_or_create_keys
 from .locks import instance_lock
 from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .pairing import clear_pending
-from .paths import daily_root, ensure_runtime_dirs, repo_root, runtime_paths
+from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .self_update import run_self_update
 from .soul import read_identity, update_identity
 from .tool_ops import fetch_webpage, run_local_command
@@ -309,6 +310,8 @@ async def _run_daemon(
     # Ensure today’s daily log exists (committed).
     ensure_daily_log(daily_root(), date.today())
     hooks = _hooks_with_log_file(hooks, paths.logs_dir / "runtime.log")
+    code_dir = ensure_code_dir(repo_root())
+    _emit_runtime_log(f"workspace code dir: {code_dir}", hooks=hooks)
 
     try:
         client = await create_client(env, paths.xmtp_db_dir, wallet_key, db_encryption_key)
@@ -631,6 +634,13 @@ async def _handle_incoming_message(
             report += "\n\nProblems:\n" + "\n".join(f"- {p}" for p in problems)
         await convo.send(report)
         return
+    if cmd in {"config", "toml"}:
+        cfg, warn = load_tako_toml(repo_root() / "tako.toml")
+        report = explain_tako_toml(cfg, path=repo_root() / "tako.toml")
+        if warn:
+            report = f"{report}\n\nwarning: {warn}"
+        await convo.send(report)
+        return
     if cmd == "task":
         spec = rest.strip()
         if not spec:
@@ -881,17 +891,19 @@ async def _handle_incoming_message(
         if not command:
             await convo.send("Usage: `run <shell command>`")
             return
-        result = await asyncio.to_thread(run_local_command, command)
+        workdir = ensure_code_dir(repo_root())
+        result = await asyncio.to_thread(run_local_command, command, cwd=workdir)
         append_daily_note(
             daily_root(),
             date.today(),
-            f"Operator ran local command via XMTP: `{command}` (exit={result.exit_code})",
+            f"Operator ran local command via XMTP in `{workdir}`: `{command}` (exit={result.exit_code})",
         )
         if not result.ok and result.error:
             await convo.send(f"command failed before execution: {result.error}")
             return
         await convo.send(
             f"run: {result.command}\n"
+            f"cwd: {workdir}\n"
             f"exit_code: {result.exit_code}\n"
             f"{result.output}"
         )
@@ -950,6 +962,9 @@ async def _maybe_handle_operator_identity_update(
         return True
 
     update_identity(parsed, current_role)
+    ok_name, summary_name = set_workspace_name(repo_root() / "tako.toml", parsed)
+    if not ok_name:
+        _emit_runtime_log(f"name sync warning: {summary_name}", level="warn", hooks=hooks)
     append_daily_note(daily_root(), date.today(), f"Operator renamed via XMTP: {current_name} -> {parsed}")
     await convo.send(f"ink dried. I'll go by `{parsed}` now.")
     return True
@@ -1169,6 +1184,7 @@ def _help_text() -> str:
         "- help\n"
         "- status\n"
         "- doctor\n"
+        "- config (explain `tako.toml` options)\n"
         "- task <title> (optional: | project=... | area=... | due=YYYY-MM-DD)\n"
         "- tasks (or `tasks project <name>` / `tasks area <name>` / `tasks due YYYY-MM-DD`)\n"
         "- done <task-id>\n"
@@ -1179,7 +1195,7 @@ def _help_text() -> str:
         "- promote <durable note>\n"
         "- update (or `update check`)\n"
         "- web <https://...>\n"
-        "- run <shell command>\n"
+        "- run <shell command> (runs in `code/`)\n"
         "- reimprint (operator-only)\n"
         "- plain text chat (inference-backed when available)\n"
     )
@@ -1195,7 +1211,7 @@ def _looks_like_command(text: str) -> bool:
     cmd, rest = _parse_command(value)
     tail = rest.strip()
     tail_lower = tail.lower()
-    if cmd in {"help", "h", "?", "status", "doctor"}:
+    if cmd in {"help", "h", "?", "status", "doctor", "config", "toml"}:
         return tail == ""
     if cmd == "task":
         return True
@@ -1224,6 +1240,22 @@ def _looks_like_command(text: str) -> bool:
     return False
 
 
+def _looks_like_tako_toml_question(text: str) -> bool:
+    lowered = text.strip().lower()
+    if not lowered:
+        return False
+    toml_hint = "tako.toml" in lowered or "toml" in lowered or "config" in lowered
+    explain_hint = (
+        "option" in lowered
+        or "setting" in lowered
+        or "mean" in lowered
+        or "explain" in lowered
+        or "what is" in lowered
+        or "what does" in lowered
+    )
+    return toml_hint and explain_hint
+
+
 async def _chat_reply(
     text: str,
     inference_runtime: InferenceRuntime,
@@ -1232,6 +1264,13 @@ async def _chat_reply(
     operator_paired: bool,
     hooks: RuntimeHooks | None,
 ) -> str:
+    if _looks_like_tako_toml_question(text):
+        cfg, warn = load_tako_toml(repo_root() / "tako.toml")
+        explained = explain_tako_toml(cfg, path=repo_root() / "tako.toml")
+        if warn:
+            explained = f"{explained}\n\nwarning: {warn}"
+        return explained
+
     fallback = _fallback_chat_reply(is_operator=is_operator, operator_paired=operator_paired)
     if not inference_runtime.ready:
         return fallback

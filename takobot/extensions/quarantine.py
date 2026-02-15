@@ -72,7 +72,6 @@ def fetch_to_quarantine(
     *,
     quarantine_root: Path,
     max_bytes: int,
-    allow_non_https: bool,
     allowlist_domains: list[str] | None,
 ) -> tuple[Path, QuarantineProvenance]:
     target = (url or "").strip()
@@ -82,7 +81,7 @@ def fetch_to_quarantine(
     parsed = urllib.parse.urlparse(target)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise QuarantineError("URL must be http(s) with a host")
-    if not allow_non_https and parsed.scheme != "https":
+    if parsed.scheme != "https":
         raise QuarantineError("non-HTTPS downloads are disabled by policy")
 
     host = parsed.netloc.split("@")[-1]

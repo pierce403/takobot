@@ -50,6 +50,22 @@ def git_identity_status(repo_root: Path) -> tuple[bool, str]:
     return False, "git user.email is not configured"
 
 
+def _ensure_local_git_identity(repo_root: Path) -> tuple[bool, str, bool]:
+    ok, detail = git_identity_status(repo_root)
+    if ok:
+        return True, detail, False
+    set_name = _run_git(repo_root, "config", "user.name", "Takobot")
+    if set_name.returncode != 0:
+        err = " ".join(set_name.stderr.strip().split()) or f"exit={set_name.returncode}"
+        return False, f"failed to set local git user.name: {err}", False
+    set_email = _run_git(repo_root, "config", "user.email", "takobot@local")
+    if set_email.returncode != 0:
+        err = " ".join(set_email.stderr.strip().split()) or f"exit={set_email.returncode}"
+        return False, f"failed to set local git user.email: {err}", False
+    ok2, detail2 = git_identity_status(repo_root)
+    return ok2, detail2, True
+
+
 def assert_not_tracked(repo_root: Path, path: Path) -> None:
     if not is_git_repo(repo_root):
         return
@@ -99,9 +115,33 @@ def auto_commit_pending(repo_root: Path, *, message: str) -> GitAutoCommitResult
         detail = " ".join(commit.stderr.strip().split()) or "commit failed"
         detail_lower = detail.lower()
         if "author identity unknown" in detail_lower or "unable to auto-detect email address" in detail_lower:
-            _, identity = git_identity_status(repo_root)
-            detail = identity
+            ensured, ensured_detail, changed = _ensure_local_git_identity(repo_root)
+            if not ensured:
+                return GitAutoCommitResult(False, False, f"auto-commit failed: {ensured_detail}")
+            retry = _run_git(repo_root, "commit", "-m", message)
+            if retry.returncode != 0:
+                retry_detail = " ".join(retry.stderr.strip().split()) or "commit failed"
+                return GitAutoCommitResult(False, False, f"auto-commit failed: {retry_detail}")
+            post_retry_status = _run_git(repo_root, "status", "--porcelain")
+            if post_retry_status.returncode != 0:
+                detail_status = " ".join(post_retry_status.stderr.strip().split()) or f"exit={post_retry_status.returncode}"
+                return GitAutoCommitResult(False, False, f"auto-commit verify failed: {detail_status}")
+            if post_retry_status.stdout.strip():
+                return GitAutoCommitResult(False, False, "auto-commit verify failed: pending changes remain after commit")
+            head = _run_git(repo_root, "rev-parse", "--short", "HEAD")
+            sha = head.stdout.strip() if head.returncode == 0 else ""
+            summary = "auto-commit created"
+            if changed:
+                summary = f"auto-commit created (git identity auto-configured: {ensured_detail})"
+            return GitAutoCommitResult(True, True, summary, commit=sha)
         return GitAutoCommitResult(False, False, f"auto-commit failed: {detail}")
+
+    post_status = _run_git(repo_root, "status", "--porcelain")
+    if post_status.returncode != 0:
+        detail_status = " ".join(post_status.stderr.strip().split()) or f"exit={post_status.returncode}"
+        return GitAutoCommitResult(False, False, f"auto-commit verify failed: {detail_status}")
+    if post_status.stdout.strip():
+        return GitAutoCommitResult(False, False, "auto-commit verify failed: pending changes remain after commit")
 
     head = _run_git(repo_root, "rev-parse", "--short", "HEAD")
     sha = head.stdout.strip() if head.returncode == 0 else ""

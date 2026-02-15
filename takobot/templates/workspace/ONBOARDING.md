@@ -19,6 +19,8 @@ This file is the operator’s checklist for bringing a new Tako workspace to a h
 - [ ] If required setup is missing (for example git identity), Tako asks the operator with concrete fix steps.
 - [ ] Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`).
 - [ ] TUI mind indicator animates while thinking/responding; XMTP typing indicators are used when SDK/runtime support exists.
+- [ ] `code/` exists and is git-ignored for repo clones and code work.
+- [ ] `workspace.name` in `tako.toml` matches Tako’s active identity name.
 
 ## Operator Control Channel (XMTP)
 

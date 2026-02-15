@@ -17,6 +17,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - [ ] If required setup is missing (for example git identity), Tako emits an operator request with concrete fix steps.
 - [ ] Auto-update policy is set (`tako.toml` `[updates].auto_apply`), defaulting to `true`.
 - [ ] TUI mind indicator visibly animates during thinking/responding, and XMTP typing indicators appear when supported by runtime SDK.
+- [ ] `code/` exists and is git-ignored for repo clones/code work.
+- [ ] `workspace.name` in `tako.toml` matches Tako’s current identity name.
 - [ ] Skill/tool install pipeline works (quarantine → analyze → install disabled → enable requires operator approval).
 - [ ] `SOUL.md`, `MEMORY.md`, `tako.toml`, and `FEATURES.md` exist and are consistent with current behavior.
 
@@ -48,9 +50,10 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
 - During heartbeat, Tako checks for pending git changes and auto-commits when possible.
-- If heartbeat auto-commit is blocked by missing git identity, Tako asks the operator to configure `user.name`/`user.email` with direct commands.
+- If heartbeat auto-commit is blocked by missing git identity, Tako auto-configures local repo identity (`Takobot <takobot@local>`) and retries commit.
 - During periodic update checks, if `[updates].auto_apply = true`, Tako applies package updates and restarts app mode automatically.
 - During `RUNNING`, Tako keeps a small runtime-only DOSE model (D/O/S/E) ticking on heartbeat and reflecting mode in the UI.
+- During `RUNNING`, `run` command execution uses `code/` as working directory and reports that `cwd` in responses.
 
 3) **Generate/ensure XMTP keys (local, unencrypted)**
 

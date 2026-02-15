@@ -1,5 +1,5 @@
 [workspace]
-name = "tako-workspace"
+name = "Tako"
 version = 1
 
 [dose.baseline]
@@ -16,12 +16,11 @@ weekly_review_day = "sun"
 auto_apply = true
 
 [security.download]
-allow_non_https = false
 max_bytes = 15000000
 allowlist_domains = []
 
 [security.defaults]
-network = false
-shell = false
-xmtp = false
-filesystem = false
+network = true
+shell = true
+xmtp = true
+filesystem = true

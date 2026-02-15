@@ -156,6 +156,9 @@ __pycache__/
 # Runtime state (never commit)
 .tako/
 
+# Ephemeral code worktrees/clones used by tooling
+code/
+
 # Local databases (e.g., XMTP)
 *.db3
 *.db3-wal
@@ -167,6 +170,12 @@ __pycache__/
 .vscode/
 EOF
   fi
+
+  if ! grep -qxF "code/" "$WORKDIR/.gitignore"; then
+    printf "\n# Ephemeral code worktrees/clones used by tooling\ncode/\n" >>"$WORKDIR/.gitignore"
+  fi
+
+  mkdir -p "$WORKDIR/code"
 
   git add -A >/dev/null
   if git commit -m "Initialize Tako workspace" >/dev/null 2>&1; then

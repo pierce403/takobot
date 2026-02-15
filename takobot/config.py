@@ -55,7 +55,7 @@ def _as_str_list(value) -> list[str]:
 
 @dataclass(frozen=True)
 class WorkspaceConfig:
-    name: str = "tako-workspace"
+    name: str = "Tako"
     version: int = 1
 
 
@@ -80,17 +80,16 @@ class UpdatesConfig:
 
 @dataclass(frozen=True)
 class SecurityDownloadConfig:
-    allow_non_https: bool = False
     max_bytes: int = 15_000_000
     allowlist_domains: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class SecurityDefaultPermissions:
-    network: bool = False
-    shell: bool = False
-    xmtp: bool = False
-    filesystem: bool = False
+    network: bool = True
+    shell: bool = True
+    xmtp: bool = True
+    filesystem: bool = True
 
 
 @dataclass(frozen=True)
@@ -154,10 +153,6 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
         ),
         security=SecurityConfig(
             download=SecurityDownloadConfig(
-                allow_non_https=_as_bool(
-                    security_download.get("allow_non_https"),
-                    default=SecurityDownloadConfig.allow_non_https,
-                ),
                 max_bytes=max(1_000_000, _as_int(security_download.get("max_bytes"), default=SecurityDownloadConfig.max_bytes)),
                 allowlist_domains=_as_str_list(security_download.get("allowlist_domains")),
             ),
@@ -171,6 +166,79 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
     )
 
     return cfg, ""
+
+
+def set_workspace_name(path: Path, name: str) -> tuple[bool, str]:
+    cleaned = " ".join((name or "").split()).strip()
+    if not cleaned:
+        return False, "workspace.name cannot be empty"
+
+    escaped = cleaned.replace('"', '\\"')
+    line = f'name = "{escaped}"'
+
+    if not path.exists():
+        payload = "[workspace]\n" + line + "\nversion = 1\n"
+        try:
+            path.write_text(payload, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"workspace.name set to {cleaned} (new file)"
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed reading tako.toml: {exc}"
+
+    lines = text.splitlines()
+    section_start = None
+    for idx, raw in enumerate(lines):
+        if raw.strip() == "[workspace]":
+            section_start = idx
+            break
+
+    if section_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("[workspace]")
+        lines.append(line)
+        lines.append("version = 1")
+        updated = "\n".join(lines) + "\n"
+        try:
+            path.write_text(updated, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"workspace.name set to {cleaned}"
+
+    section_end = len(lines)
+    for idx in range(section_start + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section_end = idx
+            break
+
+    target_idx = None
+    for idx in range(section_start + 1, section_end):
+        stripped = lines[idx].strip()
+        if stripped.startswith("name"):
+            target_idx = idx
+            break
+
+    if target_idx is not None:
+        lines[target_idx] = line
+    else:
+        insert_idx = section_start + 1
+        while insert_idx < section_end and not lines[insert_idx].strip():
+            insert_idx += 1
+        lines.insert(insert_idx, line)
+
+    updated = "\n".join(lines)
+    if text.endswith("\n") or not updated.endswith("\n"):
+        updated += "\n"
+    try:
+        path.write_text(updated, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed writing tako.toml: {exc}"
+    return True, f"workspace.name set to {cleaned}"
 
 
 def set_updates_auto_apply(path: Path, enabled: bool) -> tuple[bool, str]:
@@ -239,3 +307,38 @@ def set_updates_auto_apply(path: Path, enabled: bool) -> tuple[bool, str]:
     except Exception as exc:  # noqa: BLE001
         return False, f"failed writing tako.toml: {exc}"
     return True, f"updates.auto_apply set to {literal}"
+
+
+def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
+    location = str(path) if path is not None else "tako.toml"
+    defaults = config.security.default_permissions
+    domains = ", ".join(config.security.download.allowlist_domains) if config.security.download.allowlist_domains else "(any https domain)"
+    lines = [
+        f"tako.toml guide ({location})",
+        "",
+        "[workspace]",
+        f"- name: takobot identity name (current: {config.workspace.name})",
+        f"- version: workspace schema version (current: {config.workspace.version})",
+        "",
+        "[dose.baseline]",
+        "- d/o/s/e: baseline DOSE levels in [0..1] used by runtime emotional drift",
+        "",
+        "[productivity]",
+        f"- daily_outcomes: default number of morning outcomes (current: {config.productivity.daily_outcomes})",
+        f"- weekly_review_day: informational weekly review day token (current: {config.productivity.weekly_review_day})",
+        "",
+        "[updates]",
+        f"- auto_apply: auto-install new takobot package + restart app (current: {'true' if config.updates.auto_apply else 'false'})",
+        "",
+        "[security.download]",
+        f"- max_bytes: max extension package download size (current: {config.security.download.max_bytes})",
+        f"- allowlist_domains: optional host allowlist for downloads (current: {domains})",
+        "- HTTPS is always required for extension downloads.",
+        "",
+        "[security.defaults]",
+        f"- network: default permission for enabled extensions (current: {'true' if defaults.network else 'false'})",
+        f"- shell: default permission for enabled extensions (current: {'true' if defaults.shell else 'false'})",
+        f"- xmtp: default permission for enabled extensions (current: {'true' if defaults.xmtp else 'false'})",
+        f"- filesystem: default permission for enabled extensions (current: {'true' if defaults.filesystem else 'false'})",
+    ]
+    return "\n".join(lines)

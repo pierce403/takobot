@@ -8,12 +8,13 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Inference execution gate so first model call starts on the first interactive chat turn
 - A background XMTP runtime with stream retries + polling fallback
 - Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
-- Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically
+- Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
 - Missing-setup prompts: when required config/deps are missing (for example git identity), Tako asks the operator with concrete fix steps
 - Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
+- Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
@@ -93,6 +94,7 @@ Runtime-only (ignored):
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
 - Initializes git (if available) and commits the initial workspace.
+- Ensures a git-ignored `code/` directory exists for temporary repo clones/code work.
 - Generates a local key file at `.tako/keys.json` with a wallet key and DB encryption key (unencrypted; protected by file permissions).
 - Creates runtime logs/temp directories at `.tako/logs/` and `.tako/tmp/`.
 - Creates a local XMTP database at `.tako/xmtp-db/`.
@@ -113,7 +115,11 @@ Runtime-only (ignored):
 There is **no user-facing configuration via environment variables or CLI flags**.
 
 Workspace configuration lives in `tako.toml` (no secrets).
+- `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
+- Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
+- Extension downloads are always HTTPS; non-HTTPS is not allowed.
+- Security permission defaults for enabled extensions are now permissive by default (`network/shell/xmtp/filesystem = true`), and can be tightened in `tako.toml`.
 
 Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
 
@@ -136,7 +142,8 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Codex inference subprocesses are launched with sandbox/approval bypass flags so agentic chat does not falsely assume a read-only environment.
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.
-- If git auto-commit is blocked by missing `user.name`/`user.email`, Tako asks the operator to configure them and shows copy-ready commands.
+- If git auto-commit encounters missing git identity, Tako auto-configures local repo identity (`Takobot <takobot@local>`) and retries the commit.
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.
 - XMTP replies now use a typing indicator when supported by the installed XMTP SDK/runtime.
+- Transcript view is now selectable (read-only text area), so mouse highlight/copy works directly in compatible terminals.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

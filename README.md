@@ -159,7 +159,7 @@ Workspace configuration lives in `tako.toml` (no secrets).
 - Extension downloads are always HTTPS; non-HTTPS is not allowed.
 - Security permission defaults for enabled extensions are now permissive by default (`network/shell/xmtp/filesystem = true`), and can be tightened in `tako.toml`.
 
-Any change that affects identity/config/tools/sensors/routines must be initiated by the operator over XMTP and (when appropriate) reflected by updating repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
+Any change that affects identity/config/tools/sensors/routines must be initiated by the operator (terminal app or paired XMTP). Natural-language operator requests can be applied directly, and durable changes should still be reflected in repo-tracked docs (`SOUL.md`, `MEMORY.md`, etc).
 
 ## Developer utilities (optional)
 

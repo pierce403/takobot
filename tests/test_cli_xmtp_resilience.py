@@ -62,6 +62,7 @@ class TestCliXmtpResilience(unittest.TestCase):
         self.assertIn("You are ProTako", prompt)
         self.assertIn("Canonical identity name: ProTako", prompt)
         self.assertIn("Never claim your name is `Tako`", prompt)
+        self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
 
     def test_retryable_xmtp_error_detection(self) -> None:
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("grpc-status header missing")))

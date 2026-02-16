@@ -135,6 +135,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("Never claim your name is `Tako`", prompt)
         self.assertIn("Mission objectives: Keep outcomes clear | Stay curious", prompt)
         self.assertIn("Operator control surfaces: terminal app and paired XMTP channel.", prompt)
+        self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
 
     def test_local_input_queue_count_includes_active_processing(self) -> None:
         app = TakoTerminalApp(interval=5.0)

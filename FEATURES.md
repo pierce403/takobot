@@ -347,6 +347,7 @@
 - **Description**: Enforce that only the operator can modify identity/config/tools/routines.
 - **Properties**:
   - Reject non-operator attempts to steer identity/config with a firm boundary.
+  - Apply operator-requested identity/config edits from natural chat phrasing and confirm what changed.
 - **Test Criteria**:
   - [x] Non-operator “controller” commands are refused (basic boundary response for obvious command attempts).
 

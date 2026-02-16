@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Operator-requested purpose edits now apply directly in chat
+
+- What happened: operator natural-language requests to fix Takobot purpose text could be refused with a hard-boundary message, even when the request came from the operator.
+- Fix: local and XMTP operator chat flows now treat purpose/mission edit requests as authorized updates, patch `SOUL.md` directly, and ask only for missing replacement wording when needed.
+- Prevention: keep boundary prompts explicit that only non-operator edits are blocked and cover natural-language operator identity/config update paths with dedicated parser tests.
+
 ### 2026-02-16 — Child-stage chat is now context-first (not task-first)
 
 - What happened: child-stage conversations could feel like immediate planning/interrogation instead of gentle operator context discovery.

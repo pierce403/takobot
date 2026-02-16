@@ -800,7 +800,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Installs <code>tako.sh</code> with the package as a shell wrapper; deployed mode dispatches to installed <code>takobot</code>.
               </li>
               <li>
-                Runs hatchling onboarding in order (name, purpose, mission objectives, XMTP handle), sends outbound pairing DM when applicable, and stores
+                Runs hatchling onboarding in order (name, purpose, XMTP handle), sends outbound pairing DM when applicable, and stores
                 operator metadata in <code>.tako/operator.json</code> when paired.
               </li>
               <li>
@@ -810,7 +810,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Starts a runtime service (heartbeat + exploration + sensors) with EventBus-backed Type 1 triage and Type 2 escalation for serious events.
               </li>
               <li>
-                World Watch uses RSS/Atom feeds from <code>tako.toml</code>, writes deterministic notes to <code>memory/world/</code>, and emits bounded briefings.
+                World Watch uses RSS/Atom feeds from <code>tako.toml</code> and, in <code>child</code> stage, randomly samples Reddit/Hacker News/Wikipedia; it writes deterministic notes (including mission-linked questions) to <code>memory/world/</code> and emits bounded briefings.
               </li>
               <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes and verifies no tracked changes remain.</li>

@@ -17,11 +17,12 @@ This checklist defines first-wake success for a Tako workspace.
 
 1. `BOOTING`
 2. `ONBOARDING_IDENTITY` (name + purpose)
-3. `ONBOARDING_ROUTINES` (mission objectives)
-4. `ASK_XMTP_HANDLE` (yes/no)
-5. `PAIRING_OUTBOUND` (if yes)
-6. `PAIRED` or local-only fallback
-7. `RUNNING`
+3. `ASK_XMTP_HANDLE` (yes/no)
+4. `PAIRING_OUTBOUND` (if yes)
+5. `PAIRED` or local-only fallback
+6. `RUNNING`
+
+Mission objectives can be tuned after onboarding via `mission show|set|add|clear`.
 
 ## Life Stages
 

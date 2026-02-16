@@ -81,14 +81,15 @@
   - Inference execution is pi-runtime-only; non-pi CLIs are diagnostic-only and never used for model reply generation.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
-  - Hatchling onboarding is stage-aware and ordered: name, purpose, mission objectives, then XMTP handle yes/no.
+  - Hatchling onboarding is stage-aware and ordered: name, purpose, then XMTP handle yes/no.
   - On onboarding completion, stage transitions from `hatchling` to `child`, updates `tako.toml`, and logs the transition in `memory/dailies/`.
   - Name capture in identity onboarding accepts freeform phrases and uses inference to extract a clean name token (not entire sentence).
   - In running chat, the operator can rename Tako inline with a natural message (e.g. “call yourself SILLYTAKO”) and the app persists the parsed name into `SOUL.md`.
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs a runtime service (heartbeat + exploration + sensors) under UI orchestration, then applies Type 1 triage continuously.
   - Uses an in-memory EventBus that writes `.tako/state/events.jsonl` for audit while dispatching events directly to Type 1 queues (no JSONL polling loop).
-  - Includes a first sensor (`RSSSensor`) for world-watch RSS/Atom monitoring with feed dedupe state in `.tako/state/rss_seen.json`.
+  - Includes world-watch sensors for RSS/Atom monitoring (`RSSSensor`) plus child-stage random curiosity exploration (`CuriositySensor`) across Reddit/Hacker News/Wikipedia.
+  - Curiosity exploration persists dedupe state in `.tako/state/curiosity_seen.json` and writes mission-linked questions into world notebook entries/briefings.
   - Writes deterministic world notebook entries to `memory/world/YYYY-MM-DD.md` and daily Mission Review Lite snapshots to `memory/world/mission-review/YYYY-MM-DD.md`.
   - Maintains world-model scaffold files under `memory/world/` (`model.md`, `entities.md`, `assumptions.md`).
   - Emits bounded proactive briefings when there is signal (new world items/task unblocks/repeated errors), capped per day with cooldown state in `.tako/state/briefing_state.json`.
@@ -144,7 +145,8 @@
 - **Test Criteria**:
   - [x] Running `takobot` opens app mode by default (no required subcommand).
   - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
-  - [x] Hatchling onboarding order is `name -> purpose -> mission objectives -> XMTP handle`.
+  - [x] Hatchling onboarding order is `name -> purpose -> XMTP handle`.
+  - [x] Child stage randomly explores Reddit/Hacker News/Wikipedia and emits mission-linked world questions.
   - [x] Onboarding completion transitions stage to `child` and persists it to `tako.toml`.
   - [x] Freeform naming inputs (e.g. “your name can be SILLYTAKO”) persist only the parsed name in `SOUL.md`.
   - [x] In running chat, “call yourself SILLYTAKO” updates `SOUL.md` without entering a special setup mode.
@@ -356,7 +358,8 @@
 - **Description**: Poll-based sensors publish to EventBus; state stays runtime-only while notes stay workspace-visible.
 - **Properties**:
   - `RSSSensor` polls configured feeds from `tako.toml` (`[world_watch].feeds`, `[world_watch].poll_minutes`).
-  - Seen-item dedupe state is stored in `.tako/state/rss_seen.json`.
+  - In `child` stage, `CuriositySensor` randomly samples Reddit/Hacker News/Wikipedia and emits mission-linked questions.
+  - Seen-item dedupe state is stored in `.tako/state/rss_seen.json` and `.tako/state/curiosity_seen.json`.
   - Sensor outputs are persisted as deterministic notes under `memory/world/`.
 - **Test Criteria**:
   - [ ] RSS world watch picks up new feed items and writes deterministic notebook entries.

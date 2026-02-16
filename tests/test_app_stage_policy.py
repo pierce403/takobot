@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
-from takobot.app import _build_terminal_chat_prompt, _looks_like_local_command
+from takobot.app import TakoTerminalApp, _build_terminal_chat_prompt, _looks_like_local_command
+from takobot.life_stage import stage_policy_for_name
 
 
 class TestAppStagePolicy(unittest.TestCase):
@@ -27,6 +31,28 @@ class TestAppStagePolicy(unittest.TestCase):
         self.assertIn("Life stage: teen (skeptical).", prompt)
         self.assertIn("memory_frontmatter=", prompt)
         self.assertIn("MEMORY frontmatter", prompt)
+
+    def test_child_stage_includes_curiosity_sensor(self) -> None:
+        with TemporaryDirectory() as tmp:
+            app = TakoTerminalApp(interval=5.0)
+            app.paths = SimpleNamespace(state_dir=Path(tmp))
+            app.life_stage = "child"
+            app.stage_policy = stage_policy_for_name("child")
+            sensors = app._build_stage_sensors()
+            names = [getattr(sensor, "name", "") for sensor in sensors]
+            self.assertIn("rss", names)
+            self.assertIn("curiosity", names)
+
+    def test_non_child_stage_skips_curiosity_sensor(self) -> None:
+        with TemporaryDirectory() as tmp:
+            app = TakoTerminalApp(interval=5.0)
+            app.paths = SimpleNamespace(state_dir=Path(tmp))
+            app.life_stage = "teen"
+            app.stage_policy = stage_policy_for_name("teen")
+            sensors = app._build_stage_sensors()
+            names = [getattr(sensor, "name", "") for sensor in sensors]
+            self.assertIn("rss", names)
+            self.assertNotIn("curiosity", names)
 
 
 if __name__ == "__main__":

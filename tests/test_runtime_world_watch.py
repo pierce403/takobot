@@ -33,6 +33,9 @@ class OneShotWorldSensor:
                     "link": "https://example.com/world/oceanic-chip-policy",
                     "source": "Example News",
                     "published": "Mon, 16 Feb 2026 12:00:00 GMT",
+                    "why_it_matters": "Signals a supply-side policy shift with downstream impacts.",
+                    "mission_relevance": "Could alter planning assumptions for mission execution this quarter.",
+                    "question": "How does this policy shift change our mission timeline assumptions?",
                 },
             }
         ]
@@ -80,8 +83,11 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             notebook_text = notebook_path.read_text(encoding="utf-8")
             self.assertIn("Oceanic chip policy update", notebook_text)
             self.assertIn("Why it matters:", notebook_text)
+            self.assertIn("Signals a supply-side policy shift", notebook_text)
             self.assertIn("Possible mission relevance:", notebook_text)
+            self.assertIn("Could alter planning assumptions", notebook_text)
             self.assertIn("Questions:", notebook_text)
+            self.assertIn("How does this policy shift change our mission timeline assumptions?", notebook_text)
 
             self.assertTrue((memory_root / "world" / "model.md").exists())
             self.assertTrue((memory_root / "world" / "entities.md").exists())
@@ -106,6 +112,7 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             self.assertGreaterEqual(len(briefings), 1)
             self.assertIn("briefing:", briefings[0])
             self.assertIn("world watch", briefings[0])
+            self.assertIn("question:", briefings[0])
 
             briefing_state = json.loads((state_dir / "briefing_state.json").read_text(encoding="utf-8"))
             self.assertLessEqual(int(briefing_state.get("briefings_today", 0)), 3)

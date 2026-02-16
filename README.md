@@ -13,7 +13,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
 - EventBus-driven cognition: in-memory event fanout + JSONL audit + Type 1 triage + Type 2 escalation
-- World Watch sensor loop: RSS/Atom polling with dedupe, deterministic world notebook writes, and bounded briefings
+- World Watch sensor loop: RSS/Atom polling plus child-stage curiosity crawling (Reddit/Hacker News/Wikipedia), deterministic world notebook writes, and bounded briefings
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
 - Missing-setup prompts: when required config/deps are missing and auto-remediation fails, Tako asks the operator with concrete fix steps
 - Runtime problem capture: detected warnings/errors are converted into committed `tasks/` items for follow-up
@@ -75,7 +75,6 @@ Pairing flow:
 - During hatchling onboarding, Tako asks in this order:
   - name
   - purpose
-  - mission objectives
   - XMTP handle yes/no (pair now or continue local-only)
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
 - After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
@@ -134,7 +133,7 @@ Runtime-only (ignored):
 - Detects pi runtime/auth/key sources and persists runtime metadata to `.tako/state/inference.json`.
 - If workspace-local pi runtime is missing, runtime discovery bootstraps workspace-local nvm/node and installs pi tooling under `.tako/`.
 - Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
-- Runs stage-aware onboarding as an explicit state machine inside the app (`name -> purpose -> mission objectives -> XMTP handle`).
+- Runs stage-aware onboarding as an explicit state machine inside the app (`name -> purpose -> XMTP handle`).
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
 - Starts the runtime service (heartbeat + exploration + sensors) and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
@@ -150,6 +149,7 @@ Workspace configuration lives in `tako.toml` (no secrets).
 - `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
 - World-watch feeds live in `[world_watch]` (`feeds = [...]`, `poll_minutes = <minutes>`).
+- In `child` stage, world-watch also performs random curiosity sampling from Reddit, Hacker News, and Wikipedia.
 - Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
 - Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference `auto|pi`, API keys, pi OAuth inventory).
 - `doctor` runs local/offline inference diagnostics (CLI probes + recent inference error scan), attempts automatic workspace-local inference repair first, and does not depend on inference being available.
@@ -175,7 +175,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - While running, Tako periodically checks for package updates. With `updates.auto_apply = true`, the TUI applies the update and restarts itself.
 - XMTP client initialization disables history sync by default for compatibility.
 - Runtime event log lives at `.tako/state/events.jsonl` as an audit stream; events are consumed in-memory via EventBus (no JSONL polling queue).
-- World Watch sensor state is stored in `.tako/state/rss_seen.json`; briefing cadence/state is stored in `.tako/state/briefing_state.json`.
+- World Watch sensor state is stored in `.tako/state/rss_seen.json` and `.tako/state/curiosity_seen.json`; briefing cadence/state is stored in `.tako/state/briefing_state.json`.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
 - Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
 - Inference now runs through workspace-local pi runtime; if pi is not available, Takobot falls back to non-inference heuristic responses.

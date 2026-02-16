@@ -159,10 +159,12 @@ class Runtime:
         today = date.today()
         ensure_daily_log(self.daily_log_root, today)
         _ensure_world_memory_scaffold(self._world_dir)
+        mission_objectives = self._mission_objectives()
         ctx = SensorContext.create(
             state_dir=self.state_dir,
             user_agent=self.sensor_user_agent,
             timeout_s=self.sensor_timeout_s,
+            mission_objectives=mission_objectives,
         )
 
         world_items: list[WorldItem] = []
@@ -196,7 +198,7 @@ class Runtime:
                 self.event_bus.publish_event(
                     "world.watch.batch",
                     f"World Watch captured {new_world_count} new items.",
-                    source="sensor:rss",
+                    source="runtime",
                     metadata={"count": new_world_count, "path": str(notebook_path)},
                 )
                 self._emit_activity("world-watch", f"{new_world_count} new items")
@@ -262,6 +264,8 @@ class Runtime:
             lines.append(f"- world watch: {new_world_count} new item(s).")
             for item in sorted(recent_world, key=lambda entry: entry.sort_key())[:3]:
                 lines.append(f"- signal: {item.title} ({item.source}) -> watch mission impact.")
+                if item.question:
+                    lines.append(f"- question: {item.question}")
         if tasks_unblocked > 0:
             lines.append(f"- execution: {tasks_unblocked} task(s) were unblocked.")
         if repeated_errors:
@@ -447,6 +451,9 @@ class WorldItem:
     source: str
     link: str
     published: str
+    why_it_matters: str
+    mission_relevance: str
+    question: str
 
     def sort_key(self) -> tuple[str, str, str]:
         return (self.source.lower(), self.title.lower(), self.link.lower())
@@ -461,6 +468,9 @@ def _world_item_from_event(event: dict[str, Any]) -> WorldItem | None:
     source = _clean_value(metadata.get("source")) or "unknown source"
     link = _clean_value(metadata.get("link"))
     published = _clean_value(metadata.get("published"))
+    why_it_matters = _clean_value(metadata.get("why_it_matters"))
+    mission_relevance = _clean_value(metadata.get("mission_relevance"))
+    question = _clean_value(metadata.get("question"))
     if not item_id:
         return None
     return WorldItem(
@@ -469,6 +479,9 @@ def _world_item_from_event(event: dict[str, Any]) -> WorldItem | None:
         source=source,
         link=link,
         published=published,
+        why_it_matters=why_it_matters,
+        mission_relevance=mission_relevance,
+        question=question,
     )
 
 
@@ -501,9 +514,14 @@ def _append_world_notebook_entries(world_dir: Path, day: date, items: list[World
             safe_link = _clean_value(item.link) or "(no link)"
             handle.write(f"<!-- world_item_id: {safe_id} -->\n")
             handle.write(f"- **[{safe_title}]** ({safe_source}) — {safe_link}\n")
-            handle.write("  - Why it matters:\n")
-            handle.write("  - Possible mission relevance:\n")
+            why_it_matters = _line_or_blank("Why it matters:", item.why_it_matters)
+            mission_relevance = _line_or_blank("Possible mission relevance:", item.mission_relevance)
+            handle.write(f"  - {why_it_matters}\n")
+            handle.write(f"  - {mission_relevance}\n")
             handle.write("  - Questions:\n")
+            question = _clean_value(item.question)
+            if question:
+                handle.write(f"    - {question}\n")
     _append_world_entities(world_dir / "entities.md", day, pending)
     return path, len(pending)
 
@@ -650,6 +668,14 @@ def _format_mission_review(
 
 def _clean_value(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+def _line_or_blank(label: str, value: str) -> str:
+    cleaned_label = _clean_value(label).rstrip(":") + ":"
+    cleaned_value = _clean_value(value)
+    if not cleaned_value:
+        return cleaned_label
+    return f"{cleaned_label} {cleaned_value}"
 
 
 def _error_signature(event_type: str, message: str) -> str:

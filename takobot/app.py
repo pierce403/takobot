@@ -69,7 +69,7 @@ from .problem_tasks import ensure_problem_tasks
 from .ascii_octo import octopus_ascii_for_stage
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
-from .sensors import RSSSensor
+from .sensors import CuriositySensor, RSSSensor, Sensor
 from .soul import (
     DEFAULT_SOUL_NAME,
     DEFAULT_SOUL_ROLE,
@@ -970,19 +970,28 @@ class TakoTerminalApp(App[None]):
         scaled = int(round(base * float(self.stage_policy.world_watch_poll_multiplier)))
         return max(5, scaled)
 
-    def _build_stage_sensors(self) -> list[RSSSensor]:
+    def _build_stage_sensors(self) -> list[Sensor]:
         if self.paths is None:
             return []
         if not self.stage_policy.world_watch_enabled:
             return []
         feeds = list(self.config.world_watch.feeds)
-        return [
+        sensors: list[Sensor] = [
             RSSSensor(
                 feeds,
                 poll_minutes=self._stage_world_watch_poll_minutes(),
                 seen_path=self.paths.state_dir / "rss_seen.json",
             )
         ]
+        if self.life_stage == "child":
+            sensors.append(
+                CuriositySensor(
+                    sources=["reddit", "hackernews", "wikipedia"],
+                    poll_minutes=max(15, self._stage_world_watch_poll_minutes()),
+                    seen_path=self.paths.state_dir / "curiosity_seen.json",
+                )
+            )
+        return sensors
 
     def _configure_runtime_service_for_stage(self) -> None:
         if self.runtime_service is None:

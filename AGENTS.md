@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Child stage now runs random curiosity crawls
+
+- What happened: child-stage world learning relied mostly on configured RSS feeds, so proactive discovery could miss novel signals and felt less researcher-like.
+- Fix: added a child-stage `CuriositySensor` that randomly explores Reddit/Hacker News/Wikipedia, writes deduped world items, and emits mission-linked questions into notes/briefings.
+- Prevention: keep child-stage exploration behavior explicitly encoded in runtime sensor wiring + tests (`sensor`, `runtime notebook`, and `stage policy` coverage) so future refactors do not remove spontaneous question generation.
+
 ### 2026-02-16 — Memory frontmatter + life stages now drive runtime behavior
 
 - What happened: memory placement rules were implicit, and onboarding/cadence did not follow explicit life stages.

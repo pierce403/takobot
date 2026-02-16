@@ -12,6 +12,7 @@ class SensorContext:
     now: datetime
     user_agent: str
     timeout_s: float
+    mission_objectives: tuple[str, ...]
 
     @classmethod
     def create(
@@ -20,12 +21,19 @@ class SensorContext:
         state_dir: Path,
         user_agent: str,
         timeout_s: float,
+        mission_objectives: list[str] | tuple[str, ...] | None = None,
     ) -> "SensorContext":
+        cleaned_objectives: list[str] = []
+        for item in mission_objectives or ():
+            value = " ".join(str(item or "").split()).strip()
+            if value:
+                cleaned_objectives.append(value)
         return cls(
             state_dir=state_dir,
             now=datetime.now(tz=timezone.utc),
             user_agent=user_agent,
             timeout_s=max(1.0, float(timeout_s)),
+            mission_objectives=tuple(cleaned_objectives),
         )
 
 

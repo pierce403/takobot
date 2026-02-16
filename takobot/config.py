@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import tomllib
 
+from .life_stage import DEFAULT_LIFE_STAGE, normalize_life_stage_name, stage_titles_csv
+
 
 def _clamp01(value: float) -> float:
     if value < 0.0:
@@ -85,6 +87,11 @@ class WorldWatchConfig:
 
 
 @dataclass(frozen=True)
+class LifeConfig:
+    stage: str = DEFAULT_LIFE_STAGE
+
+
+@dataclass(frozen=True)
 class SecurityDownloadConfig:
     max_bytes: int = 15_000_000
     allowlist_domains: list[str] = field(default_factory=list)
@@ -111,6 +118,7 @@ class TakoConfig:
     productivity: ProductivityConfig = field(default_factory=ProductivityConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     world_watch: WorldWatchConfig = field(default_factory=WorldWatchConfig)
+    life: LifeConfig = field(default_factory=LifeConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
 
 
@@ -137,6 +145,7 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
     productivity = data.get("productivity") if isinstance(data.get("productivity"), dict) else {}
     updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
     world_watch = data.get("world_watch") if isinstance(data.get("world_watch"), dict) else {}
+    life = data.get("life") if isinstance(data.get("life"), dict) else {}
     security = data.get("security") if isinstance(data.get("security"), dict) else {}
     security_download = security.get("download") if isinstance(security.get("download"), dict) else {}
     security_defaults = security.get("defaults") if isinstance(security.get("defaults"), dict) else {}
@@ -168,6 +177,9 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
                     default=WorldWatchConfig.poll_minutes,
                 ),
             ),
+        ),
+        life=LifeConfig(
+            stage=normalize_life_stage_name(str(life.get("stage") or LifeConfig.stage), default=LifeConfig.stage),
         ),
         security=SecurityConfig(
             download=SecurityDownloadConfig(
@@ -327,6 +339,76 @@ def set_updates_auto_apply(path: Path, enabled: bool) -> tuple[bool, str]:
     return True, f"updates.auto_apply set to {literal}"
 
 
+def set_life_stage(path: Path, stage: str) -> tuple[bool, str]:
+    normalized = normalize_life_stage_name(stage, default="")
+    if not normalized:
+        return False, f"life.stage must be one of: {stage_titles_csv()}"
+    line = f'stage = "{normalized}"'
+
+    if not path.exists():
+        payload = "[life]\n" + line + "\n"
+        try:
+            path.write_text(payload, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"life.stage set to {normalized} (new file)"
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed reading tako.toml: {exc}"
+
+    lines = text.splitlines()
+    section_start = None
+    for idx, raw in enumerate(lines):
+        if raw.strip() == "[life]":
+            section_start = idx
+            break
+
+    if section_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("[life]")
+        lines.append(line)
+        updated = "\n".join(lines) + "\n"
+        try:
+            path.write_text(updated, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"life.stage set to {normalized}"
+
+    section_end = len(lines)
+    for idx in range(section_start + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section_end = idx
+            break
+
+    target_idx = None
+    for idx in range(section_start + 1, section_end):
+        stripped = lines[idx].strip()
+        if stripped.startswith("stage"):
+            target_idx = idx
+            break
+
+    if target_idx is not None:
+        lines[target_idx] = line
+    else:
+        insert_idx = section_start + 1
+        while insert_idx < section_end and not lines[insert_idx].strip():
+            insert_idx += 1
+        lines.insert(insert_idx, line)
+
+    updated = "\n".join(lines)
+    if text.endswith("\n") or not updated.endswith("\n"):
+        updated += "\n"
+    try:
+        path.write_text(updated, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed writing tako.toml: {exc}"
+    return True, f"life.stage set to {normalized}"
+
+
 def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
     location = str(path) if path is not None else "tako.toml"
     defaults = config.security.default_permissions
@@ -351,6 +433,9 @@ def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
         "[world_watch]",
         f"- feeds: RSS/Atom feeds to monitor (current: {len(config.world_watch.feeds)})",
         f"- poll_minutes: feed polling cadence in minutes (current: {config.world_watch.poll_minutes})",
+        "",
+        "[life]",
+        f"- stage: life stage (`{stage_titles_csv()}`) controlling routines/cadence/budgets (current: {config.life.stage})",
         "",
         "[security.download]",
         f"- max_bytes: max extension package download size (current: {config.security.download.max_bytes})",

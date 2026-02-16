@@ -22,7 +22,7 @@ Root directories (must exist):
 
 - `tools/` (tool implementations + manifests)
 - `skills/` (skills/playbooks + policies; installed but disabled by default)
-- `memory/` (committed knowledge tree: `dailies/`, `people/`, `places/`, `things/`)
+- `memory/` (committed memory store: `dailies/`, `world/`, `reflections/`, `contradictions/`)
 - `tasks/` (GTD next actions; committed)
 - `projects/` (PARA projects; committed)
 - `areas/` (PARA areas; committed)
@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Memory frontmatter + life stages now drive runtime behavior
+
+- What happened: memory placement rules were implicit, and onboarding/cadence did not follow explicit life stages.
+- Fix: `MEMORY.md` is now an explicit memory-system frontmatter spec, memory markdown is constrained to `memory/**`, and lifecycle policy (`[life].stage`) now controls onboarding order, world-watch cadence, Type2 daily budget, DOSE baseline multipliers, and stage-specific ASCII octopus rendering.
+- Prevention: keep stage policy and memory boundaries encoded in config/runtime/docs/tests together; log stage transitions in daily notes whenever policy changes.
+
 ### 2026-02-16 — Deployment now installs `tako.sh` and pi login is operator-assisted
 
 - What happened: package installs did not guarantee `tako.sh` was installed, and pi auth onboarding relied mostly on passive token discovery without an explicit assisted login flow.
@@ -87,7 +93,7 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 ### 2026-02-16 — World Watch + briefings made research visible
 
 - What happened: Tako had no first-class world sensor, no durable world notebook stream, and no bounded proactive briefing routine tied to mission context.
-- Fix: added `RSSSensor` (feed polling + dedupe), deterministic `resources/world/YYYY-MM-DD.md` note writes, bounded runtime briefings with persisted state, and daily Mission Review Lite snapshots.
+- Fix: added `RSSSensor` (feed polling + dedupe), deterministic `memory/world/YYYY-MM-DD.md` note writes, bounded runtime briefings with persisted state, and daily Mission Review Lite snapshots.
 - Prevention: treat sensing, note-taking, and proactive summaries as explicit runtime services with persisted cadence/state files under `.tako/state/`.
 
 ### 2026-02-16 — Pi runtime is now required for all inference

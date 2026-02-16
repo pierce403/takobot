@@ -7,7 +7,8 @@
 - **Description**: The repo documents identity, invariants, onboarding, and durable memory as first-class artifacts.
 - **Properties**:
   - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`.
-  - Committed knowledge lives under `memory/` (daily logs + world notes); `memory/MEMORY.md` is a compatibility pointer.
+  - `MEMORY.md` is a memory-system frontmatter spec at repo root and is injected into prompt context.
+  - Committed memory markdown lives under `memory/` (`dailies/`, `world/`, `reflections/`, `contradictions/`); `memory/MEMORY.md` is a compatibility pointer.
   - Feature state is tracked in `FEATURES.md`.
   - Feature checklist coverage is enforced by `tests/test_features_contract.py` (every criterion is parsed and mapped to executable probes).
   - Website copy lives in `index.html`.
@@ -80,14 +81,16 @@
   - Inference execution is pi-runtime-only; non-pi CLIs are diagnostic-only and never used for model reply generation.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
-  - Prompts for XMTP control-channel setup first (ASAP), and delays identity/routine prompts until inference has actually run.
+  - Hatchling onboarding is stage-aware and ordered: name, purpose, mission objectives, then XMTP handle yes/no.
+  - On onboarding completion, stage transitions from `hatchling` to `child`, updates `tako.toml`, and logs the transition in `memory/dailies/`.
   - Name capture in identity onboarding accepts freeform phrases and uses inference to extract a clean name token (not entire sentence).
   - In running chat, the operator can rename Tako inline with a natural message (e.g. “call yourself SILLYTAKO”) and the app persists the parsed name into `SOUL.md`.
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs a runtime service (heartbeat + exploration + sensors) under UI orchestration, then applies Type 1 triage continuously.
   - Uses an in-memory EventBus that writes `.tako/state/events.jsonl` for audit while dispatching events directly to Type 1 queues (no JSONL polling loop).
   - Includes a first sensor (`RSSSensor`) for world-watch RSS/Atom monitoring with feed dedupe state in `.tako/state/rss_seen.json`.
-  - Writes deterministic world notebook entries to `resources/world/YYYY-MM-DD.md` and daily Mission Review Lite snapshots to `resources/world/mission-review/YYYY-MM-DD.md`.
+  - Writes deterministic world notebook entries to `memory/world/YYYY-MM-DD.md` and daily Mission Review Lite snapshots to `memory/world/mission-review/YYYY-MM-DD.md`.
+  - Maintains world-model scaffold files under `memory/world/` (`model.md`, `entities.md`, `assumptions.md`).
   - Emits bounded proactive briefings when there is signal (new world items/task unblocks/repeated errors), capped per day with cooldown state in `.tako/state/briefing_state.json`.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
@@ -131,7 +134,8 @@
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
   - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.
-  - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
+  - Shows a stage-specific top-right ASCII octopus panel in the sidebar, including Takobot version, life-stage tone, and compact DOSE indicators.
+  - `stage` command surfaces and updates life stage policy (`stage`, `stage show`, `stage set <hatchling|child|teen|adult>`).
   - Supports local-only mode before pairing and safe-mode pause/resume controls.
   - Restores text-input focus after terminal resize/blur to keep chat entry stable.
   - Filters terminal control-sequence noise from input/transcript rendering.
@@ -140,8 +144,8 @@
 - **Test Criteria**:
   - [x] Running `takobot` opens app mode by default (no required subcommand).
   - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
-  - [x] XMTP setup prompt appears first in-chat on unpaired startup.
-  - [x] Identity + routine onboarding prompts are delayed until inference is active (or manually triggered).
+  - [x] Hatchling onboarding order is `name -> purpose -> mission objectives -> XMTP handle`.
+  - [x] Onboarding completion transitions stage to `child` and persists it to `tako.toml`.
   - [x] Freeform naming inputs (e.g. “your name can be SILLYTAKO”) persist only the parsed name in `SOUL.md`.
   - [x] In running chat, “call yourself SILLYTAKO” updates `SOUL.md` without entering a special setup mode.
   - [x] Outbound XMTP pairing can auto-complete without code copyback confirmation.
@@ -151,7 +155,7 @@
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.
   - [x] Activity panel shows inference/tool/runtime actions.
-  - [x] Octopus panel shows Takobot version and live DOSE indicators.
+  - [x] Octopus panel shows stage-specific ASCII art plus live DOSE indicators.
   - [x] Runtime logs are persisted under `.tako/logs/runtime.log` and app transcript/system logs under `.tako/logs/app.log`.
   - [x] Inference provider subprocesses use workspace-local temp files under `.tako/tmp/`.
   - [x] App/daemon heartbeat can auto-commit pending workspace changes.
@@ -353,7 +357,7 @@
 - **Properties**:
   - `RSSSensor` polls configured feeds from `tako.toml` (`[world_watch].feeds`, `[world_watch].poll_minutes`).
   - Seen-item dedupe state is stored in `.tako/state/rss_seen.json`.
-  - Sensor outputs are persisted as deterministic notes under `resources/world/`.
+  - Sensor outputs are persisted as deterministic notes under `memory/world/`.
 - **Test Criteria**:
   - [ ] RSS world watch picks up new feed items and writes deterministic notebook entries.
 

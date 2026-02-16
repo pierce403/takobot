@@ -1,11 +1,11 @@
 # resources/ — Resources (PARA)
 
-Resources are reference material you want to keep around.
+Resources are execution-facing reference material.
 
-This is not "memory/" (durable agent knowledge). This is execution-facing reference for the operator.
+This is not `memory/` (durable agent memory).
 
 ## Conventions
 
-- Prefer small Markdown files over big docs.
-- Use clear titles and add links back to related projects/tasks when useful.
-- `world/` is reserved for deterministic world-watch notes (`YYYY-MM-DD.md`) and mission-review snapshots.
+- Prefer small Markdown files over large docs.
+- Link resources back to related projects/tasks when useful.
+- Deterministic world-watch notes now live under `memory/world/`.

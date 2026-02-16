@@ -12,6 +12,7 @@ title: "TUI + Runtime Commands"
 Common commands:
 
 - `help`, `status`, `stats`, `health`, `inference`, `models`, `doctor`
+- `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`
 - `pair`, `setup`, `reimprint`
 - `update`, `upgrade`, `update check`, `update auto status|on|off`
 - `dose`, `dose calm`, `dose explore`, `dose <d|o|s|e|dopamine|oxytocin|serotonin|endorphins> <0..1>`

@@ -1,14 +1,13 @@
 ---
-title: "Tako Memory (compat pointer)"
-type: "memory-pointer"
-version: 1
+summary: "Compatibility pointer to repo-root MEMORY.md"
 ---
 
 # memory/MEMORY.md — Pointer
 
-Canonical durable memory lives at repo root: `MEMORY.md`.
+Canonical memory-system frontmatter lives at repo root: `MEMORY.md`.
 
-- Canonical: `../MEMORY.md`
-- Daily logs: `memory/dailies/`
-- World notes: `memory/people/`, `memory/places/`, `memory/things/`
-
+- Canonical spec: `../MEMORY.md`
+- Daily notes: `memory/dailies/`
+- World research: `memory/world/`
+- Reflections: `memory/reflections/`
+- Contradictions: `memory/contradictions/`

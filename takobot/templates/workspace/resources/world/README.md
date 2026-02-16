@@ -1,6 +1,5 @@
-# World Notebook
+# Legacy World Folder
 
-`resources/world/` stores deterministic world-watch notes captured by runtime sensors.
+`resources/world/` is kept for compatibility with older checkouts.
 
-- Daily notebook files: `YYYY-MM-DD.md`
-- Mission review snapshots: `mission-review/YYYY-MM-DD.md`
+Current runtime world-watch outputs are written under `memory/world/`.

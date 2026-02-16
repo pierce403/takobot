@@ -1,17 +1,17 @@
-# memory/ — Memory Strategy
+# memory/ — Committed Memory Store
 
-This directory is Tako's committed memory tree. It captures what the agent learns about the world in Markdown files that are reviewable, diffable, and versioned.
+All memory markdown lives under `memory/`.
 
-Rules:
+## Layout
+
+- `dailies/` — daily chronology (`YYYY-MM-DD.md`)
+- `world/` — world-watch notes + model artifacts
+- `reflections/` — metacognitive reflections
+- `contradictions/` — contradiction tracking
+- `people/`, `places/`, `things/` — optional legacy buckets
+
+## Rules
 
 - No secrets.
-- Daily stream goes in `dailies/`.
-- Promote durable notes into repo-root `MEMORY.md`.
-
-## Structure
-
-- `dailies/`: one file per day (`YYYY-MM-DD.md`) for observations and decisions.
-- `people/`: notes about people the agent has encountered.
-- `places/`: notes about places and operating contexts.
-- `things/`: notes about objects, systems, tools, and concepts.
-
+- Keep memory deterministic and structured.
+- Keep execution artifacts in `tasks/`, `projects/`, `areas/`, `resources/`, `archives/`.

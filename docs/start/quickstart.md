@@ -28,6 +28,8 @@ What bootstrap does:
 ## First run
 
 - TUI starts in onboarding state.
+- Hatchling onboarding order is stage-aware: `name -> purpose -> XMTP handle?`.
+- On onboarding completion, Tako transitions into `child` stage behavior (world learning).
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
 - Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.
@@ -36,5 +38,6 @@ What bootstrap does:
 
 - `takobot` opens the TUI.
 - `tako.sh` is installed with the package as a shell wrapper; in deployed environments it dispatches to the installed `takobot`.
+- Memory notes are written under `memory/` (world-watch notebook under `memory/world/`).
 - `takobot doctor` reports local/offline diagnostics.
 - `takobot run` starts daemon mode directly.

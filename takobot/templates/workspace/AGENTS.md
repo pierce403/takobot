@@ -1,53 +1,38 @@
 # AGENTS.md — Tako Workspace Contract
 
-Tako is a **highly autonomous, operator-imprinted agent**. It can chat broadly, but only the operator can change identity/config/tools/permissions/routines.
-
-This file is the workspace’s "how to work here" contract for humans and agents. Keep it short, concrete, and up to date.
+Tako is a highly autonomous, operator-imprinted agent. It can chat broadly, but only the operator can change identity/config/tools/permissions/routines.
 
 ## Workspace Layout
 
-Required files (must exist):
+Required files:
 
-- `AGENTS.md` (this file)
-- `SOUL.md` (identity + boundaries; not memory)
-- `MEMORY.md` (canonical durable memory; long-lived facts only)
-- `ONBOARDING.md` (first wake checklist)
-- `tako.toml` (workspace config; no secrets)
+- `AGENTS.md`
+- `SOUL.md`
+- `MEMORY.md` (memory-system frontmatter spec)
+- `ONBOARDING.md`
+- `tako.toml` (no secrets)
 
-Directories:
+Required directories:
 
-- `memory/` (committed memory tree: dailies + people/places/things notes)
-- `tasks/` `projects/` `areas/` `resources/` `archives/` (productivity structure; committed)
-- `tools/` (workspace tools; installed but disabled by default)
-- `skills/` (workspace skills; installed but disabled by default)
+- `memory/` (`dailies/`, `world/`, `reflections/`, `contradictions/`)
+- `tasks/`, `projects/`, `areas/`, `resources/`, `archives/` (execution structure)
+- `tools/`, `skills/` (workspace extensions, disabled by default)
 - `.tako/` (runtime only; never committed)
-- `.venv/` (local venv; never committed)
 
-## Safety Rules (non-negotiable)
+## Memory Rules
 
-- **No secrets in git.** Never commit keys, tokens, or `.tako/**`.
-- **Startup is secretless.** No external secrets required to boot the workspace.
-- **Keys live unencrypted on disk** under `.tako/` with OS file permissions as the protection.
-- **Refuse unsafe states** (e.g., if `.tako/**` is tracked by git).
+- All memory markdown must live under `memory/`.
+- `MEMORY.md` defines memory placement; keep it loaded as operating frontmatter.
+- Keep execution artifacts out of memory directories.
 
-## Operator Imprint (control plane)
+## Safety Rules
 
-- Operator is the sole controller for:
-  - identity changes (`SOUL.md`)
-  - tool/skill enablement
-  - permission changes
-  - memory promotions into `MEMORY.md`
-- Non-operator chats may converse and propose tasks, but must not cause risky actions without operator approval.
-
-## Multi-Instance Safety
-
-- Tako must avoid running twice against the same `.tako/` state (use locks).
+- No secrets in git.
+- No `.tako/**` in git.
+- Runtime keys/tokens remain under `.tako/` with file permissions.
 
 ## Runtime Git Hygiene
 
-- On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`), auto-configuring missing local git identity from bot name when needed.
-- Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`); when enabled, app mode auto-applies updates and restarts.
-- World-watch RSS/Atom settings are configured in `tako.toml` under `[world_watch]`; sensor dedupe/cadence state lives in `.tako/state/`.
-- Deterministic world-watch notes live in committed workspace files under `resources/world/`.
-- Node tooling for inference is workspace-contained: pi packages install under `.tako/pi/node`, and if host Node is missing, Tako can bootstrap local `nvm`/Node under `.tako/nvm`.
-- Inference auth/provider controls are runtime-local under `.tako/state/inference-settings.json` and can be managed with `inference` commands (`auth`, `provider`, `ollama`, `key`).
+- Heartbeat auto-commits pending workspace changes when safe.
+- World-watch deterministic notes are written under `memory/world/`.
+- Stage transitions (`[life].stage` in `tako.toml`) are logged to `memory/dailies/`.

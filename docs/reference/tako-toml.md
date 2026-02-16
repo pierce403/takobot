@@ -15,6 +15,10 @@ title: "tako.toml Reference"
 - `name` — bot identity name (synced with rename flows)
 - `version` — workspace schema version
 
+## `[life]`
+
+- `stage` — life stage (`hatchling`, `child`, `teen`, `adult`) controlling routines, exploration cadence, Type2 budget/day, and DOSE baseline multipliers
+
 ## `[dose.baseline]`
 
 - `d`, `o`, `s`, `e` in `[0..1]`

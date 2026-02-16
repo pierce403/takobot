@@ -2,6 +2,9 @@
 name = "Tako"
 version = 1
 
+[life]
+stage = "hatchling"
+
 [dose.baseline]
 # 0..1. Defaults bias toward steady/calm without being flat.
 d = 0.55

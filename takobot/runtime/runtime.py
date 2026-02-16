@@ -34,7 +34,7 @@ class Runtime:
         *,
         event_bus: EventBus,
         state_dir: Path,
-        resources_root: Path,
+        memory_root: Path,
         daily_log_root: Path,
         sensors: list[Sensor],
         heartbeat_interval_s: float,
@@ -51,7 +51,7 @@ class Runtime:
     ) -> None:
         self.event_bus = event_bus
         self.state_dir = state_dir
-        self.resources_root = resources_root
+        self.memory_root = memory_root
         self.daily_log_root = daily_log_root
         self.sensors = list(sensors)
         self.heartbeat_interval_s = max(1.0, float(heartbeat_interval_s))
@@ -79,7 +79,7 @@ class Runtime:
         self._repeating_errors: set[str] = set()
         self._last_open_tasks_count: int | None = None
 
-        self._world_dir = self.resources_root / "world"
+        self._world_dir = self.memory_root / "world"
         self._briefing_state_path = self.state_dir / "briefing_state.json"
         self._briefing_state = self._load_briefing_state()
         self._unsubscribe_error_listener = self.event_bus.subscribe(self._track_errors)
@@ -158,6 +158,7 @@ class Runtime:
     async def _run_exploration_tick(self) -> None:
         today = date.today()
         ensure_daily_log(self.daily_log_root, today)
+        _ensure_world_memory_scaffold(self._world_dir)
         ctx = SensorContext.create(
             state_dir=self.state_dir,
             user_agent=self.sensor_user_agent,
@@ -473,6 +474,7 @@ def _world_item_from_event(event: dict[str, Any]) -> WorldItem | None:
 
 def _append_world_notebook_entries(world_dir: Path, day: date, items: list[WorldItem]) -> tuple[Path, int]:
     world_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_world_memory_scaffold(world_dir)
     path = world_dir / f"{day.isoformat()}.md"
     if not path.exists():
         path.write_text(f"# World Notebook — {day.isoformat()}\n\n", encoding="utf-8")
@@ -502,7 +504,85 @@ def _append_world_notebook_entries(world_dir: Path, day: date, items: list[World
             handle.write("  - Why it matters:\n")
             handle.write("  - Possible mission relevance:\n")
             handle.write("  - Questions:\n")
+    _append_world_entities(world_dir / "entities.md", day, pending)
     return path, len(pending)
+
+
+def _ensure_world_memory_scaffold(world_dir: Path) -> None:
+    world_dir.mkdir(parents=True, exist_ok=True)
+    model_path = world_dir / "model.md"
+    if not model_path.exists():
+        model_path.write_text(
+            "\n".join(
+                [
+                    "# World Model",
+                    "",
+                    "## Mission Hypotheses",
+                    "",
+                    "- (capture evidence-backed hypotheses here)",
+                    "",
+                    "## Signals To Watch",
+                    "",
+                    "- (list stable external signals and why they matter)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    entities_path = world_dir / "entities.md"
+    if not entities_path.exists():
+        entities_path.write_text(
+            "\n".join(
+                [
+                    "# World Entities",
+                    "",
+                    "## Sources",
+                    "",
+                    "- (new sources are appended automatically from world-watch items)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    assumptions_path = world_dir / "assumptions.md"
+    if not assumptions_path.exists():
+        assumptions_path.write_text(
+            "\n".join(
+                [
+                    "# Assumptions",
+                    "",
+                    "## Active Assumptions",
+                    "",
+                    "- [ ] (assumption) | confidence: low/medium/high | evidence:",
+                    "",
+                    "## Invalidated Assumptions",
+                    "",
+                    "- (move resolved assumptions here with rationale)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+
+def _append_world_entities(path: Path, day: date, items: list[WorldItem]) -> None:
+    if not items:
+        return
+    _ensure_world_memory_scaffold(path.parent)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing = set(re.findall(r"<!-- world_source: (.+?) -->", text))
+    sources = sorted({_clean_value(item.source) for item in items if _clean_value(item.source)})
+    pending = [source for source in sources if source not in existing]
+    if not pending:
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        for source in pending:
+            safe = source.replace("--", "-")
+            handle.write(f"<!-- world_source: {safe} -->\n")
+            handle.write(f"- **{source}**\n")
+            handle.write(f"  - First seen: {day.isoformat()}\n")
 
 
 def _mission_status(*, new_world_count: int, repeated_errors: list[str], objectives: list[str]) -> str:

@@ -43,10 +43,10 @@ class TestRuntimeWorldWatch(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             state_dir = root / ".tako" / "state"
-            resources_root = root / "resources"
+            memory_root = root / "memory"
             daily_root = root / "memory" / "dailies"
             state_dir.mkdir(parents=True, exist_ok=True)
-            resources_root.mkdir(parents=True, exist_ok=True)
+            memory_root.mkdir(parents=True, exist_ok=True)
             daily_root.mkdir(parents=True, exist_ok=True)
 
             event_bus = EventBus(state_dir / "events.jsonl")
@@ -55,7 +55,7 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             runtime = Runtime(
                 event_bus=event_bus,
                 state_dir=state_dir,
-                resources_root=resources_root,
+                memory_root=memory_root,
                 daily_log_root=daily_root,
                 sensors=[sensor],
                 heartbeat_interval_s=1.0,
@@ -75,7 +75,7 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             asyncio.run(_run())
             today = date.today().isoformat()
 
-            notebook_path = resources_root / "world" / f"{today}.md"
+            notebook_path = memory_root / "world" / f"{today}.md"
             self.assertTrue(notebook_path.exists())
             notebook_text = notebook_path.read_text(encoding="utf-8")
             self.assertIn("Oceanic chip policy update", notebook_text)
@@ -83,7 +83,13 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             self.assertIn("Possible mission relevance:", notebook_text)
             self.assertIn("Questions:", notebook_text)
 
-            mission_review_path = resources_root / "world" / "mission-review" / f"{today}.md"
+            self.assertTrue((memory_root / "world" / "model.md").exists())
+            self.assertTrue((memory_root / "world" / "entities.md").exists())
+            self.assertTrue((memory_root / "world" / "assumptions.md").exists())
+            entities_text = (memory_root / "world" / "entities.md").read_text(encoding="utf-8")
+            self.assertIn("Example News", entities_text)
+
+            mission_review_path = memory_root / "world" / "mission-review" / f"{today}.md"
             self.assertTrue(mission_review_path.exists())
             mission_text = mission_review_path.read_text(encoding="utf-8")
             self.assertIn("Mission Review Lite", mission_text)

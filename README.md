@@ -23,7 +23,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - Built-in starter skills are auto-seeded into `skills/` (disabled): OpenClaw top-10, priority `skill-creator` + MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
-- TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
+- TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators
 - Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
@@ -31,7 +31,8 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors
 - XMTP outbound replies are mirrored into the local TUI transcript/activity feed so remote conversations stay visible in one place
 - Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
-- Runtime writes deterministic world notes under `resources/world/YYYY-MM-DD.md` and daily mission snapshots under `resources/world/mission-review/YYYY-MM-DD.md`
+- Runtime writes deterministic world notes under `memory/world/YYYY-MM-DD.md` and daily mission snapshots under `memory/world/mission-review/YYYY-MM-DD.md`
+- Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
@@ -71,10 +72,11 @@ Bootstrap refuses to run in a non-empty directory unless it already looks like a
 Pairing flow:
 
 - `takobot` always starts the interactive terminal app first.
-- During onboarding, Tako asks for XMTP setup ASAP (in-chat):
-  - yes: outbound DM pairing (`.eth` or `0x...`) and assumes the recipient is ready
-  - no: continue onboarding locally and allow later pairing from terminal
-- Identity/purpose/objective prompts are delayed until inference has actually run (or can be started manually with `setup`).
+- During hatchling onboarding, Tako asks in this order:
+  - name
+  - purpose
+  - mission objectives
+  - XMTP handle yes/no (pair now or continue local-only)
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
 - After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
 
@@ -95,7 +97,8 @@ Committed (git-tracked):
 - `SOUL.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`, `tako.toml`
 - `FEATURES.md` (feature tracker)
 - `memory/dailies/YYYY-MM-DD.md` (daily logs)
-- `memory/people/`, `memory/places/`, `memory/things/` (world notes)
+- `memory/world/` (`YYYY-MM-DD.md`, `model.md`, `entities.md`, `assumptions.md`)
+- `memory/reflections/`, `memory/contradictions/` (reflection + contradiction tracking)
 - `tasks/`, `projects/`, `areas/`, `resources/`, `archives/` (execution structure)
 - `tools/` (workspace tools; installed but disabled by default)
 - `skills/` (workspace skills; installed but disabled by default)
@@ -131,7 +134,7 @@ Runtime-only (ignored):
 - Detects pi runtime/auth/key sources and persists runtime metadata to `.tako/state/inference.json`.
 - If workspace-local pi runtime is missing, runtime discovery bootstraps workspace-local nvm/node and installs pi tooling under `.tako/`.
 - Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
-- Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
+- Runs stage-aware onboarding as an explicit state machine inside the app (`name -> purpose -> mission objectives -> XMTP handle`).
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
 - Starts the runtime service (heartbeat + exploration + sensors) and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.

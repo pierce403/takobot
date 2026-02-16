@@ -27,7 +27,14 @@ from textual.widgets import Footer, Input, Static, TextArea
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
 from .conversation import ConversationStore
-from .config import TakoConfig, explain_tako_toml, load_tako_toml, set_updates_auto_apply, set_workspace_name
+from .config import (
+    TakoConfig,
+    explain_tako_toml,
+    load_tako_toml,
+    set_life_stage,
+    set_updates_auto_apply,
+    set_workspace_name,
+)
 from .daily import append_daily_note, ensure_daily_log
 from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
@@ -52,11 +59,14 @@ from .inference import (
 from .identity import build_identity_name_prompt, extract_name_from_model_output, looks_like_name_change_request
 from .input_history import InputHistory
 from .keys import derive_eth_address, load_or_create_keys
+from .life_stage import DEFAULT_LIFE_STAGE, normalize_life_stage_name, stage_policy_for_name, stage_titles_csv
 from .locks import instance_lock
+from .memory_frontmatter import load_memory_frontmatter_excerpt
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
 from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
+from .ascii_octo import octopus_ascii_for_stage
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
 from .sensors import RSSSensor
@@ -99,7 +109,6 @@ from .extensions.registry import (
 
 
 HEARTBEAT_JITTER = 0.2
-EXPLORE_INTERVAL_S = 5 * 60
 LOCAL_CHAT_TIMEOUT_S = 75.0
 LOCAL_CHAT_TOTAL_TIMEOUT_S = 120.0
 LOCAL_CHAT_MAX_CHARS = 700
@@ -123,6 +132,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/stats", "Show counters and metrics"),
     ("/health", "Show health summary"),
     ("/config", "Explain tako.toml settings"),
+    ("/stage", "Show or set life stage"),
     ("/mission", "Show or set mission objectives"),
     ("/models", "Show pi and inference auth config"),
     ("/dose", "Show or tune DOSE levels"),
@@ -185,6 +195,7 @@ LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
     "run",
     "safe",
     "setup",
+    "stage",
     "stats",
     "status",
     "stop",
@@ -329,6 +340,12 @@ class TakoTerminalApp(App[None]):
         self.address = ""
         self.config: TakoConfig = TakoConfig()
         self.config_warning = ""
+        self.life_stage = DEFAULT_LIFE_STAGE
+        self.stage_policy = stage_policy_for_name(self.life_stage)
+        self.stage_changed_at: float | None = None
+        self.type2_budget_day = date.today().isoformat()
+        self.type2_budget_used_today = 0
+        self.type2_budget_exhausted_noted = False
 
         self.identity_name = DEFAULT_SOUL_NAME
         self.identity_role = DEFAULT_SOUL_ROLE
@@ -342,6 +359,7 @@ class TakoTerminalApp(App[None]):
         self.identity_step = 0
         self.awaiting_xmtp_handle = False
         self.identity_onboarding_pending = False
+        self.onboarding_collect_xmtp_handle = False
 
         self.pairing_handle = ""
         self.pairing_resolved = ""
@@ -707,6 +725,9 @@ class TakoTerminalApp(App[None]):
             self.config = cfg
             self.auto_updates_enabled = bool(cfg.updates.auto_apply)
             self.config_warning = warn
+            self.life_stage = stage_policy_for_name(cfg.life.stage).stage.value
+            self.stage_policy = stage_policy_for_name(self.life_stage)
+            self.stage_changed_at = time.monotonic()
             if warn:
                 self._write_system(warn)
                 self._add_activity("config", f"warning: {warn}")
@@ -726,18 +747,21 @@ class TakoTerminalApp(App[None]):
                 )
             else:
                 self._add_activity("config", "tako.toml loaded")
+            self._add_activity(
+                "stage",
+                (
+                    f"{self.stage_policy.title.lower()} "
+                    f"(explore={self.stage_policy.explore_interval_minutes}m "
+                    f"type2/day={self.stage_policy.type2_budget_per_day})"
+                ),
+            )
             self._add_activity("update", f"auto-updates {'on' if self.auto_updates_enabled else 'off'}")
 
             self.dose_path = self.paths.state_dir / "dose.json"
             try:
                 self.dose = dose.load_or_create(
                     self.dose_path,
-                    baseline=(
-                        self.config.dose_baseline.d,
-                        self.config.dose_baseline.o,
-                        self.config.dose_baseline.s,
-                        self.config.dose_baseline.e,
-                    ),
+                    baseline=self._effective_dose_baseline(),
                 )
                 # Catch up for downtime (capped inside tick).
                 now = time.time()
@@ -875,6 +899,8 @@ class TakoTerminalApp(App[None]):
                 self._add_activity("xmtp", "operator imprint detected; starting runtime")
                 await self._start_xmtp_runtime()
                 self._set_state(SessionState.RUNNING)
+                if self.life_stage == DEFAULT_LIFE_STAGE:
+                    await self._set_life_stage("child", reason="operator paired session resumed")
                 self._write_tako("terminal is now your local cockpit. chat works here too. type `help`.")
                 if self._today_outcomes_blank():
                     self._write_tako("tiny morning bubble: type `morning` to set 3 outcomes that make today a win.")
@@ -882,12 +908,11 @@ class TakoTerminalApp(App[None]):
 
             self.operator_paired = False
             self.mode = "onboarding"
-            self._set_state(SessionState.ASK_XMTP_HANDLE)
             self.awaiting_xmtp_handle = False
+            self._begin_identity_onboarding(collect_xmtp_handle=True)
             self._write_tako(
-                "first tentacle task, ASAP: let's set up your XMTP control channel. "
-                "do you have an XMTP handle? (yes/no)\n"
-                "we'll do identity/goals after inference currents are awake."
+                "hatchling onboarding order: name -> purpose -> XMTP handle. "
+                "after that, we shift into Child world-learning behavior."
             )
             if self._today_outcomes_blank():
                 self._write_tako("also: type `morning` any time to set 3 outcomes for today.")
@@ -931,6 +956,50 @@ class TakoTerminalApp(App[None]):
             metadata={"request_key": token, "next_steps": list(next_steps)},
         )
 
+    def _effective_dose_baseline(self) -> tuple[float, float, float, float]:
+        multipliers = self.stage_policy.dose_baseline_multipliers
+        return (
+            _clamp01(self.config.dose_baseline.d * multipliers.d),
+            _clamp01(self.config.dose_baseline.o * multipliers.o),
+            _clamp01(self.config.dose_baseline.s * multipliers.s),
+            _clamp01(self.config.dose_baseline.e * multipliers.e),
+        )
+
+    def _stage_world_watch_poll_minutes(self) -> int:
+        base = int(self.config.world_watch.poll_minutes)
+        scaled = int(round(base * float(self.stage_policy.world_watch_poll_multiplier)))
+        return max(5, scaled)
+
+    def _build_stage_sensors(self) -> list[RSSSensor]:
+        if self.paths is None:
+            return []
+        if not self.stage_policy.world_watch_enabled:
+            return []
+        feeds = list(self.config.world_watch.feeds)
+        return [
+            RSSSensor(
+                feeds,
+                poll_minutes=self._stage_world_watch_poll_minutes(),
+                seen_path=self.paths.state_dir / "rss_seen.json",
+            )
+        ]
+
+    def _configure_runtime_service_for_stage(self) -> None:
+        if self.runtime_service is None:
+            return
+        self.runtime_service.sensors = self._build_stage_sensors()
+        self.runtime_service.explore_interval_s = max(60.0, float(self.stage_policy.explore_interval_minutes) * 60.0)
+
+    async def _reload_runtime_stage_policy(self) -> None:
+        if self.runtime_service is None:
+            return
+        was_running = self.runtime_service.running
+        if was_running:
+            await self.runtime_service.stop()
+        self._configure_runtime_service_for_stage()
+        if was_running and not self.safe_mode:
+            await self.runtime_service.start()
+
     async def _initialize_reasoning_runtime(self) -> None:
         if self.paths is None:
             return
@@ -943,29 +1012,23 @@ class TakoTerminalApp(App[None]):
         self.event_total_written = self.event_bus.events_written
 
         if self.runtime_service is None:
-            world_watch_feeds = list(self.config.world_watch.feeds)
-            sensors = [
-                RSSSensor(
-                    world_watch_feeds,
-                    poll_minutes=self.config.world_watch.poll_minutes,
-                    seen_path=self.paths.state_dir / "rss_seen.json",
-                )
-            ]
             self.runtime_service = Runtime(
                 event_bus=self.event_bus,
                 state_dir=self.paths.state_dir,
-                resources_root=repo_root() / "resources",
+                memory_root=repo_root() / "memory",
                 daily_log_root=daily_root(),
-                sensors=sensors,
+                sensors=self._build_stage_sensors(),
                 heartbeat_interval_s=self.interval,
                 heartbeat_jitter_ratio=HEARTBEAT_JITTER,
-                explore_interval_s=EXPLORE_INTERVAL_S,
+                explore_interval_s=max(60.0, float(self.stage_policy.explore_interval_minutes) * 60.0),
                 mission_objectives_getter=lambda: list(self.mission_objectives),
                 open_tasks_count_getter=lambda: int(self.open_tasks_count),
                 on_heartbeat_tick=self._on_runtime_heartbeat_tick,
                 on_activity=self._add_activity,
                 on_briefing=self._on_runtime_briefing,
             )
+        else:
+            self._configure_runtime_service_for_stage()
         if self.type1_task is None:
             self.type1_task = asyncio.create_task(self._type1_loop(), name="tako-type1")
         if self.type2_task is None:
@@ -973,7 +1036,10 @@ class TakoTerminalApp(App[None]):
         await self._start_local_heartbeat()
         await self._start_periodic_update_checks()
 
-        self._write_system("Type1 tide scanner online. Event bus + runtime service are triaging signals.")
+        self._write_system(
+            "Type1 tide scanner online. Event bus + runtime service are triaging signals. "
+            f"stage={self.life_stage} explore={self.stage_policy.explore_interval_minutes}m"
+        )
         self._add_activity("reasoning", "Type1/Type2 loops online")
         self._record_event(
             "reasoning.engine.started",
@@ -1077,6 +1143,8 @@ class TakoTerminalApp(App[None]):
 
         self.health_summary = {
             "instance_kind": self.instance_kind,
+            "life_stage": self.life_stage,
+            "stage_tone": self.stage_policy.tone,
             "lock": "ok" if self.lock_acquired else "missing",
             "workspace_writable": _yes_no(os.access(repo_root(), os.W_OK)),
             "runtime_writable": _yes_no(os.access(self.paths.root, os.W_OK)),
@@ -1297,7 +1365,42 @@ class TakoTerminalApp(App[None]):
             reason = str(payload.get("reason", "serious signal"))
             if not isinstance(event, dict):
                 continue
+            if not self._consume_type2_budget():
+                event_type = str(event.get("type", "unknown"))
+                self._record_event(
+                    "type2.budget.exhausted",
+                    f"Type2 budget exhausted for {self.type2_budget_day}; deferred {event_type}.",
+                    severity="warn",
+                    source="type2",
+                    metadata={
+                        "event_type": event_type,
+                        "budget": self.stage_policy.type2_budget_per_day,
+                        "used": self.type2_budget_used_today,
+                        "stage": self.life_stage,
+                    },
+                )
+                continue
             await self._run_type2_thinking(event, depth=depth, reason=reason)
+
+    def _roll_type2_budget_day(self) -> None:
+        today_iso = date.today().isoformat()
+        if self.type2_budget_day == today_iso:
+            return
+        self.type2_budget_day = today_iso
+        self.type2_budget_used_today = 0
+        self.type2_budget_exhausted_noted = False
+
+    def _consume_type2_budget(self) -> bool:
+        self._roll_type2_budget_day()
+        budget = max(1, int(self.stage_policy.type2_budget_per_day))
+        if self.type2_budget_used_today >= budget:
+            if not self.type2_budget_exhausted_noted:
+                self.type2_budget_exhausted_noted = True
+                self._add_activity("type2", f"daily budget exhausted ({budget})")
+            return False
+        self.type2_budget_used_today += 1
+        self.type2_budget_exhausted_noted = False
+        return True
 
     async def _run_type2_thinking(self, event: dict[str, Any], *, depth: str, reason: str) -> None:
         sleep_s = {"light": 0.15, "medium": 0.4, "deep": 0.9}.get(depth, 0.4)
@@ -1314,7 +1417,13 @@ class TakoTerminalApp(App[None]):
         model_used = "heuristic"
         if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
             self._add_activity("inference", f"Type2[{depth}] -> requesting model reasoning")
-            prompt = _build_type2_prompt(event=event, depth=depth, reason=reason, fallback=recommendation)
+            prompt = _build_type2_prompt(
+                event=event,
+                depth=depth,
+                reason=reason,
+                fallback=recommendation,
+                memory_frontmatter=load_memory_frontmatter_excerpt(root=repo_root(), max_chars=700),
+            )
             try:
                 self._record_event(
                     "inference.request",
@@ -1525,6 +1634,12 @@ class TakoTerminalApp(App[None]):
         if lowered in {"skip", "later"}:
             self._write_tako("copy that. whenever you want, just tell me what to call myself and what my purpose is.")
             self.identity_onboarding_pending = False
+            if self.mode == "onboarding" and self.onboarding_collect_xmtp_handle:
+                self.routines = "; ".join(self.mission_objectives or [self.identity_role])
+                self._set_state(SessionState.ASK_XMTP_HANDLE)
+                self.awaiting_xmtp_handle = False
+                self._write_tako("keeping current identity defaults for now. do you have an XMTP handle? (yes/no)")
+                return
             self._set_state(SessionState.RUNNING)
             return
 
@@ -1569,6 +1684,14 @@ class TakoTerminalApp(App[None]):
         )
         self._add_activity("identity", f"name/role updated ({self.identity_name})")
         self._write_tako(f"identity tucked away in my little shell: {self.identity_name} — {self.identity_role}")
+        if self.mode == "onboarding" and self.onboarding_collect_xmtp_handle and not self.operator_paired:
+            if not self.mission_objectives:
+                self.mission_objectives = [self.identity_role]
+            self.routines = "; ".join(self.mission_objectives or [self.identity_role])
+            self._set_state(SessionState.ASK_XMTP_HANDLE)
+            self.awaiting_xmtp_handle = False
+            self._write_tako("last hatchling check: do you have an XMTP handle? (yes/no)")
+            return
         self._set_state(SessionState.ONBOARDING_ROUTINES)
         self._write_tako(
             "last onboarding nibble: what mission objectives should guide me? "
@@ -1600,6 +1723,11 @@ class TakoTerminalApp(App[None]):
             metadata={"count": len(self.mission_objectives)},
         )
         self._add_activity("identity", f"mission objectives set ({len(self.mission_objectives)})")
+        if self.mode == "onboarding" and self.onboarding_collect_xmtp_handle and not self.operator_paired:
+            self.awaiting_xmtp_handle = False
+            self._set_state(SessionState.ASK_XMTP_HANDLE)
+            self._write_tako("last hatchling check: do you have an XMTP handle? (yes/no)")
+            return
         await self._finalize_onboarding()
 
     async def _handle_xmtp_handle_prompt(self, text: str) -> None:
@@ -1610,7 +1738,7 @@ class TakoTerminalApp(App[None]):
             if self.mode == "onboarding":
                 self._write_tako("no worries, captain. we'll keep paddling locally for now.")
                 await self._enter_local_only_mode()
-                self._schedule_identity_onboarding_after_awake()
+                await self._finalize_onboarding()
                 return
             await self._enter_local_only_mode()
             return
@@ -1635,7 +1763,7 @@ class TakoTerminalApp(App[None]):
             self._record_event("pairing.user.no_handle", "Operator has no XMTP handle yet.", source="pairing")
             self._write_tako("got it. we'll continue in local mode first, and you can pair later with `pair`.")
             await self._enter_local_only_mode()
-            self._schedule_identity_onboarding_after_awake()
+            await self._finalize_onboarding()
             return
 
         await self._enter_local_only_mode()
@@ -1762,7 +1890,7 @@ class TakoTerminalApp(App[None]):
             if self.mode == "onboarding":
                 self._write_tako("roger that. we'll keep things local.")
                 await self._enter_local_only_mode()
-                self._schedule_identity_onboarding_after_awake()
+                await self._finalize_onboarding()
                 return
             await self._enter_local_only_mode()
             return
@@ -1776,6 +1904,7 @@ class TakoTerminalApp(App[None]):
             self._write_tako("cannot finish pairing: missing operator inbox id.")
             return
 
+        was_onboarding = self.mode == "onboarding"
         self.pairing_completed = True
         imprint_operator(
             self.paths.operator_json,
@@ -1809,7 +1938,10 @@ class TakoTerminalApp(App[None]):
         await self._start_xmtp_runtime()
         self._set_state(SessionState.RUNNING)
         self._write_tako("all tentacles online. chat is open here too. type `help`.")
-        self._schedule_identity_onboarding_after_awake()
+        if was_onboarding:
+            await self._finalize_onboarding()
+        else:
+            self._schedule_identity_onboarding_after_awake()
 
     async def _cleanup_pairing_resources(self) -> None:
         current = asyncio.current_task()
@@ -1843,23 +1975,99 @@ class TakoTerminalApp(App[None]):
         self._record_event("runtime.local_mode", "Running in local-only mode.", source="startup")
 
     async def _finalize_onboarding(self) -> None:
+        self.identity_onboarding_pending = False
+        self.onboarding_collect_xmtp_handle = False
         if self.operator_paired:
             self.mode = "paired"
             self._record_event("onboarding.completed", "Onboarding completed with operator pairing.", source="onboarding")
             self._set_state(SessionState.RUNNING)
-            self._write_tako("identity + mission objectives updated. current stays strong.")
+            if self.life_stage == DEFAULT_LIFE_STAGE:
+                await self._set_life_stage("child", reason="hatchling onboarding completed")
+            self._write_tako("identity + mission objectives updated. Child stage world-learning routines are now active.")
             return
 
         self.mode = "local-only"
         self._record_event("onboarding.completed", "Onboarding completed in local-only mode.", source="onboarding")
         self._set_state(SessionState.RUNNING)
-        self._write_tako("identity + mission objectives updated. local mode stays active.")
+        if self.life_stage == DEFAULT_LIFE_STAGE:
+            await self._set_life_stage("child", reason="hatchling onboarding completed")
+        self._write_tako("identity + mission objectives updated. local mode stays active with Child-stage world learning.")
 
-    def _begin_identity_onboarding(self) -> None:
+    async def _set_life_stage(self, target_stage: str, *, reason: str) -> None:
+        normalized = normalize_life_stage_name(target_stage, default="")
+        if not normalized:
+            self._write_tako(f"invalid stage. valid: {stage_titles_csv()}")
+            return
+        if normalized == self.life_stage:
+            self._write_tako(f"life stage already `{normalized}`.")
+            return
+
+        config_path = repo_root() / "tako.toml"
+        ok, summary = await asyncio.to_thread(set_life_stage, config_path, normalized)
+        if not ok:
+            self._write_tako(f"could not set life stage: {summary}")
+            return
+
+        previous = self.life_stage
+        self.life_stage = normalized
+        self.stage_policy = stage_policy_for_name(normalized)
+        self.stage_changed_at = time.monotonic()
+        refreshed_cfg, warn = load_tako_toml(config_path)
+        self.config = refreshed_cfg
+        self.config_warning = warn
+
+        if self.dose is not None:
+            base_d, base_o, base_s, base_e = self._effective_dose_baseline()
+            self.dose.baseline_d = base_d
+            self.dose.baseline_o = base_o
+            self.dose.baseline_s = base_s
+            self.dose.baseline_e = base_e
+            self.dose.clamp()
+            if self.dose_path is not None:
+                with contextlib.suppress(Exception):
+                    dose.save(self.dose_path, self.dose)
+
+        await self._reload_runtime_stage_policy()
+        self._roll_type2_budget_day()
+        self.type2_budget_exhausted_noted = False
+
+        append_daily_note(
+            daily_root(),
+            date.today(),
+            (
+                f"Life stage changed: {previous} -> {normalized}. "
+                f"Reason: {reason}. Explore={self.stage_policy.explore_interval_minutes}m "
+                f"type2/day={self.stage_policy.type2_budget_per_day}."
+            ),
+        )
+        self._record_event(
+            "life.stage.changed",
+            f"Life stage changed: {previous} -> {normalized} ({reason})",
+            source="runtime",
+            metadata={
+                "from": previous,
+                "to": normalized,
+                "reason": reason,
+                "explore_minutes": self.stage_policy.explore_interval_minutes,
+                "type2_budget_per_day": self.stage_policy.type2_budget_per_day,
+            },
+        )
+        self._add_activity("stage", f"{previous} -> {normalized}")
+        self._write_tako(
+            "life stage updated:\n"
+            f"- from: {previous}\n"
+            f"- to: {normalized}\n"
+            f"- tone: {self.stage_policy.tone}\n"
+            f"- summary: {summary}\n"
+            f"{octopus_ascii_for_stage(normalized)}"
+        )
+
+    def _begin_identity_onboarding(self, *, collect_xmtp_handle: bool = False) -> None:
         self.mode = "onboarding"
         self._set_state(SessionState.ONBOARDING_IDENTITY)
         self.identity_step = 0
         self.identity_onboarding_pending = False
+        self.onboarding_collect_xmtp_handle = collect_xmtp_handle
         self._add_activity("identity", "interactive identity setup started")
         self._record_event("onboarding.identity.begin", "Identity prompt phase started.", source="onboarding")
         if self.identity_name.strip() == DEFAULT_SOUL_NAME:
@@ -2423,10 +2631,11 @@ class TakoTerminalApp(App[None]):
             return
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, stats, health, config, mission, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
                 "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
+                "stage controls: `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
-                "slash commands: type `/` to show available command shortcuts (`/mission`, `/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
+                "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
@@ -2461,6 +2670,7 @@ class TakoTerminalApp(App[None]):
                 f"paired: {paired}\n"
                 f"instance_kind: {self.instance_kind}\n"
                 f"mode: {self.mode}\n"
+                f"stage: {self.life_stage}\n"
                 f"runtime_mode: {self.runtime_mode}\n"
                 f"safe_mode: {safe}\n"
                 f"heartbeat_ticks: {self.heartbeat_ticks}\n"
@@ -2469,6 +2679,8 @@ class TakoTerminalApp(App[None]):
                 f"last_explore: {explore_age}\n"
                 f"type1_processed: {self.type1_processed}\n"
                 f"type2_escalations: {self.type2_escalations}\n"
+                f"type2_budget_day: {self.type2_budget_day}\n"
+                f"type2_budget_used: {self.type2_budget_used_today}/{self.stage_policy.type2_budget_per_day}\n"
                 f"inference_provider: {(self.inference_runtime.selected_provider if self.inference_runtime else 'none')}\n"
                 f"inference_ready: {('yes' if self.inference_runtime and self.inference_runtime.ready else 'no')}\n"
                 f"inference_gate: {('open' if self.inference_gate_open else 'closed')}\n"
@@ -2477,6 +2689,7 @@ class TakoTerminalApp(App[None]):
                 f"last_update_check: {update_check_age}\n"
                 f"dose_label: {self.dose_label}\n"
                 f"world_watch_feeds: {len(self.config.world_watch.feeds)}\n"
+                f"world_watch_poll_minutes: {self._stage_world_watch_poll_minutes() if self.stage_policy.world_watch_enabled else 0}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
                 f"code_dir: {self.code_dir or code_root(repo_root())}\n"
@@ -2529,6 +2742,10 @@ class TakoTerminalApp(App[None]):
                 f"last_update_check: {update_check_age}",
                 f"auto_updates: {'on' if self.auto_updates_enabled else 'off'}",
                 f"operator_paired: {'yes' if self.operator_paired else 'no'}",
+                f"life_stage: {self.life_stage}",
+                f"stage_tone: {self.stage_policy.tone}",
+                f"stage_explore_interval_minutes: {self.stage_policy.explore_interval_minutes}",
+                f"type2_budget_used: {self.type2_budget_used_today}/{self.stage_policy.type2_budget_per_day}",
             ]
             if self.dose is None:
                 lines.append("dose: not ready")
@@ -2551,6 +2768,31 @@ class TakoTerminalApp(App[None]):
 
         if cmd in {"config", "toml"}:
             self._write_tako(explain_tako_toml(self.config, path=repo_root() / "tako.toml"))
+            return
+
+        if cmd == "stage":
+            action_raw = rest.strip()
+            action = action_raw.lower()
+            if action in {"", "show", "status"}:
+                routines = ", ".join(self.stage_policy.routines_active)
+                self._write_tako(
+                    "life stage:\n"
+                    f"- current: {self.life_stage}\n"
+                    f"- title: {self.stage_policy.title}\n"
+                    f"- tone: {self.stage_policy.tone}\n"
+                    f"- routines: {routines}\n"
+                    f"- explore_interval_minutes: {self.stage_policy.explore_interval_minutes}\n"
+                    f"- type2_budget_per_day: {self.stage_policy.type2_budget_per_day}\n"
+                    f"- world_watch_enabled: {'yes' if self.stage_policy.world_watch_enabled else 'no'}\n"
+                    f"- world_watch_poll_minutes: {self._stage_world_watch_poll_minutes() if self.stage_policy.world_watch_enabled else 0}\n"
+                    f"- valid: {stage_titles_csv()}"
+                )
+                return
+            if action.startswith("set "):
+                target = action_raw.split(maxsplit=1)[1] if len(action_raw.split(maxsplit=1)) == 2 else ""
+                await self._set_life_stage(target, reason="operator command")
+                return
+            self._write_tako("usage: `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`")
             return
 
         if cmd == "mission":
@@ -3865,6 +4107,7 @@ class TakoTerminalApp(App[None]):
                 user_label="User",
                 assistant_label=self.identity_name or "Takobot",
             )
+        memory_frontmatter = load_memory_frontmatter_excerpt(root=repo_root(), max_chars=1200)
 
         prompt = _build_terminal_chat_prompt(
             text=text,
@@ -3875,6 +4118,9 @@ class TakoTerminalApp(App[None]):
             state=self.state.value,
             operator_paired=self.operator_paired,
             history=history,
+            life_stage=self.life_stage,
+            stage_tone=self.stage_policy.tone,
+            memory_frontmatter=memory_frontmatter,
         )
         self._add_activity("inference", "terminal chat inference requested")
         self._stream_begin(focus=text)
@@ -4258,6 +4504,7 @@ class TakoTerminalApp(App[None]):
         input_pending = self._queued_input_total()
         self.status_bar.update(
             f"state={self.state.value} | mode={self.mode} | runtime={self.runtime_mode} | "
+            f"stage={self.life_stage} | "
             f"dose={self.dose_label} | indicator={self.indicator} | mind={thinking} | "
             f"input_pending={input_pending} | safe={safe} | updates={updates} | uptime={uptime_s}s"
         )
@@ -4280,6 +4527,7 @@ class TakoTerminalApp(App[None]):
 
         session = {
             "state": self.state.value,
+            "stage": self.life_stage,
             "operator_paired": self.operator_paired,
             "awaiting_xmtp_handle": self.awaiting_xmtp_handle,
             "safe_mode": self.safe_mode,
@@ -4321,10 +4569,15 @@ class TakoTerminalApp(App[None]):
         loops_age = f"{int(loops_age_s // 3600)}h" if loops_age_s >= 3600 else f"{int(loops_age_s)}s"
         thinking = self._thinking_visual()
         active_work = _active_work_summary(list(self.live_work_items))
+        stage_routines = ", ".join(self.stage_policy.routines_active)
+        type2_budget = f"{self.type2_budget_used_today}/{self.stage_policy.type2_budget_per_day}"
         tasks = (
             "Tasks\n"
             f"- state: {self.state.value}\n"
             f"- instance: {self.instance_kind}\n"
+            f"- life stage: {self.life_stage} ({self.stage_policy.title})\n"
+            f"- stage tone: {self.stage_policy.tone}\n"
+            f"- stage routines: {stage_routines}\n"
             f"- next: {pair_next}\n"
             f"- runtime: {self.runtime_mode}\n"
             f"- mind: {thinking}\n"
@@ -4334,6 +4587,7 @@ class TakoTerminalApp(App[None]):
             f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
             f"- open tasks: {self.open_tasks_count}\n"
             f"- open loops: {loops_count} (oldest {loops_age})\n"
+            f"- type2 budget today: {type2_budget}\n"
             f"- heartbeat ticks: {self.heartbeat_ticks}\n"
             f"- explore ticks: {self.explore_ticks}\n"
             f"- last heartbeat: {heartbeat_age}\n"
@@ -4341,17 +4595,14 @@ class TakoTerminalApp(App[None]):
             f"- last update check: {update_check_age}"
         )
         self.tasks_panel.update(tasks)
-        level = _octopus_level(
-            heartbeat_ticks=self.heartbeat_ticks,
-            type2_escalations=self.type2_escalations,
-            operator_paired=self.operator_paired,
-        )
         frame = int((time.monotonic() - self.started_at) * 2.0)
         self.octo_panel.update(
             _octopus_panel_text(
-                level,
+                self.life_stage,
                 frame,
                 version=__version__,
+                stage_title=self.stage_policy.title,
+                stage_tone=self.stage_policy.tone,
                 dose_state=self.dose,
                 dose_label=self.dose_label,
                 thinking=thinking,
@@ -4367,8 +4618,10 @@ class TakoTerminalApp(App[None]):
             "Memory\n"
             f"- name: {self.identity_name}\n"
             f"- role: {self.identity_role}\n"
+            f"- life stage: {self.life_stage}\n"
             f"- mission objectives: {mission_preview}\n"
             f"- daily log: memory/dailies/{date.today().isoformat()}.md\n"
+            f"- world notebook: memory/world/{date.today().isoformat()}.md\n"
             f"- routines: {self.routines or mission_preview}\n"
             f"- event log: {event_log_value}"
         )
@@ -4378,6 +4631,7 @@ class TakoTerminalApp(App[None]):
         inference_provider = self.inference_runtime.selected_provider if self.inference_runtime else "none"
         inference_ready = "yes" if self.inference_runtime and self.inference_runtime.ready else "no"
         inference_source = self.inference_runtime.selected_key_source if self.inference_runtime else None
+        world_poll = self._stage_world_watch_poll_minutes() if self.stage_policy.world_watch_enabled else 0
         if self.dose is None:
             dose_line = "- dose: not ready"
         else:
@@ -4388,12 +4642,16 @@ class TakoTerminalApp(App[None]):
         sensors = (
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
+            f"- life stage: {self.life_stage}\n"
             f"- mind: {thinking}\n"
             f"- input queue: {self._queued_input_total()}\n"
-            f"- world-watch feeds: {len(self.config.world_watch.feeds)} (poll {self.config.world_watch.poll_minutes}m)\n"
+            f"- world-watch routine: {'active' if self.stage_policy.world_watch_enabled else 'paused'}\n"
+            f"- world-watch feeds: {len(self.config.world_watch.feeds)} (poll {world_poll}m)\n"
+            f"- explore cadence: every {self.stage_policy.explore_interval_minutes}m\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"
+            f"- type2 budget used: {type2_budget}\n"
             f"- type2 last: {self.type2_last}\n"
             f"{dose_line}\n"
             f"- inference: {inference_provider} (ready={inference_ready})\n"
@@ -4732,6 +4990,8 @@ def _looks_like_local_command(text: str) -> bool:
     tail = rest.strip().lower()
     if cmd in {"help", "h", "?", "status", "stats", "health", "doctor", "config", "toml", "models", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
         return tail == ""
+    if cmd == "stage":
+        return True
     if cmd == "mission":
         return True
     if cmd == "dose":
@@ -4810,6 +5070,9 @@ def _build_terminal_chat_prompt(
     state: str,
     operator_paired: bool,
     history: str,
+    life_stage: str = DEFAULT_LIFE_STAGE,
+    stage_tone: str = "",
+    memory_frontmatter: str = "",
 ) -> str:
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
@@ -4819,6 +5082,9 @@ def _build_terminal_chat_prompt(
     objectives_line = " | ".join(obj.strip() for obj in objectives[:4] if obj.strip())
     if len(objectives) > 4:
         objectives_line += f" | (+{len(objectives) - 4} more)"
+    memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
+    stage_line = life_stage.strip().lower() or DEFAULT_LIFE_STAGE
+    tone_line = " ".join((stage_tone or "").split()).strip() or "steady"
     control_surface_line = (
         "Operator control surfaces: terminal app and paired XMTP channel.\n"
         if operator_paired
@@ -4830,14 +5096,18 @@ def _build_terminal_chat_prompt(
         "Never claim your name is `Tako` unless canonical identity name is exactly `Tako`.\n"
         f"Identity mission: {role_line}\n"
         f"Mission objectives: {objectives_line}\n"
+        f"Life stage: {stage_line} ({tone_line}).\n"
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
         "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
+        "Use MEMORY.md frontmatter spec to decide what belongs in memory vs execution structures.\n"
         "Terminal chat is always available.\n"
         "Hard boundary: only the operator may change identity/config/tools/permissions/routines.\n"
         f"{control_surface_line}"
         f"session_mode={mode}\n"
         f"session_state={state}\n"
         f"operator_paired={paired}\n"
+        "memory_frontmatter=\n"
+        f"{memory_block}\n"
         "recent_conversation=\n"
         f"{history_block}"
         f"user_message={text}\n"
@@ -4898,19 +5168,28 @@ def _local_chat_unavailable_message(
     return message
 
 
-def _build_type2_prompt(*, event: dict[str, Any], depth: str, reason: str, fallback: str) -> str:
+def _build_type2_prompt(
+    *,
+    event: dict[str, Any],
+    depth: str,
+    reason: str,
+    fallback: str,
+    memory_frontmatter: str = "",
+) -> str:
     event_type = str(event.get("type", "unknown"))
     severity = str(event.get("severity", "info"))
     source = str(event.get("source", "system"))
     message = str(event.get("message", ""))
     metadata = event.get("metadata")
     metadata_json = json.dumps(metadata, ensure_ascii=True, sort_keys=True) if isinstance(metadata, dict) else "{}"
+    memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
 
     return (
         "You are Tako Type2 reasoning.\n"
         "Given an operational event, produce exactly one concise safe recommendation line.\n"
         "Priorities: safety, reversibility, operator control boundary, and immediate next action.\n"
         "No markdown, no bullets, <= 180 characters.\n"
+        "Respect MEMORY.md frontmatter guidance on memory-vs-execution boundaries.\n"
         f"depth={depth}\n"
         f"reason={reason}\n"
         f"event.type={event_type}\n"
@@ -4918,6 +5197,8 @@ def _build_type2_prompt(*, event: dict[str, Any], depth: str, reason: str, fallb
         f"event.source={source}\n"
         f"event.message={message}\n"
         f"event.metadata={metadata_json}\n"
+        "memory_frontmatter=\n"
+        f"{memory_block}\n"
         f"fallback={fallback}\n"
     )
 
@@ -4952,6 +5233,14 @@ def _stream_focus_summary(text: str) -> str:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _clamp01(value: float) -> float:
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
 
 
 def _is_git_identity_error(text: str) -> bool:
@@ -5073,29 +5362,18 @@ def _dose_productivity_hint(state: dose.DoseState) -> str:
     return ""
 
 
-def _octopus_level(*, heartbeat_ticks: int, type2_escalations: int, operator_paired: bool) -> int:
-    score = (heartbeat_ticks // 20) + type2_escalations + (2 if operator_paired else 0)
-    if score >= 18:
-        return 4
-    if score >= 10:
-        return 3
-    if score >= 4:
-        return 2
-    if score >= 1:
-        return 1
-    return 0
-
-
 def _octopus_panel_text(
-    level: int,
+    stage_name: str,
     frame: int,
     *,
     version: str,
+    stage_title: str,
+    stage_tone: str,
     dose_state: dose.DoseState | None,
     dose_label: str,
     thinking: str,
 ) -> str:
-    art = _octopus_art(level, frame)
+    art = octopus_ascii_for_stage(stage_name, frame=frame)
     mood = "zzz" if frame % 12 == 0 else "~"
     if dose_state is None:
         dose_line = "D○○○○ O○○○○ S○○○○ E○○○○ pending"
@@ -5107,7 +5385,13 @@ def _octopus_panel_text(
             f"E{_dose_meter(dose_state.e)} "
             f"{dose_label}"
         )
-    return f"Takobot v{version} | L{level} {mood}\nMind {thinking}\n{dose_line}\n{art}"
+    return (
+        f"Takobot v{version} | {stage_title} {mood}\n"
+        f"Mind {thinking}\n"
+        f"Tone {stage_tone}\n"
+        f"{dose_line}\n"
+        f"{art}"
+    )
 
 
 def _dose_meter(value: float, *, width: int = 4) -> str:
@@ -5115,44 +5399,6 @@ def _dose_meter(value: float, *, width: int = 4) -> str:
     filled = int(round(clamped * width))
     filled = max(0, min(width, filled))
     return ("●" * filled) + ("○" * (width - filled))
-
-
-def _octopus_art(level: int, frame: int) -> str:
-    phase = frame % 4
-    blink = frame % 12 == 0
-    eyes = "- -" if blink else ("O O" if level >= 4 else "o o")
-    beak = "><" if level >= 2 else "^"
-
-    band = ".-~~~~-." if level >= 3 else ".-\"\"\"-."
-
-    bubble_offsets = [5, 3, 7, 4]
-    bubble_chars = ["o", "o", ("O" if level >= 4 else "o"), "o"]
-    bubble = " " * bubble_offsets[phase] + bubble_chars[phase]
-    crown = "  ^-^" if level >= 4 else ""
-
-    tentacles = [
-        ("_/~~\\__/~~\\_", "/__/~~\\__/~~\\__\\", "\\__\\__/~~\\__/__/_"),
-        ("_/~~\\_/~~\\__", "/__/~~\\__/~~\\__\\", "\\__\\__/~~\\__/__/_"),
-        ("__/~~\\__/~~\\_", "/__/~~\\_/~~\\__\\", "\\__\\__/~~\\__/__/_"),
-        ("_/~~\\__/~~\\__", "/__/~~\\__/~~\\__\\", "\\__\\__/~~\\__/__/_"),
-    ]
-    t1, t2, t3 = tentacles[phase]
-
-    lines = [
-        f"{bubble}{crown}".rstrip(),
-        band,
-        f"/  {eyes}  \\",
-        f"|    {beak}    |",
-        r"|  \____/  |",
-        r"\________/",
-        t1,
-        t2,
-        t3,
-    ]
-
-    drift = [0, 1, 2, 1][phase]
-    prefix = " " * (2 + drift)
-    return "\n".join(prefix + line for line in lines)
 
 
 def _dns_lookup_ok(host: str) -> bool:

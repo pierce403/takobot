@@ -2,6 +2,9 @@
 name = "Tako"
 version = 1
 
+[life]
+stage = "hatchling"
+
 [dose.baseline]
 d = 0.55
 o = 0.55

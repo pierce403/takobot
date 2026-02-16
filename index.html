@@ -673,9 +673,9 @@ curl -fsSL https://tako.bot/setup.sh | bash
 # Next runs:
 .venv/bin/takobot
 
-# In app: XMTP setup prompt appears first
+# In app: hatchling onboarding asks name -> purpose -> XMTP handle?
 # Startup: health check (instance + resources + lock)
-# Then: onboarding questions (name/purpose/routines)
+# After onboarding: stage moves to child (world learning)
 # After pairing: XMTP adds remote control; terminal keeps full local operator control</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Developer utilities: <code>.venv/bin/takobot doctor</code> and <code>.venv/bin/takobot hi --to &lt;to&gt; [--message ...]</code>.
@@ -685,9 +685,10 @@ curl -fsSL https://tako.bot/setup.sh | bash
           <div class="card panel">
             <h2>The three systems</h2>
             <ul>
-              <li><b>Memory system</b>: durable knowledge in git-tracked Markdown (<code>memory/</code> + promotions into <code>MEMORY.md</code>).</li>
+              <li><b>Memory system</b>: durable knowledge in git-tracked Markdown (<code>memory/</code>) guided by repo-root <code>MEMORY.md</code> frontmatter spec.</li>
               <li><b>Emotion system</b>: deterministic DOSE state (<code>.tako/state/dose.json</code>) that biases escalation sensitivity and tone.</li>
               <li><b>Productivity system</b>: GTD + PARA execution structure (<code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>) plus open loops (<code>.tako/state/open_loops.json</code>).</li>
+              <li><b>Life stages</b>: <code>hatchling</code> → <code>child</code> → <code>teen</code> → <code>adult</code> with stage policies in <code>tako.toml</code>.</li>
               <li><b>Safety boundary</b>: operator control + quarantine-first skill/tool installs (analyze → install disabled → enable).</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
@@ -705,7 +706,8 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 </p>
                 <ul>
                   <li><b>Daily logs</b>: <code>memory/dailies/YYYY-MM-DD.md</code> (no secrets; summaries only).</li>
-                  <li><b>World notes</b>: <code>memory/people/</code>, <code>memory/places/</code>, <code>memory/things/</code>.</li>
+                  <li><b>World notes</b>: <code>memory/world/YYYY-MM-DD.md</code> + <code>memory/world/model.md</code>/<code>entities.md</code>/<code>assumptions.md</code>.</li>
+                  <li><b>Reflections + contradictions</b>: <code>memory/reflections/</code> and <code>memory/contradictions/contradictions.md</code>.</li>
                   <li><b>Promotions</b>: operator-approved notes go into <code>MEMORY.md</code> (via <code>promote</code>).</li>
                   <li><b>Progressive summarization</b>: <code>compress</code> writes a structured summary block into today’s daily log.</li>
                 </ul>
@@ -793,15 +795,13 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>
                 Launches the interactive terminal app and runs onboarding as explicit states (or falls back to stdout daemon mode when no interactive TTY is available).
               </li>
+              <li>Uses stage policy from <code>tako.toml</code> (<code>[life].stage</code>) to control exploration cadence, Type2 budget/day, and DOSE baseline multipliers.</li>
               <li>
                 Installs <code>tako.sh</code> with the package as a shell wrapper; deployed mode dispatches to installed <code>takobot</code>.
               </li>
               <li>
-                Prompts XMTP setup first in-app, sends outbound pairing DM, assumes the recipient is ready, then stores
+                Runs hatchling onboarding in order (name, purpose, mission objectives, XMTP handle), sends outbound pairing DM when applicable, and stores
                 operator metadata in <code>.tako/operator.json</code> when paired.
-              </li>
-              <li>
-                Delays identity/goals/routine prompts until inference has actually run (or until manually triggered).
               </li>
               <li>
                 Offers a <code>morning</code> prompt to set 3 outcomes for today (stored in <code>memory/dailies/</code>).
@@ -810,7 +810,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Starts a runtime service (heartbeat + exploration + sensors) with EventBus-backed Type 1 triage and Type 2 escalation for serious events.
               </li>
               <li>
-                World Watch uses RSS/Atom feeds from <code>tako.toml</code>, writes deterministic notes to <code>resources/world/</code>, and emits bounded briefings.
+                World Watch uses RSS/Atom feeds from <code>tako.toml</code>, writes deterministic notes to <code>memory/world/</code>, and emits bounded briefings.
               </li>
               <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes and verifies no tracked changes remain.</li>
@@ -826,7 +826,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Maintains an open-loops index at <code>.tako/state/open_loops.json</code> (unfinished tasks + onboarding prompts) and shows it in the sidebar.
               </li>
               <li>
-                Shows a live activity panel (inference/tool/runtime) plus a top-right ASCII octopus panel with Takobot version and compact DOSE indicators.
+                Shows a live activity panel (inference/tool/runtime) plus a top-right stage-specific ASCII octopus panel with Takobot version and compact DOSE indicators.
               </li>
             </ul>
           </div>

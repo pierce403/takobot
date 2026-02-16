@@ -88,6 +88,7 @@
   - Runs XMTP daemon loop as a background task when paired.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Keeps full local operator control in the terminal for identity/config/tools/permissions/routines, even when XMTP is paired.
+  - Queues local terminal input so long-running turns do not block new message entry; status/sensors expose pending input count.
   - Includes an activity panel with inference/tool/runtime trace lines.
   - App transcript/system lines are appended to `.tako/logs/app.log`.
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.

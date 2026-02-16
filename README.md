@@ -23,6 +23,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
+- Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection

@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — TUI input queue prevents local chat stalls
+
+- What happened: while a long inference turn was active, terminal input handling could feel blocked because submissions awaited routing inline.
+- Fix: moved local input handling to a dedicated queue + worker so new messages can be entered immediately while previous turns are still running.
+- Prevention: keep UI submission path non-blocking; do long-running routing/inference work in background workers and expose queue depth in UI status.
+
 ### 2026-02-16 — Terminal retains full operator control after pairing
 
 - What happened: terminal fallback/chat copy implied that identity/config/tools/permissions/routines changes were XMTP-only once paired, which confused operator expectations.

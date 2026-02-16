@@ -343,6 +343,7 @@ class TakoTerminalApp(App[None]):
         self.event_ingest_task: asyncio.Task[None] | None = None
         self.type1_task: asyncio.Task[None] | None = None
         self.type2_task: asyncio.Task[None] | None = None
+        self.input_worker_task: asyncio.Task[None] | None = None
         self.boot_task: asyncio.Task[None] | None = None
         self.update_check_task: asyncio.Task[None] | None = None
 
@@ -400,6 +401,8 @@ class TakoTerminalApp(App[None]):
         self.prompt_step = 0
         self.prompt_values: list[str] = []
         self.input_history = InputHistory(max_items=INPUT_HISTORY_MAX)
+        self.input_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.input_processing = False
         self.conversations: ConversationStore | None = None
 
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
@@ -471,6 +474,7 @@ class TakoTerminalApp(App[None]):
         self.activity_panel = self.query_one("#panel-activity", Static)
         self.slash_menu.display = False
         self._ensure_input_focus()
+        self.input_worker_task = asyncio.create_task(self._input_worker_loop(), name="tako-input-worker")
         self.set_interval(0.5, self._refresh_status)
         self._refresh_panels()
         self.boot_task = asyncio.create_task(self._boot())
@@ -616,13 +620,48 @@ class TakoTerminalApp(App[None]):
         event.input.value = ""
 
         self._write_user(text)
-        self._set_indicator("thinking")
-        try:
-            await self._route_input(text)
-        finally:
-            if self.indicator == "thinking":
-                self._set_indicator("idle")
-            self._ensure_input_focus()
+        pending_before = self._queued_input_total()
+        pending_after = self._enqueue_local_input(text)
+        if pending_before > 0:
+            self._add_activity("input", f"queued local message ({pending_after} pending)")
+        elif not self.indicator.startswith("type2:"):
+            self._set_indicator("thinking")
+        self._ensure_input_focus()
+
+    def _queued_input_total(self) -> int:
+        return self.input_queue.qsize() + (1 if self.input_processing else 0)
+
+    def _enqueue_local_input(self, text: str) -> int:
+        self.input_queue.put_nowait(text)
+        return self._queued_input_total()
+
+    async def _input_worker_loop(self) -> None:
+        while True:
+            text = await self.input_queue.get()
+            self.input_processing = True
+            if not self.indicator.startswith("type2:"):
+                self._set_indicator("thinking")
+            try:
+                await self._route_input(text)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                summary = _summarize_error(exc)
+                self._write_system(f"input routing warning: {summary}")
+                self._append_app_log("input", f"route-warning {summary}")
+                self._add_activity("input", f"route warning: {summary}")
+                self._record_event(
+                    "ui.input.route_warning",
+                    f"Input routing warning: {summary}",
+                    severity="warn",
+                    source="ui",
+                )
+            finally:
+                self.input_processing = False
+                self.input_queue.task_done()
+                if self.input_queue.empty() and self.indicator == "thinking":
+                    self._set_indicator("idle")
+                self._ensure_input_focus()
 
     async def _boot(self) -> None:
         self._set_state(SessionState.BOOTING)
@@ -3718,6 +3757,9 @@ class TakoTerminalApp(App[None]):
             return
         self.shutdown_complete = True
 
+        await _cancel_task(self.input_worker_task)
+        self.input_worker_task = None
+
         if self.boot_task is not None and not self.boot_task.done():
             self.boot_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -3861,9 +3903,11 @@ class TakoTerminalApp(App[None]):
         safe = "on" if self.safe_mode else "off"
         updates = "on" if self.auto_updates_enabled else "off"
         thinking = self._thinking_visual()
+        input_pending = self._queued_input_total()
         self.status_bar.update(
             f"state={self.state.value} | mode={self.mode} | runtime={self.runtime_mode} | "
-            f"dose={self.dose_label} | indicator={self.indicator} | mind={thinking} | safe={safe} | updates={updates} | uptime={uptime_s}s"
+            f"dose={self.dose_label} | indicator={self.indicator} | mind={thinking} | "
+            f"input_pending={input_pending} | safe={safe} | updates={updates} | uptime={uptime_s}s"
         )
         self._refresh_panels()
 
@@ -3973,6 +4017,7 @@ class TakoTerminalApp(App[None]):
             "Sensors\n"
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
             f"- mind: {thinking}\n"
+            f"- input queue: {self._queued_input_total()}\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"

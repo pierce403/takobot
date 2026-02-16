@@ -112,6 +112,17 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("Never claim your name is `Tako`", prompt)
         self.assertIn("Operator control surfaces: terminal app and paired XMTP channel.", prompt)
 
+    def test_local_input_queue_count_includes_active_processing(self) -> None:
+        app = TakoTerminalApp(interval=5.0)
+        self.assertEqual(0, app._queued_input_total())
+
+        pending_after_first = app._enqueue_local_input("first")
+        self.assertEqual(1, pending_after_first)
+        self.assertEqual(1, app._queued_input_total())
+
+        app.input_processing = True
+        self.assertEqual(2, app._queued_input_total())
+
 
 if __name__ == "__main__":
     unittest.main()

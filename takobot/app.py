@@ -35,6 +35,7 @@ from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import (
+    PROVIDER_PRIORITY,
     CONFIGURABLE_API_KEY_VARS,
     SUPPORTED_PROVIDER_PREFERENCES,
     InferenceRuntime,
@@ -92,6 +93,7 @@ from .extensions.registry import (
 HEARTBEAT_JITTER = 0.2
 EVENT_INGEST_INTERVAL_S = 0.8
 LOCAL_CHAT_TIMEOUT_S = 75.0
+LOCAL_CHAT_TOTAL_TIMEOUT_S = 120.0
 LOCAL_CHAT_MAX_CHARS = 700
 ACTIVITY_LOG_MAX = 80
 TRANSCRIPT_LOG_MAX = 2000
@@ -104,6 +106,7 @@ SLASH_MENU_MAX_ITEMS = 12
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+INFERENCE_WATCHDOG_INTERVAL_S = 10.0
 SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/help", "Show command reference"),
     ("/status", "Show runtime status"),
@@ -560,6 +563,22 @@ class TakoTerminalApp(App[None]):
         event.stop()
         self.input_box.insert_text_at_cursor(cleaned)
         self._add_activity("clipboard", "sanitized pasted text")
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button != 3:
+            return
+        if not hasattr(self, "transcript") or not hasattr(self, "stream_box"):
+            return
+        target = event.widget
+        selection = self._selected_text_for_widget(target)
+        if not selection:
+            return
+        event.stop()
+        event.prevent_default()
+        summary = "transcript selection" if self._widget_matches(target, self.transcript) else "stream selection"
+        self._copy_payload_to_clipboard(selection, summary=summary)
+        self._add_activity("clipboard", "copied selected text (right-click)")
+        self.call_after_refresh(self._ensure_input_focus)
 
     def on_key(self, event: events.Key) -> None:
         if event.key not in {"up", "down", "tab"}:
@@ -3388,6 +3407,8 @@ class TakoTerminalApp(App[None]):
     def _on_inference_stream_event(self, kind: str, payload: str) -> None:
         if kind == "provider":
             self.stream_provider = payload.strip() or self.stream_provider
+            self._add_activity("inference", f"provider attempt: {self.stream_provider}")
+            self._append_app_log("inference", f"provider={self.stream_provider}")
             self._stream_render(force=True)
             return
 
@@ -3398,6 +3419,7 @@ class TakoTerminalApp(App[None]):
             self.stream_status_lines.append(line)
             if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
                 self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
+            self._append_app_log("inference", f"status={_summarize_text(line)}")
             self._stream_render()
             return
 
@@ -3436,6 +3458,33 @@ class TakoTerminalApp(App[None]):
         self.stream_box.load_text(header + focus + status + body)
         self.stream_box.scroll_end(animate=False)
 
+    def _ready_inference_providers(self) -> list[str]:
+        runtime = self.inference_runtime
+        if runtime is None:
+            return []
+        providers: list[str] = []
+        for provider in PROVIDER_PRIORITY:
+            status = runtime.statuses.get(provider)
+            if status and status.ready:
+                providers.append(provider)
+        return providers
+
+    async def _inference_watchdog_loop(self, stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            await asyncio.sleep(INFERENCE_WATCHDOG_INTERVAL_S)
+            if stop_event.is_set():
+                return
+            if not self.stream_active:
+                continue
+            elapsed_s = 0
+            if self.stream_started_at is not None:
+                elapsed_s = int(max(0.0, time.monotonic() - self.stream_started_at))
+            provider = self.stream_provider or "starting"
+            self._on_inference_stream_event(
+                "status",
+                f"debug: waiting on provider={provider} elapsed={elapsed_s}s",
+            )
+
     async def _local_chat_reply(self, text: str) -> str:
         if self.operator_paired:
             fallback = (
@@ -3467,16 +3516,52 @@ class TakoTerminalApp(App[None]):
         )
         self._add_activity("inference", "terminal chat inference requested")
         self._stream_begin(focus=text)
+        ready_providers = self._ready_inference_providers()
+        if ready_providers:
+            self._on_inference_stream_event(
+                "status",
+                "debug: ready providers=" + ", ".join(ready_providers),
+            )
+        self._append_app_log(
+            "inference",
+            (
+                "chat-start "
+                f"selected={self.inference_runtime.selected_provider or 'none'} "
+                f"ready={','.join(ready_providers) or 'none'} "
+                f"per_provider_timeout={LOCAL_CHAT_TIMEOUT_S:.0f}s "
+                f"total_timeout={LOCAL_CHAT_TOTAL_TIMEOUT_S:.0f}s"
+            ),
+        )
+        started_at = time.monotonic()
+        watchdog_stop = asyncio.Event()
+        watchdog_task = asyncio.create_task(self._inference_watchdog_loop(watchdog_stop), name="tako-inference-watchdog")
 
         try:
-            provider, reply = await stream_inference_prompt_with_fallback(
-                self.inference_runtime,
-                prompt,
-                timeout_s=LOCAL_CHAT_TIMEOUT_S,
-                on_event=self._on_inference_stream_event,
+            provider, reply = await asyncio.wait_for(
+                stream_inference_prompt_with_fallback(
+                    self.inference_runtime,
+                    prompt,
+                    timeout_s=LOCAL_CHAT_TIMEOUT_S,
+                    on_event=self._on_inference_stream_event,
+                ),
+                timeout=LOCAL_CHAT_TOTAL_TIMEOUT_S,
             )
+        except asyncio.TimeoutError:
+            self.inference_last_error = f"inference timed out after {int(LOCAL_CHAT_TOTAL_TIMEOUT_S)}s"
+            self._append_app_log("inference", f"chat-timeout {self.inference_last_error}")
+            self._on_inference_stream_event("status", f"debug: {self.inference_last_error}")
+            self._record_event(
+                "inference.chat.timeout",
+                f"Terminal chat inference timed out after {int(LOCAL_CHAT_TOTAL_TIMEOUT_S)}s.",
+                severity="warn",
+                source="inference",
+            )
+            self._add_activity("inference", f"chat timeout: {self.inference_last_error}")
+            self._stream_clear()
+            return fallback
         except Exception as exc:  # noqa: BLE001
             self.inference_last_error = _summarize_error(exc)
+            self._append_app_log("inference", f"chat-error {self.inference_last_error}")
             self._record_event(
                 "inference.chat.error",
                 f"Terminal chat inference failed: {exc}",
@@ -3487,15 +3572,21 @@ class TakoTerminalApp(App[None]):
             self._stream_clear()
             return fallback
         finally:
+            watchdog_stop.set()
+            watchdog_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watchdog_task
             self.stream_active = False
             self._stream_render(force=True)
 
         cleaned = _clean_chat_reply(reply)
         if not cleaned:
             return fallback
+        elapsed_s = int(max(0.0, time.monotonic() - started_at))
         self.inference_ever_used = True
         self.inference_last_provider = provider
         self.inference_last_error = ""
+        self._append_app_log("inference", f"chat-success provider={provider} elapsed={elapsed_s}s")
         self._add_activity("inference", f"terminal chat used provider={provider}")
         self._record_event(
             "inference.chat.reply",
@@ -3689,6 +3780,25 @@ class TakoTerminalApp(App[None]):
             return
         with contextlib.suppress(Exception):
             input_box.focus()
+
+    def _widget_matches(self, target, widget) -> bool:
+        if target is widget:
+            return True
+        ancestors = getattr(target, "ancestors", ())
+        return widget in ancestors
+
+    def _selected_text_for_widget(self, target) -> str:
+        source = None
+        if self._widget_matches(target, self.transcript):
+            source = self.transcript
+        elif self._widget_matches(target, self.stream_box):
+            source = self.stream_box
+        if source is None:
+            return ""
+        selected = ""
+        with contextlib.suppress(Exception):
+            selected = str(source.selected_text or "")
+        return selected.strip()
 
     def _hide_slash_menu(self) -> None:
         if not hasattr(self, "slash_menu"):
@@ -3951,9 +4061,7 @@ class TakoTerminalApp(App[None]):
 
 def run_terminal_app(*, interval: float = 30.0) -> int:
     app = TakoTerminalApp(interval=interval)
-    # Keep terminal-native text selection/copy behavior (right-click/context-menu) by
-    # disabling mouse reporting in app mode.
-    app.run(mouse=False)
+    app.run()
     return 0
 
 

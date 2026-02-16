@@ -75,8 +75,14 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 ### 2026-02-15 — XMTP resilience + terminal-native right-click copy
 
 - What happened: operators observed XMTP reliability issues and right-click copy in the TUI could clear selection instead of copying selected text.
-- Fix: added XMTP send retries and daemon-side client rebuild on repeated stream/poll failures; switched app mode to run with mouse reporting disabled so terminal-native selection/right-click copy works reliably.
-- Prevention: keep transport resilience in daemon loops and preserve native terminal copy ergonomics for transcript inspection.
+- Fix: added XMTP send retries and daemon-side client rebuild on repeated stream/poll failures; added explicit in-app right-click copy for selected transcript/stream text so selection is preserved and copied reliably.
+- Prevention: keep transport resilience in daemon loops and provide deterministic clipboard actions for transcript inspection inside the TUI.
+
+### 2026-02-15 — Inference stall visibility + bounded chat timeout
+
+- What happened: local inference turns could appear stuck on “responding” for long periods with little telemetry, especially during multi-provider fallback attempts.
+- Fix: added richer inference debug status lines (ready providers, periodic watchdog updates), app-log tracing for provider/status transitions, and a global local-chat timeout budget to prevent indefinite stalls.
+- Prevention: keep fallback attempts time-bounded and emit continuous operator-visible debug telemetry for long-running inference turns.
 
 ### 2026-02-15 — Bubble stream now exposes request focus during long thinking
 

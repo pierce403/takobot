@@ -24,7 +24,8 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
-- TUI runs with mouse reporting disabled so terminal-native selection and right-click copy work reliably for transcript text
+- Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
+- TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
 - XMTP daemon resilience: retries transient send failures and auto-rebuilds XMTP client sessions after repeated stream/poll failures
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)

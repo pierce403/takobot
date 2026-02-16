@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 from takobot.app import (
-    TakoTerminalApp,
     _command_completion_context,
     _command_completion_matches,
     _dose_channel_label,
@@ -13,6 +12,7 @@ from takobot.app import (
     _parse_dose_set_request,
     _slash_command_matches,
     _stream_focus_summary,
+    TakoTerminalApp,
     run_terminal_app,
 )
 
@@ -85,11 +85,11 @@ class TestAppCommands(unittest.TestCase):
         self.assertTrue(len(summarized) <= 120)
         self.assertTrue(summarized.endswith("..."))
 
-    def test_run_terminal_app_disables_mouse_capture(self) -> None:
+    def test_run_terminal_app_uses_default_mouse_mode(self) -> None:
         with patch.object(TakoTerminalApp, "run", return_value=None) as run_mock:
             code = run_terminal_app(interval=11.0)
         self.assertEqual(0, code)
-        run_mock.assert_called_once_with(mouse=False)
+        run_mock.assert_called_once_with()
 
 
 if __name__ == "__main__":

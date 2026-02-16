@@ -27,7 +27,7 @@ Clipboard helpers:
 - `Ctrl+Shift+C` copy transcript
 - `Ctrl+Shift+L` copy last line
 - `Ctrl+V` / `Shift+Insert` paste
-- Native terminal right-click copy is supported for selected transcript text.
+- Right-click on selected transcript/stream text copies the current selection via Takobot clipboard helpers.
 
 Input history:
 
@@ -36,6 +36,7 @@ Input history:
 Thinking visibility:
 
 - Bubble stream shows current request focus and elapsed time while the model is thinking/responding.
+- During longer inference turns, bubble stream emits periodic debug wait updates and local chat has a bounded total timeout budget.
 
 ## XMTP operator command surface
 

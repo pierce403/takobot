@@ -855,8 +855,9 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>
               <li>TUI command input supports <code>Tab</code> autocomplete for command names and cycles matching candidates on repeated <code>Tab</code>.</li>
               <li>Bubble stream now shows the active request focus and elapsed thinking/responding time for long responses.</li>
-              <li>TUI keeps terminal-native text selection enabled (mouse reporting off), so right-click copy works for selected transcript text.</li>
+              <li>TUI right-click on selected transcript/stream text copies that selection in-app without clearing it.</li>
               <li>XMTP runtime is more resilient: transient send errors are retried and repeated poll/stream failures trigger client-session rebuilds.</li>
+              <li>Inference stream emits periodic debug wait updates and applies a total local-chat timeout budget to avoid indefinite response stalls.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">

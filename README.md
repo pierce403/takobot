@@ -67,7 +67,7 @@ Pairing flow:
   - no: continue onboarding locally and allow later pairing from terminal
 - Identity/purpose/routine prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
-- After pairing, XMTP becomes the primary control plane for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`).
+- After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
 
 Productivity (GTD + PARA):
 

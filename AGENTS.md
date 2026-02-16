@@ -36,7 +36,7 @@ Root directories (must exist):
 - **No encryption in the working directory.** Startup must be “secretless” (no external secrets required).
 - **Keys live unencrypted on disk** under `.tako/` with OS file permissions as the protection.
 - **Refuse unsafe states** (e.g., if a key file is tracked by git).
-- **XMTP Operator Channel is the ONLY control plane.** No user-facing configuration via CLI flags or environment variables.
+- **Operator control is available in terminal app + paired XMTP channel.** No user-facing configuration via CLI flags or environment variables.
 - Workspace config is file-based (`tako.toml`) and must never contain secrets.
 
 ## Operator Imprint (control plane)
@@ -71,6 +71,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-16 — Terminal retains full operator control after pairing
+
+- What happened: terminal fallback/chat copy implied that identity/config/tools/permissions/routines changes were XMTP-only once paired, which confused operator expectations.
+- Fix: clarified runtime behavior so the terminal app remains a full operator control surface even when XMTP is paired, and updated prompt/fallback copy to match.
+- Prevention: keep control-plane language consistent across fallback text, model prompts, and docs whenever pairing behavior changes.
 
 ### 2026-02-16 — Canonical identity name enforced in chat prompts
 

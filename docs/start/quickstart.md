@@ -29,8 +29,8 @@ What bootstrap does:
 
 - TUI starts in onboarding state.
 - Pairing is terminal-first outbound XMTP.
-- After pairing, XMTP is the control plane for identity/config/tools/permissions/routines.
-- Local terminal chat remains available as a cockpit.
+- After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
+- Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.
 
 ## Core checks
 

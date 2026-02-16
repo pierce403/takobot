@@ -78,7 +78,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 5) **Pairing / handshake**
 
 - Pairing is auto-completed in-app after successful outbound DM + inbox resolution.
-- After imprint, management moves to XMTP for operator changes and commands (`help`, `status`, `doctor`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`).
+- After imprint, XMTP becomes the remote operator channel for commands (`help`, `status`, `doctor`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) while terminal stays fully available for local operator control.
 - Re-imprinting is still operator-only over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs the next operator.
 
 6) **Initialize today’s daily log**
@@ -93,11 +93,11 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 
 8) **Emit completion summary**
 
-- After pairing, Tako keeps terminal as local cockpit (status/logs/chat/safe mode) while XMTP is the control plane.
+- After pairing, Tako keeps terminal as full local operator control (status/logs/chat/safe mode/config/tools/permissions/routines) while XMTP remains available for remote operator control.
 - TUI exposes an activity panel (inference/tool/runtime traces) and clipboard helpers (`Ctrl+Shift+C`, `Ctrl+Shift+L`).
 - The operator can request status via XMTP commands:
   - `help`, `status`, `doctor`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`
 
 Notes:
 
-- **No env vars, no CLI configuration** in the standard flow. Management is via the operator XMTP channel.
+- **No env vars, no CLI configuration** in the standard flow. Management is through operator surfaces (terminal app + paired XMTP).

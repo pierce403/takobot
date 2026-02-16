@@ -6,8 +6,8 @@ These invariants should remain true as the implementation evolves.
 
 - Running `tako` starts an interactive terminal app that is the primary runtime loop.
 - Before pairing, terminal app onboarding is the control path.
-- After pairing, XMTP is the **only** control plane for identity/config/tools/routines changes.
-- Terminal remains a local cockpit for status, logs, chat, tool actions, and safe-mode controls.
+- After pairing, XMTP is the remote operator control channel for identity/config/tools/routines changes.
+- Terminal remains a full local operator control surface for status, logs, chat, tool actions, config changes, and safe-mode controls.
 
 Implications:
 

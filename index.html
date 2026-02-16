@@ -676,7 +676,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
 # In app: XMTP setup prompt appears first
 # Startup: health check (instance + resources + lock)
 # Then: onboarding questions (name/purpose/routines)
-# After pairing: XMTP controls identity/config/tools/routines</code></pre>
+# After pairing: XMTP adds remote control; terminal keeps full local operator control</code></pre>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Developer utilities: <code>.venv/bin/takobot doctor</code> and <code>.venv/bin/takobot hi --to &lt;to&gt; [--message ...]</code>.
             </p>
@@ -829,12 +829,12 @@ curl -fsSL https://tako.bot/setup.sh | bash
           <div class="card panel" id="config">
             <h2>Control plane</h2>
             <p>
-              The operator XMTP channel is the <b>only</b> control plane.
+              Operator control is available in the terminal app and over the paired XMTP channel.
               There is no user-facing configuration via environment variables or CLI flags.
             </p>
             <ul>
               <li>Before pairing: terminal app is primary onboarding/control loop.</li>
-              <li>After pairing: XMTP is primary for identity/config/tools/routines.</li>
+              <li>After pairing: XMTP provides remote control for identity/config/tools/routines, while terminal keeps full local operator control.</li>
               <li>
                 After pairing, operator commands include:
                 <code>help</code>, <code>status</code>, <code>doctor</code>,
@@ -849,7 +849,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><code>doctor</code> runs offline inference diagnostics (provider CLI probes + recent inference error scan), so it can diagnose inference issues without using inference.</li>
               <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
-              <li>Terminal remains a local cockpit for status/logs/safe mode, and plain-text chat stays available there.</li>
+              <li>Terminal remains a local cockpit for status/logs/safe mode, plain-text chat, and local operator configuration commands.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>
               <li>TUI input supports history recall: <code>↑</code>/<code>↓</code> cycles previously submitted local messages.</li>
               <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>

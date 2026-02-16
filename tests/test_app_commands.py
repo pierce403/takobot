@@ -110,6 +110,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("You are ProTako", prompt)
         self.assertIn("Canonical identity name: ProTako", prompt)
         self.assertIn("Never claim your name is `Tako`", prompt)
+        self.assertIn("Operator control surfaces: terminal app and paired XMTP channel.", prompt)
 
 
 if __name__ == "__main__":

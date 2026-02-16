@@ -87,6 +87,7 @@
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
+  - Keeps full local operator control in the terminal for identity/config/tools/permissions/routines, even when XMTP is paired.
   - Includes an activity panel with inference/tool/runtime trace lines.
   - App transcript/system lines are appended to `.tako/logs/app.log`.
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.

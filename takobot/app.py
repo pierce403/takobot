@@ -790,7 +790,7 @@ class TakoTerminalApp(App[None]):
                 self.operator_paired = True
                 self.mode = "paired"
                 self._set_state(SessionState.PAIRED)
-                self._write_tako("operator imprint found. XMTP is already my control current for config changes.")
+                self._write_tako("operator imprint found. XMTP remote control is already paired; local terminal control stays fully available.")
                 self._add_activity("xmtp", "operator imprint detected; starting runtime")
                 await self._start_xmtp_runtime()
                 self._set_state(SessionState.RUNNING)
@@ -1732,7 +1732,7 @@ class TakoTerminalApp(App[None]):
         await self._cleanup_pairing_resources()
 
         self._set_state(SessionState.PAIRED)
-        self._write_tako("paired! XMTP is now primary control channel for identity/config/tools/routines.")
+        self._write_tako("paired! XMTP remote control is active, and this terminal still has full operator control.")
         self._record_event(
             "pairing.completed",
             "Operator pairing completed successfully.",
@@ -2337,12 +2337,6 @@ class TakoTerminalApp(App[None]):
                 )
                 return
             if action in {"calm", "explore"}:
-                if self.operator_paired and not self.safe_mode:
-                    self._write_tako(
-                        "dose tuning is operator-only over XMTP when paired. "
-                        "if you need an emergency local nudge, enable safe mode first (`safe on`)."
-                    )
-                    return
                 event_type = "dose.operator.calm" if action == "calm" else "dose.operator.explore"
                 self._record_event(
                     event_type,
@@ -2358,12 +2352,6 @@ class TakoTerminalApp(App[None]):
                 return
             set_target = _parse_dose_set_request(action)
             if set_target is not None:
-                if self.operator_paired and not self.safe_mode:
-                    self._write_tako(
-                        "dose tuning is operator-only over XMTP when paired. "
-                        "if you need an emergency local nudge, enable safe mode first (`safe on`)."
-                    )
-                    return
                 channel, value = set_target
                 setattr(self.dose, channel, value)
                 self.dose.clamp()
@@ -3489,7 +3477,7 @@ class TakoTerminalApp(App[None]):
         if self.operator_paired:
             fallback = (
                 "chat current is open here and over XMTP. "
-                "config/tools/permissions/routines changes remain operator-only on XMTP."
+                "this terminal is full operator control too, so local config/tools/permissions/routines changes are allowed."
             )
         else:
             fallback = "chat current is open. type `pair` when you want to establish XMTP operator control."
@@ -3910,7 +3898,7 @@ class TakoTerminalApp(App[None]):
                 prod_open_loops.save_open_loops(self.open_loops_path, loops)
 
     def _refresh_panels(self) -> None:
-        pair_next = "establish XMTP pairing" if not self.operator_paired else "process operator commands via XMTP"
+        pair_next = "establish XMTP pairing" if not self.operator_paired else "process operator commands (terminal + XMTP)"
         heartbeat_age = (
             f"{int(time.monotonic() - self.last_heartbeat_at)}s"
             if self.last_heartbeat_at is not None
@@ -4406,6 +4394,11 @@ def _build_terminal_chat_prompt(
     history_block = f"{history}\n" if history else "(none)\n"
     name = _canonical_identity_name(identity_name)
     role_line = " ".join((identity_role or "").split()).strip() or "Your highly autonomous octopus friend"
+    control_surface_line = (
+        "Operator control surfaces: terminal app and paired XMTP channel.\n"
+        if operator_paired
+        else "Operator control surface: terminal app (XMTP unpaired).\n"
+    )
     return (
         f"You are {name}, a super cute octopus assistant with pragmatic engineering judgment.\n"
         f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
@@ -4414,7 +4407,8 @@ def _build_terminal_chat_prompt(
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
         "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
         "Terminal chat is always available.\n"
-        "Hard boundary: identity/config/tools/permissions/routines remain operator-only over XMTP when paired.\n"
+        "Hard boundary: only the operator may change identity/config/tools/permissions/routines.\n"
+        f"{control_surface_line}"
         f"session_mode={mode}\n"
         f"session_state={state}\n"
         f"operator_paired={paired}\n"

@@ -858,6 +858,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>TUI right-click on selected transcript/stream text copies that selection in-app without clearing it.</li>
               <li>XMTP runtime is more resilient: transient send errors are retried and repeated poll/stream failures trigger client-session rebuilds.</li>
               <li>Inference stream emits periodic debug wait updates and applies a total local-chat timeout budget to avoid indefinite response stalls.</li>
+              <li>Local/XMTP chat prompts enforce canonical identity naming from workspace config/identity state after rename updates.</li>
               <li>Runtime state lives under <code>.tako/</code> and is never committed.</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">

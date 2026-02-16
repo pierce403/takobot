@@ -27,6 +27,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
 - XMTP daemon resilience: retries transient send failures and auto-rebuilds XMTP client sessions after repeated stream/poll failures
+- Local/XMTP chat prompts now enforce canonical identity naming from workspace/identity state, so self-introductions stay consistent after renames
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
 - Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
 - OpenClaw-style docs tree in `docs/` (`start/`, `concepts/`, `reference/`)

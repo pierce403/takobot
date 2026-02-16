@@ -1772,14 +1772,22 @@ async def _chat_reply(
     if not inference_runtime.ready:
         return fallback
 
+    identity_name = _preferred_git_identity_name(repo_root())
+
     history = conversations.format_prompt_context(
         session_key,
         user_turn_limit=CHAT_CONTEXT_USER_TURNS,
         max_chars=CHAT_CONTEXT_MAX_CHARS,
         user_label="User",
-        assistant_label="Takobot",
+        assistant_label=identity_name or "Takobot",
     )
-    prompt = _chat_prompt(text, history=history, is_operator=is_operator, operator_paired=operator_paired)
+    prompt = _chat_prompt(
+        text,
+        history=history,
+        is_operator=is_operator,
+        operator_paired=operator_paired,
+        identity_name=identity_name,
+    )
     try:
         provider, reply = await asyncio.to_thread(
             run_inference_prompt_with_fallback,
@@ -1798,12 +1806,20 @@ async def _chat_reply(
     return cleaned
 
 
-def _chat_prompt(text: str, *, history: str, is_operator: bool, operator_paired: bool) -> str:
+def _canonical_identity_name(raw: str) -> str:
+    value = " ".join((raw or "").split()).strip()
+    return value or "Tako"
+
+
+def _chat_prompt(text: str, *, history: str, is_operator: bool, operator_paired: bool, identity_name: str) -> str:
     role = "operator" if is_operator else "non-operator"
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
+    name = _canonical_identity_name(identity_name)
     return (
-        "You are Tako, a cute but practical octopus assistant.\n"
+        f"You are {name}, a cute but practical octopus assistant.\n"
+        f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
+        "Never claim your name is `Tako` unless canonical identity name is exactly `Tako`.\n"
         "Reply with plain text only (no markdown), max 4 short lines.\n"
         "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
         "You can chat broadly and help think through tasks.\n"

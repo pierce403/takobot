@@ -6,7 +6,14 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from takobot.cli import RuntimeHooks, _close_xmtp_client, _is_retryable_xmtp_error, _rebuild_xmtp_client
+from takobot.cli import (
+    RuntimeHooks,
+    _canonical_identity_name,
+    _chat_prompt,
+    _close_xmtp_client,
+    _is_retryable_xmtp_error,
+    _rebuild_xmtp_client,
+)
 
 
 class _DummyAsyncClosable:
@@ -26,6 +33,22 @@ class _DummySyncClosable:
 
 
 class TestCliXmtpResilience(unittest.TestCase):
+    def test_cli_canonical_identity_name_defaults(self) -> None:
+        self.assertEqual("Tako", _canonical_identity_name(""))
+        self.assertEqual("ProTako", _canonical_identity_name(" ProTako "))
+
+    def test_cli_chat_prompt_uses_identity_name(self) -> None:
+        prompt = _chat_prompt(
+            "hello",
+            history="User: hi",
+            is_operator=True,
+            operator_paired=True,
+            identity_name="ProTako",
+        )
+        self.assertIn("You are ProTako", prompt)
+        self.assertIn("Canonical identity name: ProTako", prompt)
+        self.assertIn("Never claim your name is `Tako`", prompt)
+
     def test_retryable_xmtp_error_detection(self) -> None:
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("grpc-status header missing")))
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("deadline exceeded while sending message")))

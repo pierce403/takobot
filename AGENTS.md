@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Canonical identity name enforced in chat prompts
+
+- What happened: after identity rename, model chat prompts still hard-coded “You are Tako,” causing self-introduction drift despite persisted identity state.
+- Fix: local and XMTP chat prompt builders now inject canonical identity name from workspace/identity state and explicitly instruct the model to self-identify only with that name.
+- Prevention: avoid hard-coded identity tokens in prompt templates; route all naming through canonical identity helpers tied to config/state.
+
 ### 2026-02-15 — XMTP resilience + terminal-native right-click copy
 
 - What happened: operators observed XMTP reliability issues and right-click copy in the TUI could clear selection instead of copying selected text.

@@ -115,6 +115,7 @@
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
   - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid multi-provider fallback stalls.
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
+  - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.
   - Shows an animated top-right ASCII octopus panel in the sidebar, including Takobot version and compact DOSE indicators.
   - Supports local-only mode before pairing and safe-mode pause/resume controls.

@@ -3504,11 +3504,13 @@ class TakoTerminalApp(App[None]):
                 user_turn_limit=CHAT_CONTEXT_USER_TURNS,
                 max_chars=CHAT_CONTEXT_MAX_CHARS,
                 user_label="User",
-                assistant_label="Takobot",
+                assistant_label=self.identity_name or "Takobot",
             )
 
         prompt = _build_terminal_chat_prompt(
             text=text,
+            identity_name=self.identity_name,
+            identity_role=self.identity_role,
             mode=self.mode,
             state=self.state.value,
             operator_paired=self.operator_paired,
@@ -4385,11 +4387,30 @@ def _looks_like_tako_toml_question(text: str) -> bool:
     return toml_hint and explain_hint
 
 
-def _build_terminal_chat_prompt(*, text: str, mode: str, state: str, operator_paired: bool, history: str) -> str:
+def _canonical_identity_name(raw: str) -> str:
+    value = " ".join(_sanitize_for_display(raw or "").split()).strip()
+    return value or DEFAULT_SOUL_NAME
+
+
+def _build_terminal_chat_prompt(
+    *,
+    text: str,
+    identity_name: str,
+    identity_role: str,
+    mode: str,
+    state: str,
+    operator_paired: bool,
+    history: str,
+) -> str:
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
+    name = _canonical_identity_name(identity_name)
+    role_line = " ".join((identity_role or "").split()).strip() or "Your highly autonomous octopus friend"
     return (
-        "You are Tako, a super cute octopus assistant with pragmatic engineering judgment.\n"
+        f"You are {name}, a super cute octopus assistant with pragmatic engineering judgment.\n"
+        f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
+        "Never claim your name is `Tako` unless canonical identity name is exactly `Tako`.\n"
+        f"Identity mission: {role_line}\n"
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
         "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
         "Terminal chat is always available.\n"

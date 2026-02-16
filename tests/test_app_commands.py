@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from takobot.app import (
+    _build_terminal_chat_prompt,
+    _canonical_identity_name,
     _command_completion_context,
     _command_completion_matches,
     _dose_channel_label,
@@ -90,6 +92,24 @@ class TestAppCommands(unittest.TestCase):
             code = run_terminal_app(interval=11.0)
         self.assertEqual(0, code)
         run_mock.assert_called_once_with()
+
+    def test_canonical_identity_name_defaults_to_tako(self) -> None:
+        self.assertEqual("Tako", _canonical_identity_name(""))
+        self.assertEqual("ProTako", _canonical_identity_name("  ProTako  "))
+
+    def test_terminal_chat_prompt_uses_identity_name(self) -> None:
+        prompt = _build_terminal_chat_prompt(
+            text="hello",
+            identity_name="ProTako",
+            identity_role="Your highly autonomous octopus friend",
+            mode="paired",
+            state="RUNNING",
+            operator_paired=True,
+            history="User: hi",
+        )
+        self.assertIn("You are ProTako", prompt)
+        self.assertIn("Canonical identity name: ProTako", prompt)
+        self.assertIn("Never claim your name is `Tako`", prompt)
 
 
 if __name__ == "__main__":

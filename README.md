@@ -10,7 +10,8 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
-- Event-log driven cognition: heartbeat + Type 1 triage + Type 2 escalation for serious signals
+- EventBus-driven cognition: in-memory event fanout + JSONL audit + Type 1 triage + Type 2 escalation
+- World Watch sensor loop: RSS/Atom polling with dedupe, deterministic world notebook writes, and bounded briefings
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
 - Missing-setup prompts: when required config/deps are missing and auto-remediation fails, Tako asks the operator with concrete fix steps
 - Runtime problem capture: detected warnings/errors are converted into committed `tasks/` items for follow-up
@@ -28,6 +29,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors
 - XMTP outbound replies are mirrored into the local TUI transcript/activity feed so remote conversations stay visible in one place
 - Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
+- Runtime writes deterministic world notes under `resources/world/YYYY-MM-DD.md` and daily mission snapshots under `resources/world/mission-review/YYYY-MM-DD.md`
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
@@ -130,7 +132,7 @@ Runtime-only (ignored):
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
-- Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
+- Starts the runtime service (heartbeat + exploration + sensors) and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
 - Type 2 escalation uses the required pi runtime after the first interactive turn; if pi is unavailable/fails, Type 2 falls back to heuristic guidance.
 - Seeds starter skills into `skills/` and registers them as installed-but-disabled runtime extensions.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit with plain-text chat still available.
@@ -142,9 +144,10 @@ There is **no user-facing configuration via environment variables or CLI flags**
 Workspace configuration lives in `tako.toml` (no secrets).
 - `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
+- World-watch feeds live in `[world_watch]` (`feeds = [...]`, `poll_minutes = <minutes>`).
 - Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
 - Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference `auto|pi`, API keys, pi OAuth inventory).
-- `doctor` runs local/offline inference diagnostics (CLI probes + recent inference error scan) and does not depend on inference being available.
+- `doctor` runs local/offline inference diagnostics (CLI probes + recent inference error scan), attempts automatic workspace-local inference repair first, and does not depend on inference being available.
 - Extension downloads are always HTTPS; non-HTTPS is not allowed.
 - Security permission defaults for enabled extensions are now permissive by default (`network/shell/xmtp/filesystem = true`), and can be tightened in `tako.toml`.
 
@@ -166,7 +169,8 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
 - While running, Tako periodically checks for package updates. With `updates.auto_apply = true`, the TUI applies the update and restarts itself.
 - XMTP client initialization disables history sync by default for compatibility.
-- Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
+- Runtime event log lives at `.tako/state/events.jsonl` as an audit stream; events are consumed in-memory via EventBus (no JSONL polling queue).
+- World Watch sensor state is stored in `.tako/state/rss_seen.json`; briefing cadence/state is stored in `.tako/state/briefing_state.json`.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
 - Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
 - Inference now runs through workspace-local pi runtime; if pi is not available, Takobot falls back to non-inference heuristic responses.

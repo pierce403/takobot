@@ -8,9 +8,7 @@ import importlib.util
 import json
 import os
 import platform
-import random
 import re
-import secrets
 import shutil
 import socket
 import subprocess
@@ -59,6 +57,7 @@ from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, 
 from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
+from .sensors import RSSSensor
 from .soul import (
     DEFAULT_SOUL_NAME,
     DEFAULT_SOUL_ROLE,
@@ -69,6 +68,7 @@ from .soul import (
     update_mission_objectives,
 )
 from .tool_ops import fetch_webpage, run_local_command
+from .runtime import EventBus, Runtime, RuntimeHeartbeatTick
 from .xmtp import create_client, hint_for_xmtp_error, probe_xmtp_import
 from .productivity import open_loops as prod_open_loops
 from .productivity import outcomes as prod_outcomes
@@ -97,7 +97,7 @@ from .extensions.registry import (
 
 
 HEARTBEAT_JITTER = 0.2
-EVENT_INGEST_INTERVAL_S = 0.8
+EXPLORE_INTERVAL_S = 5 * 60
 LOCAL_CHAT_TIMEOUT_S = 75.0
 LOCAL_CHAT_TOTAL_TIMEOUT_S = 120.0
 LOCAL_CHAT_MAX_CHARS = 700
@@ -114,6 +114,7 @@ UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 INFERENCE_WATCHDOG_INTERVAL_S = 10.0
+INFERENCE_RECOVERY_COOLDOWN_S = 20.0
 SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/help", "Show command reference"),
     ("/status", "Show runtime status"),
@@ -349,8 +350,7 @@ class TakoTerminalApp(App[None]):
         self.pairing_watch_task: asyncio.Task[None] | None = None
 
         self.runtime_task: asyncio.Task[None] | None = None
-        self.local_heartbeat_task: asyncio.Task[None] | None = None
-        self.event_ingest_task: asyncio.Task[None] | None = None
+        self.runtime_service: Runtime | None = None
         self.type1_task: asyncio.Task[None] | None = None
         self.type2_task: asyncio.Task[None] | None = None
         self.input_worker_task: asyncio.Task[None] | None = None
@@ -363,16 +363,18 @@ class TakoTerminalApp(App[None]):
 
         self.event_log_path: Path | None = None
         self.app_log_path: Path | None = None
-        self.event_cursor = 0
-        self.pending_events: list[dict[str, Any]] = []
         self.seen_event_ids: set[str] = set()
         self.type1_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.type2_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.event_bus = EventBus()
+        self.event_bus.subscribe(self._enqueue_type1_event)
 
         self.instance_kind = "unknown"
         self.health_summary: dict[str, str] = {}
         self.heartbeat_ticks = 0
         self.last_heartbeat_at: float | None = None
+        self.explore_ticks = 0
+        self.last_explore_at: float | None = None
         self.type1_processed = 0
         self.type2_escalations = 0
         self.type2_last = "none"
@@ -388,6 +390,7 @@ class TakoTerminalApp(App[None]):
         self.inference_gate_opened_at: float | None = None
         self.inference_gate_block_noted = False
         self.inference_ever_used = False
+        self.inference_recovery_last_attempt_at = 0.0
         self.last_update_check_at: float | None = None
         self.last_update_check_signature = ""
         self.auto_updates_enabled = True
@@ -653,6 +656,9 @@ class TakoTerminalApp(App[None]):
             if not self.indicator.startswith("type2:"):
                 self._set_indicator("thinking")
             try:
+                if self.runtime_service is not None:
+                    with contextlib.suppress(Exception):
+                        self.runtime_service.handle_input(text)
                 await self._route_input(text)
             except asyncio.CancelledError:
                 raise
@@ -926,12 +932,33 @@ class TakoTerminalApp(App[None]):
             self.event_log_path = self.paths.state_dir / "events.jsonl"
             self.event_log_path.parent.mkdir(parents=True, exist_ok=True)
             self.event_log_path.touch(exist_ok=True)
-            self.event_cursor = 0
+        self.event_bus.set_log_path(self.event_log_path)
+        self.event_total_written = self.event_bus.events_written
 
-        await self._flush_pending_events()
-
-        if self.event_ingest_task is None:
-            self.event_ingest_task = asyncio.create_task(self._event_ingest_loop(), name="tako-event-ingest")
+        if self.runtime_service is None:
+            world_watch_feeds = list(self.config.world_watch.feeds)
+            sensors = [
+                RSSSensor(
+                    world_watch_feeds,
+                    poll_minutes=self.config.world_watch.poll_minutes,
+                    seen_path=self.paths.state_dir / "rss_seen.json",
+                )
+            ]
+            self.runtime_service = Runtime(
+                event_bus=self.event_bus,
+                state_dir=self.paths.state_dir,
+                resources_root=repo_root() / "resources",
+                daily_log_root=daily_root(),
+                sensors=sensors,
+                heartbeat_interval_s=self.interval,
+                heartbeat_jitter_ratio=HEARTBEAT_JITTER,
+                explore_interval_s=EXPLORE_INTERVAL_S,
+                mission_objectives_getter=lambda: list(self.mission_objectives),
+                open_tasks_count_getter=lambda: int(self.open_tasks_count),
+                on_heartbeat_tick=self._on_runtime_heartbeat_tick,
+                on_activity=self._add_activity,
+                on_briefing=self._on_runtime_briefing,
+            )
         if self.type1_task is None:
             self.type1_task = asyncio.create_task(self._type1_loop(), name="tako-type1")
         if self.type2_task is None:
@@ -939,7 +966,7 @@ class TakoTerminalApp(App[None]):
         await self._start_local_heartbeat()
         await self._start_periodic_update_checks()
 
-        self._write_system("Type1 tide scanner online. Consuming event log and triaging signals.")
+        self._write_system("Type1 tide scanner online. Event bus + runtime service are triaging signals.")
         self._add_activity("reasoning", "Type1/Type2 loops online")
         self._record_event(
             "reasoning.engine.started",
@@ -1160,37 +1187,34 @@ class TakoTerminalApp(App[None]):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         safe_message = _sanitize_for_display(message)
-        event = {
-            "id": _new_event_id(),
-            "ts": _utc_now_iso(),
-            "type": event_type,
-            "severity": severity.lower(),
-            "source": source,
-            "message": safe_message,
-            "metadata": metadata or {},
-        }
+        event_metadata = metadata or {}
 
         if self.dose is not None:
             try:
                 self.dose.apply_event(
-                    str(event.get("type", "")),
-                    str(event.get("severity", "info")),
-                    str(event.get("source", "system")),
-                    str(event.get("message", "")),
-                    event.get("metadata") if isinstance(event.get("metadata"), dict) else {},
+                    str(event_type),
+                    str(severity).lower(),
+                    str(source),
+                    str(safe_message),
+                    event_metadata,
                 )
                 self.dose_label = self.dose.label()
             except Exception as exc:  # noqa: BLE001
                 self._write_system(f"dose update warning: {_summarize_error(exc)}")
 
+        try:
+            event = self.event_bus.publish_event(
+                event_type,
+                safe_message,
+                severity=str(severity).lower(),
+                source=source,
+                metadata=event_metadata,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._write_system(f"event-log write warning: {_summarize_error(exc)}")
+            return
+        self.event_total_written = self.event_bus.events_written
         self._maybe_capture_signal_loop(event)
-
-        if self.event_log_path is None:
-            self.pending_events.append(event)
-        else:
-            self._append_event_to_log(event)
-
-        self._enqueue_type1_event(event)
 
     def _maybe_capture_signal_loop(self, event: dict[str, Any]) -> None:
         severity = str(event.get("severity", "info")).lower()
@@ -1228,25 +1252,6 @@ class TakoTerminalApp(App[None]):
             )
         )
 
-    async def _flush_pending_events(self) -> None:
-        if self.event_log_path is None or not self.pending_events:
-            return
-        pending = list(self.pending_events)
-        self.pending_events.clear()
-        for event in pending:
-            self._append_event_to_log(event)
-
-    def _append_event_to_log(self, event: dict[str, Any]) -> None:
-        if self.event_log_path is None:
-            return
-        try:
-            with self.event_log_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(event, sort_keys=True, ensure_ascii=True))
-                handle.write("\n")
-            self.event_total_written += 1
-        except Exception as exc:  # noqa: BLE001
-            self._write_system(f"event-log write warning: {_summarize_error(exc)}")
-
     def _enqueue_type1_event(self, event: dict[str, Any]) -> None:
         event_id = str(event.get("id") or "")
         if event_id and event_id in self.seen_event_ids:
@@ -1256,36 +1261,6 @@ class TakoTerminalApp(App[None]):
         self.event_total_ingested += 1
         with contextlib.suppress(asyncio.QueueFull):
             self.type1_queue.put_nowait(event)
-
-    async def _event_ingest_loop(self) -> None:
-        while True:
-            await asyncio.sleep(EVENT_INGEST_INTERVAL_S)
-            if self.event_log_path is None:
-                continue
-            try:
-                with self.event_log_path.open("r", encoding="utf-8") as handle:
-                    handle.seek(self.event_cursor)
-                    while True:
-                        line = handle.readline()
-                        if not line:
-                            break
-                        self.event_cursor = handle.tell()
-                        payload = line.strip()
-                        if not payload:
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(event, dict):
-                            continue
-                        if "id" not in event:
-                            event["id"] = _line_event_id(payload)
-                        self._enqueue_type1_event(event)
-            except FileNotFoundError:
-                continue
-            except Exception as exc:  # noqa: BLE001
-                self._write_system(f"event-log ingest warning: {_summarize_error(exc)}")
 
     async def _type1_loop(self) -> None:
         while True:
@@ -2000,10 +1975,14 @@ class TakoTerminalApp(App[None]):
         self._record_event("runtime.xmtp.stopped", "XMTP runtime loop stopped.", source="runtime")
 
     async def _start_local_heartbeat(self) -> None:
-        if self.local_heartbeat_task is not None:
+        if self.runtime_service is None:
             return
-        self.local_heartbeat_task = asyncio.create_task(self._local_heartbeat_loop(), name="tako-local-heartbeat")
-        self._record_event("heartbeat.loop.started", "Heartbeat loop started.", source="heartbeat")
+        was_running = self.runtime_service.running
+        await self.runtime_service.start()
+        self.heartbeat_ticks = self.runtime_service.heartbeat_ticks
+        self.last_heartbeat_at = self.runtime_service.last_heartbeat_at
+        if not was_running:
+            self._record_event("heartbeat.loop.started", "Heartbeat loop started.", source="heartbeat")
 
     async def _start_periodic_update_checks(self) -> None:
         if self.update_check_task is not None:
@@ -2129,70 +2108,59 @@ class TakoTerminalApp(App[None]):
             self._record_event("runtime.restart.error", summary, severity="warn", source="update")
 
     async def _stop_local_heartbeat(self) -> None:
-        if self.local_heartbeat_task is None:
+        if self.runtime_service is None:
             return
-        self.local_heartbeat_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self.local_heartbeat_task
-        self.local_heartbeat_task = None
-        self._record_event("heartbeat.loop.stopped", "Heartbeat loop stopped.", source="heartbeat")
+        was_running = self.runtime_service.running
+        await self.runtime_service.stop()
+        if was_running:
+            self._record_event("heartbeat.loop.stopped", "Heartbeat loop stopped.", source="heartbeat")
 
-    async def _local_heartbeat_loop(self) -> None:
-        while True:
-            if not self.safe_mode:
-                ensure_daily_log(daily_root(), date.today())
-                self.heartbeat_ticks += 1
-                now = time.time()
-                if self.dose is not None:
-                    try:
-                        dt = now - float(self.dose.last_updated_ts)
-                        self.dose.tick(now, dt)
-                        self.dose_label = self.dose.label()
-                    except Exception as exc:  # noqa: BLE001
-                        self._write_system(f"dose tick warning: {_summarize_error(exc)}")
-                self.last_heartbeat_at = time.monotonic()
-                self._record_event(
-                    "heartbeat.tick",
-                    "Heartbeat tick completed.",
-                    source="heartbeat",
-                    metadata={
-                        "tick": self.heartbeat_ticks,
-                        "mode": self.mode,
-                        "runtime_mode": self.runtime_mode,
-                    },
-                )
-                label_changed = self.dose is not None and self.dose_label != self.dose_last_emitted_label
-                if label_changed:
-                    before = self.dose_last_emitted_label
-                    after = self.dose_label
-                    self.dose_last_emitted_label = after
-                    self._add_activity("dose", f"mode {before} -> {after}")
-                    self._record_event(
-                        "dose.mode.changed",
-                        f"DOSE mode changed: {before} -> {after}.",
-                        source="dose",
-                        metadata={"from": before, "to": after},
-                    )
-                    if "stressed" in {before, after}:
-                        append_daily_note(
-                            daily_root(),
-                            date.today(),
-                            f"DOSE mode changed: {before} -> {after}",
-                        )
-
-                if self.dose is not None and self.dose_path is not None:
-                    should_save = label_changed or (self.heartbeat_ticks % 5 == 0)
-                    if should_save:
-                        try:
-                            dose.save(self.dose_path, self.dose)
-                        except Exception as exc:  # noqa: BLE001
-                            self._write_system(f"dose save warning: {_summarize_error(exc)}")
-                self._refresh_open_loops(save=True)
-                await self._run_git_autocommit()
-            await asyncio.sleep(
-                self.interval
-                + random.uniform(-HEARTBEAT_JITTER * self.interval, HEARTBEAT_JITTER * self.interval)
+    async def _on_runtime_heartbeat_tick(self, tick: RuntimeHeartbeatTick) -> None:
+        if self.safe_mode:
+            return
+        ensure_daily_log(daily_root(), date.today())
+        self.heartbeat_ticks = tick.tick
+        now = tick.at_wall
+        if self.dose is not None:
+            try:
+                dt = now - float(self.dose.last_updated_ts)
+                self.dose.tick(now, dt)
+                self.dose_label = self.dose.label()
+            except Exception as exc:  # noqa: BLE001
+                self._write_system(f"dose tick warning: {_summarize_error(exc)}")
+        self.last_heartbeat_at = tick.at_monotonic
+        label_changed = self.dose is not None and self.dose_label != self.dose_last_emitted_label
+        if label_changed:
+            before = self.dose_last_emitted_label
+            after = self.dose_label
+            self.dose_last_emitted_label = after
+            self._add_activity("dose", f"mode {before} -> {after}")
+            self._record_event(
+                "dose.mode.changed",
+                f"DOSE mode changed: {before} -> {after}.",
+                source="dose",
+                metadata={"from": before, "to": after},
             )
+            if "stressed" in {before, after}:
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"DOSE mode changed: {before} -> {after}",
+                )
+
+        if self.dose is not None and self.dose_path is not None:
+            should_save = label_changed or (self.heartbeat_ticks % 5 == 0)
+            if should_save:
+                try:
+                    dose.save(self.dose_path, self.dose)
+                except Exception as exc:  # noqa: BLE001
+                    self._write_system(f"dose save warning: {_summarize_error(exc)}")
+        self._refresh_open_loops(save=True)
+        await self._run_git_autocommit()
+
+    def _on_runtime_briefing(self, message: str) -> None:
+        self._write_tako(message)
+        self._add_activity("briefing", _summarize_text(message))
 
     async def _run_git_autocommit(self) -> None:
         result = await asyncio.to_thread(
@@ -2288,12 +2256,22 @@ class TakoTerminalApp(App[None]):
             return
 
         if cmd == "status":
+            if self.runtime_service is not None:
+                self.heartbeat_ticks = self.runtime_service.heartbeat_ticks
+                self.last_heartbeat_at = self.runtime_service.last_heartbeat_at
+                self.explore_ticks = self.runtime_service.explore_ticks
+                self.last_explore_at = self.runtime_service.last_explore_at
             uptime = int(time.monotonic() - self.started_at)
             paired = "yes" if self.operator_paired else "no"
             safe = "on" if self.safe_mode else "off"
             heartbeat_age = (
                 f"{int(time.monotonic() - self.last_heartbeat_at)}s ago"
                 if self.last_heartbeat_at is not None
+                else "n/a"
+            )
+            explore_age = (
+                f"{int(time.monotonic() - self.last_explore_at)}s ago"
+                if self.last_explore_at is not None
                 else "n/a"
             )
             update_check_age = (
@@ -2309,7 +2287,9 @@ class TakoTerminalApp(App[None]):
                 f"runtime_mode: {self.runtime_mode}\n"
                 f"safe_mode: {safe}\n"
                 f"heartbeat_ticks: {self.heartbeat_ticks}\n"
+                f"explore_ticks: {self.explore_ticks}\n"
                 f"last_heartbeat: {heartbeat_age}\n"
+                f"last_explore: {explore_age}\n"
                 f"type1_processed: {self.type1_processed}\n"
                 f"type2_escalations: {self.type2_escalations}\n"
                 f"inference_provider: {(self.inference_runtime.selected_provider if self.inference_runtime else 'none')}\n"
@@ -2319,6 +2299,7 @@ class TakoTerminalApp(App[None]):
                 f"auto_updates: {('on' if self.auto_updates_enabled else 'off')}\n"
                 f"last_update_check: {update_check_age}\n"
                 f"dose_label: {self.dose_label}\n"
+                f"world_watch_feeds: {len(self.config.world_watch.feeds)}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
                 f"code_dir: {self.code_dir or code_root(repo_root())}\n"
@@ -2327,10 +2308,20 @@ class TakoTerminalApp(App[None]):
             return
 
         if cmd == "stats":
+            if self.runtime_service is not None:
+                self.heartbeat_ticks = self.runtime_service.heartbeat_ticks
+                self.last_heartbeat_at = self.runtime_service.last_heartbeat_at
+                self.explore_ticks = self.runtime_service.explore_ticks
+                self.last_explore_at = self.runtime_service.last_explore_at
             uptime = int(time.monotonic() - self.started_at)
             heartbeat_age = (
                 f"{int(time.monotonic() - self.last_heartbeat_at)}s ago"
                 if self.last_heartbeat_at is not None
+                else "n/a"
+            )
+            explore_age = (
+                f"{int(time.monotonic() - self.last_explore_at)}s ago"
+                if self.last_explore_at is not None
                 else "n/a"
             )
             update_check_age = (
@@ -2346,13 +2337,16 @@ class TakoTerminalApp(App[None]):
                 f"version: {__version__}",
                 f"uptime_s: {uptime}",
                 f"heartbeat_ticks: {self.heartbeat_ticks}",
+                f"explore_ticks: {self.explore_ticks}",
                 f"last_heartbeat: {heartbeat_age}",
-                f"events_written: {self.event_total_written}",
+                f"last_explore: {explore_age}",
+                f"events_written: {self.event_bus.events_written}",
                 f"events_ingested: {self.event_total_ingested}",
                 f"type1_processed: {self.type1_processed}",
                 f"type2_escalations: {self.type2_escalations}",
                 f"open_tasks: {self.open_tasks_count}",
                 f"open_loops: {loops_count}",
+                f"world_watch_feeds: {len(self.config.world_watch.feeds)}",
                 f"inference_provider: {inference_provider}",
                 f"inference_ready: {inference_ready}",
                 f"last_update_check: {update_check_age}",
@@ -3633,16 +3627,25 @@ class TakoTerminalApp(App[None]):
             )
 
     async def _local_chat_reply(self, text: str) -> str:
-        if self.operator_paired:
-            fallback = (
-                "chat current is open here and over XMTP. "
-                "this terminal is full operator control too, so local config/tools/permissions/routines changes are allowed."
-            )
-        else:
-            fallback = "chat current is open. type `pair` when you want to establish XMTP operator control."
+        fallback = _local_chat_unavailable_message(
+            operator_paired=self.operator_paired,
+            runtime=self.inference_runtime,
+            last_error=self.inference_last_error,
+        )
 
         if self.inference_runtime is None or not self.inference_runtime.ready:
-            return fallback
+            now = time.monotonic()
+            if (now - self.inference_recovery_last_attempt_at) >= INFERENCE_RECOVERY_COOLDOWN_S:
+                self.inference_recovery_last_attempt_at = now
+                self._add_activity("inference", "runtime unavailable; attempting auto-repair")
+                self._initialize_inference_runtime()
+                fallback = _local_chat_unavailable_message(
+                    operator_paired=self.operator_paired,
+                    runtime=self.inference_runtime,
+                    last_error=self.inference_last_error,
+                )
+            if self.inference_runtime is None or not self.inference_runtime.ready:
+                return fallback
 
         history = ""
         if self.conversations is not None:
@@ -3708,7 +3711,11 @@ class TakoTerminalApp(App[None]):
             )
             self._add_activity("inference", f"chat timeout: {self.inference_last_error}")
             self._stream_clear()
-            return fallback
+            return _local_chat_unavailable_message(
+                operator_paired=self.operator_paired,
+                runtime=self.inference_runtime,
+                last_error=self.inference_last_error,
+            )
         except Exception as exc:  # noqa: BLE001
             self.inference_last_error = _summarize_error(exc)
             self._append_app_log("inference", f"chat-error {self.inference_last_error}")
@@ -3720,7 +3727,11 @@ class TakoTerminalApp(App[None]):
             )
             self._add_activity("inference", f"chat inference fallback: {self.inference_last_error}")
             self._stream_clear()
-            return fallback
+            return _local_chat_unavailable_message(
+                operator_paired=self.operator_paired,
+                runtime=self.inference_runtime,
+                last_error=self.inference_last_error,
+            )
         finally:
             watchdog_stop.set()
             watchdog_task.cancel()
@@ -3902,10 +3913,8 @@ class TakoTerminalApp(App[None]):
         await self._stop_periodic_update_checks()
         await self._stop_xmtp_runtime()
         await self._stop_local_heartbeat()
-        await _cancel_task(self.event_ingest_task)
         await _cancel_task(self.type1_task)
         await _cancel_task(self.type2_task)
-        self.event_ingest_task = None
         self.type1_task = None
         self.type2_task = None
 
@@ -4075,10 +4084,21 @@ class TakoTerminalApp(App[None]):
                 prod_open_loops.save_open_loops(self.open_loops_path, loops)
 
     def _refresh_panels(self) -> None:
+        if self.runtime_service is not None:
+            self.heartbeat_ticks = self.runtime_service.heartbeat_ticks
+            self.last_heartbeat_at = self.runtime_service.last_heartbeat_at
+            self.explore_ticks = self.runtime_service.explore_ticks
+            self.last_explore_at = self.runtime_service.last_explore_at
+        self.event_total_written = self.event_bus.events_written
         pair_next = "establish XMTP pairing" if not self.operator_paired else "process operator commands (terminal + XMTP)"
         heartbeat_age = (
             f"{int(time.monotonic() - self.last_heartbeat_at)}s"
             if self.last_heartbeat_at is not None
+            else "n/a"
+        )
+        explore_age = (
+            f"{int(time.monotonic() - self.last_explore_at)}s"
+            if self.last_explore_at is not None
             else "n/a"
         )
         update_check_age = (
@@ -4105,7 +4125,9 @@ class TakoTerminalApp(App[None]):
             f"- open tasks: {self.open_tasks_count}\n"
             f"- open loops: {loops_count} (oldest {loops_age})\n"
             f"- heartbeat ticks: {self.heartbeat_ticks}\n"
+            f"- explore ticks: {self.explore_ticks}\n"
             f"- last heartbeat: {heartbeat_age}\n"
+            f"- last explore: {explore_age}\n"
             f"- last update check: {update_check_age}"
         )
         self.tasks_panel.update(tasks)
@@ -4158,6 +4180,7 @@ class TakoTerminalApp(App[None]):
             f"- xmtp ingress: {'active' if self.operator_paired and not self.safe_mode else 'inactive'}\n"
             f"- mind: {thinking}\n"
             f"- input queue: {self._queued_input_total()}\n"
+            f"- world-watch feeds: {len(self.config.world_watch.feeds)} (poll {self.config.world_watch.poll_minutes}m)\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- type1 processed: {self.type1_processed}\n"
             f"- type2 escalations: {self.type2_escalations}\n"
@@ -4637,6 +4660,34 @@ def _inference_setup_hints(runtime: InferenceRuntime) -> list[str]:
     return hints
 
 
+def _local_chat_unavailable_message(
+    *,
+    operator_paired: bool,
+    runtime: InferenceRuntime | None,
+    last_error: str = "",
+) -> str:
+    if operator_paired:
+        control_surfaces = (
+            "Chat remains available here and over XMTP. This terminal has full operator control for local "
+            "config, tools, permissions, and routines."
+        )
+    else:
+        control_surfaces = "Chat remains available in this terminal. Use `pair` if you also want XMTP operator control."
+
+    hints = _inference_setup_hints(runtime) if runtime is not None else []
+    next_step = hints[0] if hints else "run `inference refresh` to rescan runtime/auth status."
+    message = (
+        "Inference is unavailable right now, so this reply is diagnostic status only. "
+        f"{control_surfaces} "
+        f"Next step: {next_step} "
+        "Run `doctor` to auto-repair runtime/auth."
+    )
+    cleaned_error = " ".join((last_error or "").split()).strip()
+    if cleaned_error:
+        message += f" Last inference error: {cleaned_error}."
+    return message
+
+
 def _build_type2_prompt(*, event: dict[str, Any], depth: str, reason: str, fallback: str) -> str:
     event_type = str(event.get("type", "unknown"))
     severity = str(event.get("severity", "info"))
@@ -4687,21 +4738,6 @@ def _stream_focus_summary(text: str) -> str:
     if len(value) <= 120:
         return value
     return f"{value[:117]}..."
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
-
-
-def _new_event_id() -> str:
-    stamp = int(time.time() * 1000)
-    token = secrets.token_hex(4)
-    return f"evt-{stamp}-{token}"
-
-
-def _line_event_id(payload: str) -> str:
-    token = secrets.token_hex(4)
-    return f"line-{abs(hash(payload))}-{token}"
 
 
 def _yes_no(value: bool) -> str:

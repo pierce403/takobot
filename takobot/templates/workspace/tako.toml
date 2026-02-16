@@ -15,6 +15,10 @@ weekly_review_day = "sun"
 [updates]
 auto_apply = true
 
+[world_watch]
+feeds = []
+poll_minutes = 30
+
 [security.download]
 max_bytes = 15000000
 allowlist_domains = []

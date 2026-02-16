@@ -72,6 +72,18 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — EventBus replaced JSONL queue polling
+
+- What happened: runtime cognition was writing events to `.tako/state/events.jsonl` and separately polling that file as a queue, which added latency and duplicate moving parts.
+- Fix: introduced an in-memory `EventBus` that appends JSONL for audit and dispatches events directly to subscribers/Type1 queue; removed the JSONL ingest loop.
+- Prevention: keep event transport single-path (publish once, fan out in memory) and reserve JSONL for replay/audit only.
+
+### 2026-02-16 — World Watch + briefings made research visible
+
+- What happened: Tako had no first-class world sensor, no durable world notebook stream, and no bounded proactive briefing routine tied to mission context.
+- Fix: added `RSSSensor` (feed polling + dedupe), deterministic `resources/world/YYYY-MM-DD.md` note writes, bounded runtime briefings with persisted state, and daily Mission Review Lite snapshots.
+- Prevention: treat sensing, note-taking, and proactive summaries as explicit runtime services with persisted cadence/state files under `.tako/state/`.
+
 ### 2026-02-16 — Pi runtime is now required for all inference
 
 - What happened: multi-provider fallback could mask missing pi runtime and drifted from the desired local-first agent setup.

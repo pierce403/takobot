@@ -79,6 +79,12 @@ class UpdatesConfig:
 
 
 @dataclass(frozen=True)
+class WorldWatchConfig:
+    feeds: list[str] = field(default_factory=list)
+    poll_minutes: int = 15
+
+
+@dataclass(frozen=True)
 class SecurityDownloadConfig:
     max_bytes: int = 15_000_000
     allowlist_domains: list[str] = field(default_factory=list)
@@ -104,6 +110,7 @@ class TakoConfig:
     dose_baseline: DoseBaselineConfig = field(default_factory=DoseBaselineConfig)
     productivity: ProductivityConfig = field(default_factory=ProductivityConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
+    world_watch: WorldWatchConfig = field(default_factory=WorldWatchConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
 
 
@@ -129,6 +136,7 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
     dose_baseline = dose.get("baseline") if isinstance(dose.get("baseline"), dict) else {}
     productivity = data.get("productivity") if isinstance(data.get("productivity"), dict) else {}
     updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
+    world_watch = data.get("world_watch") if isinstance(data.get("world_watch"), dict) else {}
     security = data.get("security") if isinstance(data.get("security"), dict) else {}
     security_download = security.get("download") if isinstance(security.get("download"), dict) else {}
     security_defaults = security.get("defaults") if isinstance(security.get("defaults"), dict) else {}
@@ -150,6 +158,16 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
         ),
         updates=UpdatesConfig(
             auto_apply=_as_bool(updates.get("auto_apply"), default=UpdatesConfig.auto_apply),
+        ),
+        world_watch=WorldWatchConfig(
+            feeds=_as_str_list(world_watch.get("feeds") if "feeds" in world_watch else data.get("feeds")),
+            poll_minutes=max(
+                5,
+                _as_int(
+                    world_watch.get("poll_minutes") if "poll_minutes" in world_watch else data.get("poll_minutes"),
+                    default=WorldWatchConfig.poll_minutes,
+                ),
+            ),
         ),
         security=SecurityConfig(
             download=SecurityDownloadConfig(
@@ -329,6 +347,10 @@ def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
         "",
         "[updates]",
         f"- auto_apply: auto-install new takobot package + restart app (current: {'true' if config.updates.auto_apply else 'false'})",
+        "",
+        "[world_watch]",
+        f"- feeds: RSS/Atom feeds to monitor (current: {len(config.world_watch.feeds)})",
+        f"- poll_minutes: feed polling cadence in minutes (current: {config.world_watch.poll_minutes})",
         "",
         "[security.download]",
         f"- max_bytes: max extension package download size (current: {config.security.download.max_bytes})",

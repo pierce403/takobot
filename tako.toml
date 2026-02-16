@@ -17,6 +17,12 @@ weekly_review_day = "sun"
 # Auto-apply package updates and restart TUI when a newer takobot release is detected.
 auto_apply = true
 
+[world_watch]
+# RSS/Atom feeds to monitor for world-watch notes + briefings.
+feeds = []
+# Feed polling cadence in minutes.
+poll_minutes = 30
+
 [security.download]
 # Maximum download size for skill/tool packages (quarantine fetch).
 max_bytes = 15000000

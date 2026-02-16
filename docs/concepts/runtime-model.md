@@ -32,8 +32,11 @@ All mutable runtime state is under `.tako/`:
 - `keys.json`, `operator.json`
 - `logs/` (`runtime.log`, `app.log`)
 - `state/` (events, DOSE, open loops, inference metadata, conversation sessions)
+- `state/rss_seen.json` + `state/briefing_state.json` (world-watch dedupe + briefing cadence state)
 - `tmp/` (workspace-local temp files)
 - `xmtp-db/`
 - `pi/` (workspace-scoped pi runtime/auth/session state)
+
+World-watch notes are committed under `resources/world/` so research accumulation stays visible in git history.
 
 This keeps runtime writes inside the workspace while preserving git cleanliness.

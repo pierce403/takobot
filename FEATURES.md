@@ -81,7 +81,11 @@
   - Name capture in identity onboarding accepts freeform phrases and uses inference to extract a clean name token (not entire sentence).
   - In running chat, the operator can rename Tako inline with a natural message (e.g. “call yourself SILLYTAKO”) and the app persists the parsed name into `SOUL.md`.
   - Uses a playful octopus voice in onboarding transcript copy.
-  - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
+  - Runs a runtime service (heartbeat + exploration + sensors) under UI orchestration, then applies Type 1 triage continuously.
+  - Uses an in-memory EventBus that writes `.tako/state/events.jsonl` for audit while dispatching events directly to Type 1 queues (no JSONL polling loop).
+  - Includes a first sensor (`RSSSensor`) for world-watch RSS/Atom monitoring with feed dedupe state in `.tako/state/rss_seen.json`.
+  - Writes deterministic world notebook entries to `resources/world/YYYY-MM-DD.md` and daily Mission Review Lite snapshots to `resources/world/mission-review/YYYY-MM-DD.md`.
+  - Emits bounded proactive briefings when there is signal (new world items/task unblocks/repeated errors), capped per day with cooldown state in `.tako/state/briefing_state.json`.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
@@ -100,7 +104,8 @@
   - Daemon startup and heartbeat only emit operator-request guidance when automatic local git identity setup fails.
   - When required setup is missing (for example XMTP dependency or failed git identity auto-setup), app mode emits a polite operator request with concrete next steps.
   - Runtime and `doctor`-detected problems are converted into committed follow-up tasks under `tasks/` (deduped by issue key).
-  - `doctor` includes offline inference diagnostics (CLI version/help probes + recent inference-error scan from `.tako/state/events.jsonl`).
+  - `doctor` auto-runs inference repair (workspace pi runtime/auth sync) before offline diagnostics (CLI version/help probes + recent inference-error scan from `.tako/state/events.jsonl`).
+  - If local Codex OAuth tokens exist (`~/.codex/auth.json`), startup/refresh syncs them into `.tako/pi/agent/auth.json` as `openai-codex` for pi inference readiness.
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
@@ -119,6 +124,7 @@
   - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
   - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid stalled pi-runtime turns.
+  - When inference is unavailable, local chat returns a clear diagnostics-mode message with immediate repair guidance instead of ambiguous status text.
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
   - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.
@@ -149,7 +155,7 @@
   - [x] Missing git identity is auto-remediated with repo-local config derived from the bot name.
   - [x] Operator-facing `git config` remediation prompts appear only if automatic local git identity setup fails.
   - [x] Runtime/doctor problem detection auto-creates (or reuses) matching tasks under `tasks/`.
-  - [x] `doctor` can diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
+  - [x] `doctor` can auto-repair + diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
   - [x] Plain-text chat includes recent same-session history in model prompts (local + XMTP), not only the current message.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
@@ -338,20 +344,22 @@
 - **Test Criteria**:
   - [ ] CRUD tools can create/read/update entries deterministically.
 
-### Sensors framework (disabled by default)
-- **Stability**: planned
-- **Description**: Poll-based sensors with significance gating and runtime-only state.
+### Sensors framework (world watch first)
+- **Stability**: in-progress
+- **Description**: Poll-based sensors publish to EventBus; state stays runtime-only while notes stay workspace-visible.
 - **Properties**:
-  - Sensor state stored under `.tako/state/sensors/<name>.json`.
+  - `RSSSensor` polls configured feeds from `tako.toml` (`[world_watch].feeds`, `[world_watch].poll_minutes`).
+  - Seen-item dedupe state is stored in `.tako/state/rss_seen.json`.
+  - Sensor outputs are persisted as deterministic notes under `resources/world/`.
 - **Test Criteria**:
-  - [ ] Disabled sensors produce no events.
+  - [ ] RSS world watch picks up new feed items and writes deterministic notebook entries.
 
 ### Cognitive state (Type 1 / Type 2)
 - **Stability**: in-progress
 - **Description**: Runtime-only cognition loop that triages events with Type 1 and escalates serious signals to Type 2 depth passes.
 - **Properties**:
   - Event log is stored at `.tako/state/events.jsonl` (ignored).
-  - Type 1 continuously consumes and evaluates event-log items.
+  - EventBus dispatches events in-memory to Type 1 immediately while still appending audit lines to JSONL.
   - Type 2 is triggered for serious events with `light` / `medium` / `deep` depth.
 - **Test Criteria**:
   - [x] Startup health-check issues can trigger Type 2 escalation.

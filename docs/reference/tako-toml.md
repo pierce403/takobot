@@ -29,6 +29,11 @@ title: "tako.toml Reference"
 
 - `auto_apply` — auto-apply package updates and restart app mode
 
+## `[world_watch]`
+
+- `feeds` — RSS/Atom feed URLs for world-watch monitoring
+- `poll_minutes` — feed poll cadence in minutes
+
 ## `[security.download]`
 
 - `max_bytes` — max extension package size

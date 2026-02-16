@@ -47,5 +47,7 @@ Directories:
 
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`), auto-configuring missing local git identity from bot name when needed.
 - Auto-update policy is configured in `tako.toml` (`[updates].auto_apply`, default `true`); when enabled, app mode auto-applies updates and restarts.
+- World-watch RSS/Atom settings are configured in `tako.toml` under `[world_watch]`; sensor dedupe/cadence state lives in `.tako/state/`.
+- Deterministic world-watch notes live in committed workspace files under `resources/world/`.
 - Node tooling for inference is workspace-contained: pi packages install under `.tako/pi/node`, and if host Node is missing, Tako can bootstrap local `nvm`/Node under `.tako/nvm`.
 - Inference auth/provider controls are runtime-local under `.tako/state/inference-settings.json` and can be managed with `inference` commands (`auth`, `provider`, `ollama`, `key`).

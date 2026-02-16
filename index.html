@@ -772,7 +772,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Runs a startup health check to classify environment state (brand-new vs established), verify lock/safety, and probe resources.
               </li>
               <li>
-                Ensures required workspace-local <code>pi</code> runtime/auth is available and writes inference metadata to <code>.tako/state/inference.json</code>.
+                Ensures required workspace-local <code>pi</code> runtime/auth is available, auto-syncs local Codex OAuth tokens into workspace pi auth when present, and writes inference metadata to <code>.tako/state/inference.json</code>.
               </li>
               <li>Loads auto-update policy from <code>tako.toml</code> (<code>[updates].auto_apply</code>, default <code>true</code>).</li>
               <li>Inference is pi-runtime-first and required; when pi is unavailable, Tako falls back to heuristic guidance instead of alternate model CLIs.</li>
@@ -803,7 +803,10 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Offers a <code>morning</code> prompt to set 3 outcomes for today (stored in <code>memory/dailies/</code>).
               </li>
               <li>
-                Starts heartbeat + event-log ingestion with Type 1 triage and Type 2 escalation for serious events.
+                Starts a runtime service (heartbeat + exploration + sensors) with EventBus-backed Type 1 triage and Type 2 escalation for serious events.
+              </li>
+              <li>
+                World Watch uses RSS/Atom feeds from <code>tako.toml</code>, writes deterministic notes to <code>resources/world/</code>, and emits bounded briefings.
               </li>
               <li>When auto-updates are enabled, applies detected package updates and restarts the TUI automatically.</li>
               <li>On each heartbeat, auto-commits pending workspace changes and verifies no tracked changes remain.</li>
@@ -844,7 +847,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><code>run</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>
-              <li><code>doctor</code> runs offline inference diagnostics (provider CLI probes + recent inference error scan), so it can diagnose inference issues without using inference.</li>
+              <li><code>doctor</code> auto-runs inference repair first (workspace pi runtime/auth), then runs offline diagnostics (provider CLI probes + recent inference error scan) without needing inference.</li>
               <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, plain-text chat, and local operator configuration commands.</li>

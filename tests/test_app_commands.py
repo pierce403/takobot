@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from takobot.app import (
     _active_work_summary,
+    _activity_text,
     _build_terminal_chat_prompt,
     _canonical_identity_name,
     _command_completion_context,
@@ -108,6 +109,10 @@ class TestAppCommands(unittest.TestCase):
             "browsing the web (+1 more)",
             _active_work_summary(["browsing the web", "searching files for tests"]),
         )
+
+    def test_activity_text_escapes_markup_sequences(self) -> None:
+        rendered = _activity_text(["14:44:57 inference: provider attempt: [pi]"])
+        self.assertIn(r"- 14:44:57 inference: provider attempt: \[pi]", rendered)
 
     def test_run_terminal_app_uses_default_mouse_mode(self) -> None:
         with patch.object(TakoTerminalApp, "run", return_value=None) as run_mock:

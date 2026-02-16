@@ -23,6 +23,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input, Static, TextArea
+from rich.markup import escape as escape_rich_markup
 
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
@@ -488,7 +489,7 @@ class TakoTerminalApp(App[None]):
         self.activity_panel: Static
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="status-bar")
+        yield Static("", id="status-bar", markup=False)
         with Horizontal(id="main"):
             yield TextArea(
                 "",
@@ -500,11 +501,11 @@ class TakoTerminalApp(App[None]):
                 language=None,
             )
             with Vertical(id="sidebar"):
-                yield Static("", id="panel-octo")
-                yield Static("", id="panel-tasks", classes="panel")
-                yield Static("", id="panel-memory", classes="panel")
-                yield Static("", id="panel-sensors", classes="panel")
-                yield Static("", id="panel-activity", classes="panel")
+                yield Static("", id="panel-octo", markup=False)
+                yield Static("", id="panel-tasks", classes="panel", markup=False)
+                yield Static("", id="panel-memory", classes="panel", markup=False)
+                yield Static("", id="panel-sensors", classes="panel", markup=False)
+                yield Static("", id="panel-activity", classes="panel", markup=False)
         yield TextArea(
             "",
             id="stream-box",
@@ -515,7 +516,7 @@ class TakoTerminalApp(App[None]):
             placeholder="bubble stream: inference + tools will appear here while I'm working",
         )
         yield Input(id="input-box", placeholder="Type here. During onboarding, answer the current question.")
-        yield Static("", id="slash-menu")
+        yield Static("", id="slash-menu", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -5498,7 +5499,7 @@ def _activity_text(entries: list[str]) -> str:
         return "Activity\n- idle"
     lines = ["Activity"]
     for entry in entries[:10]:
-        lines.append(f"- {entry}")
+        lines.append(f"- {escape_rich_markup(entry)}")
     return "\n".join(lines)
 
 

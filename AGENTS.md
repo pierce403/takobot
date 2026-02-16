@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — TUI shutdown no longer crashes on activity markup parsing
+
+- What happened: during app shutdown, activity-panel rendering could raise `textual.markup.MarkupError` when activity strings contained markup-like tokens (for example bracketed provider names), which crashed the session.
+- Fix: sidebar/status `Static` widgets now render with `markup=False`, and activity lines are escaped before rendering so queued worker errors cannot trip Rich markup parsing.
+- Prevention: keep operator/runtime-generated text treated as plain text in TUI status panels and cover markup-containing activity entries with a dedicated unit test.
+
 ### 2026-02-16 — Pi chat now runs with full tool/skill access
 
 - What happened: operator chat could answer as if live web/tooling access was unavailable because pi inference was launched with `--no-tools --no-extensions --no-skills` and starter capabilities could remain disabled.

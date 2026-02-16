@@ -37,7 +37,8 @@ For each model call:
 2. Keep the last **N user turns** and associated assistant replies (default: `12` turns).
 3. Apply a character budget tail trim (default: `8000` chars).
 4. Load a bounded excerpt of repo-root `MEMORY.md` (memory-system frontmatter spec).
-5. Inject memory frontmatter + formatted history block into the inference prompt before `user_message=...`.
+5. Inject stage-aware behavior guidance (for example child-stage context-first conversational tone).
+6. Inject memory frontmatter + formatted history block into the inference prompt before `user_message=...`.
 
 This mirrors OpenClaw’s “session transcript + bounded history window” pattern.
 

@@ -16,7 +16,7 @@ from datetime import date, datetime, timezone
 from typing import Callable
 
 from . import __version__
-from .config import explain_tako_toml, load_tako_toml, set_workspace_name
+from .config import add_world_watch_sites, explain_tako_toml, load_tako_toml, set_workspace_name
 from .conversation import ConversationStore
 from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
@@ -36,11 +36,20 @@ from .inference import (
     set_inference_preferred_provider,
 )
 from .keys import derive_eth_address, load_or_create_keys
+from .life_stage import stage_policy_for_name
 from .locks import instance_lock
 from .memory_frontmatter import load_memory_frontmatter_excerpt
 from .operator import clear_operator, get_operator_inbox_id, load_operator
+from .operator_profile import (
+    apply_operator_profile_update,
+    extract_operator_profile_update,
+    load_operator_profile,
+    next_child_followup_question,
+    save_operator_profile,
+    write_operator_profile_note,
+)
 from .pairing import clear_pending
-from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
+from .paths import RuntimePaths, code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
@@ -935,6 +944,7 @@ async def _handle_incoming_message(
     if not _looks_like_command(text):
         if await _maybe_handle_operator_identity_update(text, inference_runtime, paths, convo, hooks=hooks):
             return
+        child_followups = await _capture_child_operator_context(text, paths, hooks=hooks)
         reply = await _chat_reply(
             text,
             inference_runtime,
@@ -946,6 +956,9 @@ async def _handle_incoming_message(
         )
         _record_chat_turn(conversations, session_key, text, reply, hooks=hooks)
         await convo.send(reply)
+        for line in child_followups:
+            if line.strip():
+                await convo.send(line)
         return
 
     cmd, rest = _parse_command(text)
@@ -1791,6 +1804,9 @@ async def _chat_reply(
         return fallback
 
     identity_name = _preferred_git_identity_name(repo_root())
+    cfg, _warn = load_tako_toml(repo_root() / "tako.toml")
+    life_stage = cfg.life.stage
+    stage_tone = stage_policy_for_name(life_stage).tone
 
     history = conversations.format_prompt_context(
         session_key,
@@ -1805,6 +1821,8 @@ async def _chat_reply(
         is_operator=is_operator,
         operator_paired=operator_paired,
         identity_name=identity_name,
+        life_stage=life_stage,
+        stage_tone=stage_tone,
     )
     try:
         provider, reply = await asyncio.to_thread(
@@ -1829,20 +1847,45 @@ def _canonical_identity_name(raw: str) -> str:
     return value or "Tako"
 
 
-def _chat_prompt(text: str, *, history: str, is_operator: bool, operator_paired: bool, identity_name: str) -> str:
+def _chat_prompt(
+    text: str,
+    *,
+    history: str,
+    is_operator: bool,
+    operator_paired: bool,
+    identity_name: str,
+    life_stage: str = "hatchling",
+    stage_tone: str = "",
+) -> str:
     role = "operator" if is_operator else "non-operator"
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
     name = _canonical_identity_name(identity_name)
     memory_frontmatter = load_memory_frontmatter_excerpt(root=repo_root(), max_chars=1000)
+    stage_line = life_stage.strip().lower() or "hatchling"
+    tone_line = " ".join((stage_tone or "").split()).strip() or "steady"
+    if stage_line == "child":
+        stage_behavior = (
+            "Child-stage behavior: ask one gentle context question at a time "
+            "(where the operator is, what they do, what websites they read). "
+            "Do not push structured planning/tasks unless asked.\n"
+        )
+    else:
+        stage_behavior = "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
+    task_help_line = (
+        "You can chat broadly; only discuss structured tasks/plans if the operator asks.\n"
+        if stage_line == "child"
+        else "You can chat broadly and help think through tasks.\n"
+    )
     return (
         f"You are {name}, a cute but practical octopus assistant.\n"
         f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
         "Never claim your name is `Tako` unless canonical identity name is exactly `Tako`.\n"
+        f"Life stage: {stage_line} ({tone_line}).\n"
         "Reply with plain text only (no markdown), max 4 short lines.\n"
-        "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
+        f"{stage_behavior}"
         "Use MEMORY.md frontmatter to keep memory-vs-execution boundaries explicit.\n"
-        "You can chat broadly and help think through tasks.\n"
+        f"{task_help_line}"
         "Hard boundary: only the operator may change identity/config/tools/permissions/routines.\n"
         "If user asks for restricted changes and they are non-operator, say operator-only clearly.\n"
         f"sender_role={role}\n"
@@ -1888,6 +1931,57 @@ def _record_chat_turn(
             level="warn",
             hooks=hooks,
         )
+
+
+async def _capture_child_operator_context(text: str, paths: RuntimePaths, *, hooks: RuntimeHooks | None) -> list[str]:
+    cfg, _warn = load_tako_toml(repo_root() / "tako.toml")
+    if cfg.life.stage != "child":
+        return []
+    cleaned = " ".join((text or "").split()).strip()
+    if not cleaned:
+        return []
+
+    profile = load_operator_profile(paths.state_dir)
+    update = extract_operator_profile_update(cleaned)
+    changed_fields, added_sites = apply_operator_profile_update(profile, update)
+    notes: list[str] = []
+
+    if changed_fields or added_sites:
+        profile_path = write_operator_profile_note(repo_root() / "memory", profile)
+        append_daily_note(
+            daily_root(),
+            date.today(),
+            "Child-stage operator profile updated via XMTP: "
+            + ", ".join(changed_fields + ([f"sites+={len(added_sites)}"] if added_sites else [])),
+        )
+        _emit_runtime_log(
+            f"child-profile updated path={profile_path} fields={len(changed_fields)} sites={len(added_sites)}",
+            hooks=hooks,
+        )
+        if changed_fields:
+            notes.append("noted. I updated my operator profile notes.")
+
+    if added_sites:
+        ok, summary, monitor_added = add_world_watch_sites(repo_root() / "tako.toml", added_sites)
+        if ok and monitor_added:
+            append_daily_note(
+                daily_root(),
+                date.today(),
+                "World-watch sites added from operator XMTP chat: " + ", ".join(monitor_added[:6]),
+            )
+            _emit_runtime_log(
+                f"child-profile world_watch.sites added={len(monitor_added)}",
+                hooks=hooks,
+            )
+            notes.append("added to watch list: " + ", ".join(monitor_added[:3]))
+        elif not ok:
+            _emit_runtime_log(f"child-profile world_watch.sites update warning: {summary}", level="warn", hooks=hooks)
+
+    followup = next_child_followup_question(profile)
+    save_operator_profile(paths.state_dir, profile)
+    if followup:
+        notes.append(followup)
+    return notes
 
 
 def _is_git_identity_error(text: str) -> bool:

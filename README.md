@@ -14,6 +14,8 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - A background XMTP runtime with stream retries + polling fallback
 - EventBus-driven cognition: in-memory event fanout + JSONL audit + Type 1 triage + Type 2 escalation
 - World Watch sensor loop: RSS/Atom polling plus child-stage curiosity crawling (Reddit/Hacker News/Wikipedia), deterministic world notebook writes, and bounded briefings
+- Child-stage chat tone is relationship-first: it asks one small context question at a time (who/where/what the operator does) and avoids forcing task frameworks unless asked
+- Child-stage operator context is captured into `memory/people/operator.md`; shared websites are added to `[world_watch].sites` in `tako.toml` for monitoring
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
 - Missing-setup prompts: when required config/deps are missing and auto-remediation fails, Tako asks the operator with concrete fix steps
 - Runtime problem capture: detected warnings/errors are converted into committed `tasks/` items for follow-up
@@ -149,6 +151,7 @@ Workspace configuration lives in `tako.toml` (no secrets).
 - `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
 - World-watch feeds live in `[world_watch]` (`feeds = [...]`, `poll_minutes = <minutes>`).
+- Website watch-list lives in `[world_watch].sites` and is automatically updated when child-stage chat captures operator-preferred websites.
 - In `child` stage, world-watch also performs random curiosity sampling from Reddit, Hacker News, and Wikipedia.
 - Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
 - Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference `auto|pi`, API keys, pi OAuth inventory).

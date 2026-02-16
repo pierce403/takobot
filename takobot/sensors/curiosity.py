@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from datetime import datetime, timezone
+import html
 import json
 from pathlib import Path
 import random
+import re
 import time
 from typing import Any, Callable, Mapping
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from .base import SensorContext
@@ -38,6 +40,7 @@ class CuriositySensor:
         self,
         *,
         sources: list[str] | None = None,
+        site_urls: list[str] | None = None,
         poll_minutes: int = 30,
         seen_path: Path | None = None,
         max_seen_ids: int = 20_000,
@@ -57,6 +60,7 @@ class CuriositySensor:
             for source in _normalize_sources(sources or list(DEFAULT_CURIOSITY_SOURCES))
             if source in self._source_fetchers
         )
+        self._site_urls = tuple(_normalize_site_urls(site_urls or []))
         self.poll_interval_s = max(300, int(poll_minutes) * 60)
         self._next_poll_at = 0.0
         self._seen_path = seen_path
@@ -78,16 +82,21 @@ class CuriositySensor:
         self._ensure_seen_loaded(ctx.state_dir)
 
         sources = list(self.sources)
+        if self._site_urls:
+            sources.append("operator_sites")
         self._rng.shuffle(sources)
 
         changed = False
         events: list[dict[str, Any]] = []
         for source_name in sources:
-            fetcher = self._source_fetchers.get(source_name)
-            if fetcher is None:
-                continue
             try:
-                raw_item = await asyncio.to_thread(fetcher, ctx, self._rng)
+                if source_name == "operator_sites":
+                    raw_item = await asyncio.to_thread(self._fetch_operator_site_item, ctx, self._rng)
+                else:
+                    fetcher = self._source_fetchers.get(source_name)
+                    if fetcher is None:
+                        continue
+                    raw_item = await asyncio.to_thread(fetcher, ctx, self._rng)
             except Exception:
                 continue
             prepared = _prepare_item(raw_item, source_name=source_name, mission_objectives=ctx.mission_objectives)
@@ -105,6 +114,24 @@ class CuriositySensor:
         if changed:
             self._persist_seen()
         return events
+
+    def _fetch_operator_site_item(self, ctx: SensorContext, rng: random.Random) -> dict[str, Any] | None:
+        if not self._site_urls:
+            return None
+        target = rng.choice(self._site_urls)
+        title = _fetch_html_title(target, timeout_s=ctx.timeout_s, user_agent=ctx.user_agent)
+        if not title:
+            parsed = urlparse(target)
+            title = parsed.netloc or target
+        parsed = urlparse(target)
+        source_label = parsed.netloc or "operator website"
+        return {
+            "item_id": f"site:{target}",
+            "title": title,
+            "link": target,
+            "source": f"Operator Site {source_label}",
+            "why_it_matters": "Operator-preferred source; likely to contain mission-relevant context.",
+        }
 
     def _ensure_seen_loaded(self, state_dir: Path) -> None:
         if self._seen_loaded:
@@ -279,6 +306,26 @@ def _source_label(source_name: str) -> str:
     return source_name
 
 
+def _normalize_site_urls(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        candidate = _clean_text(str(raw))
+        if not candidate:
+            continue
+        if "://" not in candidate and "." in candidate:
+            candidate = "https://" + candidate
+        parsed = urlparse(candidate)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+        normalized = candidate.rstrip("/")
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out
+
+
 def _fetch_reddit_item(ctx: SensorContext, rng: random.Random) -> dict[str, Any] | None:
     subreddit = rng.choice(DEFAULT_REDDIT_SUBREDDITS)
     url = REDDIT_HOT_TEMPLATE.format(subreddit=quote(subreddit))
@@ -384,6 +431,27 @@ def _fetch_json(url: str, *, timeout_s: float, user_agent: str) -> Any:
         if len(raw) > CURIOSITY_MAX_BYTES:
             raise ValueError(f"curiosity payload too large (> {CURIOSITY_MAX_BYTES} bytes)")
     return json.loads(raw.decode(charset, errors="replace"))
+
+
+def _fetch_html_title(url: str, *, timeout_s: float, user_agent: str) -> str:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+        },
+        method="GET",
+    )
+    with urlopen(request, timeout=max(1.0, float(timeout_s))) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        raw = response.read(CURIOSITY_MAX_BYTES + 1)
+        if len(raw) > CURIOSITY_MAX_BYTES:
+            raise ValueError(f"website payload too large (> {CURIOSITY_MAX_BYTES} bytes)")
+    text = raw.decode(charset, errors="replace")
+    match = re.search(r"<title[^>]*>(.*?)</title>", text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    return _clean_text(html.unescape(match.group(1)))
 
 
 def _epoch_to_iso(value: Any) -> str:

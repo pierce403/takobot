@@ -5,6 +5,7 @@ from pathlib import Path
 import random
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from takobot.sensors.base import SensorContext
 from takobot.sensors.curiosity import CuriositySensor
@@ -97,6 +98,28 @@ class TestCuriositySensor(unittest.TestCase):
             self.assertEqual(1, len(events))
             origin = events[0]["metadata"].get("origin_source")
             self.assertIn(origin, {"reddit", "hackernews"})
+
+    def test_operator_sites_are_sampled_when_configured(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            ctx = SensorContext.create(
+                state_dir=state_dir,
+                user_agent="takobot-test",
+                timeout_s=2.0,
+            )
+            sensor = CuriositySensor(
+                sources=[],
+                site_urls=["https://example.com"],
+                poll_minutes=1,
+                seen_path=state_dir / "curiosity_seen.json",
+                rng=random.Random(3),
+            )
+            with patch("takobot.sensors.curiosity._fetch_html_title", return_value="Example Domain"):
+                events = asyncio.run(sensor.tick(ctx))
+            self.assertEqual(1, len(events))
+            metadata = events[0]["metadata"]
+            self.assertEqual("operator_sites", metadata.get("origin_source"))
+            self.assertIn("Example Domain", metadata.get("title", ""))
 
 
 if __name__ == "__main__":

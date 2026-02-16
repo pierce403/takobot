@@ -30,6 +30,7 @@ What bootstrap does:
 - TUI starts in onboarding state.
 - Hatchling onboarding order is stage-aware: `name -> purpose -> XMTP handle?`.
 - On onboarding completion, Tako transitions into `child` stage behavior (world learning).
+- In `child` stage chat, Tako asks lightweight context questions first (who/where/what you do), records notes in `memory/people/operator.md`, and can add your favorite websites to `[world_watch].sites`.
 - In `child` stage, world learning includes random curiosity crawls across Reddit, Hacker News, and Wikipedia with mission-linked questions.
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.

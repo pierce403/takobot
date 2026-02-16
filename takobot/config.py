@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import tomllib
+from urllib.parse import urlparse, urlunparse
 
 from .life_stage import DEFAULT_LIFE_STAGE, normalize_life_stage_name, stage_titles_csv
 
@@ -83,6 +84,7 @@ class UpdatesConfig:
 @dataclass(frozen=True)
 class WorldWatchConfig:
     feeds: list[str] = field(default_factory=list)
+    sites: list[str] = field(default_factory=list)
     poll_minutes: int = 15
 
 
@@ -170,6 +172,9 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
         ),
         world_watch=WorldWatchConfig(
             feeds=_as_str_list(world_watch.get("feeds") if "feeds" in world_watch else data.get("feeds")),
+            sites=_normalize_monitor_sites(
+                _as_str_list(world_watch.get("sites") if "sites" in world_watch else data.get("sites"))
+            ),
             poll_minutes=max(
                 5,
                 _as_int(
@@ -409,6 +414,95 @@ def set_life_stage(path: Path, stage: str) -> tuple[bool, str]:
     return True, f"life.stage set to {normalized}"
 
 
+def add_world_watch_sites(path: Path, site_urls: list[str]) -> tuple[bool, str, list[str]]:
+    normalized_input = _normalize_monitor_sites(site_urls)
+    if not normalized_input:
+        return False, "no valid website URLs detected", []
+
+    cfg, _warn = load_tako_toml(path)
+    existing = _normalize_monitor_sites(list(cfg.world_watch.sites))
+    added = [item for item in normalized_input if item not in existing]
+    if not added:
+        return True, "no new websites were added", []
+
+    combined = existing + added
+    ok, summary = _set_world_watch_list(path, "sites", combined)
+    if not ok:
+        return False, summary, []
+    return True, f"world_watch.sites updated (+{len(added)})", added
+
+
+def _set_world_watch_list(path: Path, key: str, values: list[str]) -> tuple[bool, str]:
+    if key not in {"feeds", "sites"}:
+        return False, f"unsupported world_watch key: {key}"
+    escaped_values = [f'"{_escape_toml_string(value)}"' for value in values]
+    line = f"{key} = [{', '.join(escaped_values)}]"
+
+    if not path.exists():
+        payload = "[world_watch]\n" + line + f"\npoll_minutes = {WorldWatchConfig.poll_minutes}\n"
+        try:
+            path.write_text(payload, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"world_watch.{key} set ({len(values)} item(s), new file)"
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed reading tako.toml: {exc}"
+
+    lines = text.splitlines()
+    section_start = None
+    for idx, raw in enumerate(lines):
+        if raw.strip() == "[world_watch]":
+            section_start = idx
+            break
+
+    if section_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("[world_watch]")
+        lines.append(line)
+        lines.append(f"poll_minutes = {WorldWatchConfig.poll_minutes}")
+        updated = "\n".join(lines) + "\n"
+        try:
+            path.write_text(updated, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"failed writing tako.toml: {exc}"
+        return True, f"world_watch.{key} set ({len(values)} item(s))"
+
+    section_end = len(lines)
+    for idx in range(section_start + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section_end = idx
+            break
+
+    target_idx = None
+    for idx in range(section_start + 1, section_end):
+        stripped = lines[idx].strip()
+        if stripped.startswith(f"{key}"):
+            target_idx = idx
+            break
+
+    if target_idx is not None:
+        lines[target_idx] = line
+    else:
+        insert_idx = section_start + 1
+        while insert_idx < section_end and not lines[insert_idx].strip():
+            insert_idx += 1
+        lines.insert(insert_idx, line)
+
+    updated = "\n".join(lines)
+    if text.endswith("\n") or not updated.endswith("\n"):
+        updated += "\n"
+    try:
+        path.write_text(updated, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed writing tako.toml: {exc}"
+    return True, f"world_watch.{key} set ({len(values)} item(s))"
+
+
 def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
     location = str(path) if path is not None else "tako.toml"
     defaults = config.security.default_permissions
@@ -432,6 +526,7 @@ def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
         "",
         "[world_watch]",
         f"- feeds: RSS/Atom feeds to monitor (current: {len(config.world_watch.feeds)})",
+        f"- sites: website URLs to sample in child-stage curiosity exploration (current: {len(config.world_watch.sites)})",
         f"- poll_minutes: feed polling cadence in minutes (current: {config.world_watch.poll_minutes})",
         "",
         "[life]",
@@ -449,3 +544,36 @@ def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
         f"- filesystem: default permission for enabled extensions (current: {'true' if defaults.filesystem else 'false'})",
     ]
     return "\n".join(lines)
+
+
+def _normalize_monitor_sites(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        candidate = " ".join(str(raw or "").split()).strip()
+        if not candidate:
+            continue
+        if "://" not in candidate and "." in candidate:
+            candidate = "https://" + candidate
+        parsed = urlparse(candidate)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+        normalized = urlunparse(
+            (
+                parsed.scheme.lower(),
+                parsed.netloc.lower(),
+                parsed.path or "",
+                "",
+                parsed.query or "",
+                "",
+            )
+        ).rstrip("/")
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out
+
+
+def _escape_toml_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')

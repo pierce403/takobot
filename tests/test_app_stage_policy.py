@@ -31,6 +31,25 @@ class TestAppStagePolicy(unittest.TestCase):
         self.assertIn("Life stage: teen (skeptical).", prompt)
         self.assertIn("memory_frontmatter=", prompt)
         self.assertIn("MEMORY frontmatter", prompt)
+        self.assertIn("ask sharp follow-up questions", prompt)
+
+    def test_child_stage_prompt_prefers_gentle_context_questions(self) -> None:
+        prompt = _build_terminal_chat_prompt(
+            text="hi",
+            identity_name="Tako",
+            identity_role="Your highly autonomous octopus friend",
+            mission_objectives=["Track mission signals"],
+            mode="running",
+            state="RUNNING",
+            operator_paired=True,
+            history="User: hi",
+            life_stage="child",
+            stage_tone="curious",
+            memory_frontmatter="# MEMORY frontmatter",
+        )
+        self.assertIn("Child-stage behavior", prompt)
+        self.assertIn("Ask one gentle question", prompt)
+        self.assertIn("Do not push structured plans", prompt)
 
     def test_child_stage_includes_curiosity_sensor(self) -> None:
         with TemporaryDirectory() as tmp:

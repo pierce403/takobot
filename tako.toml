@@ -23,6 +23,8 @@ auto_apply = true
 [world_watch]
 # RSS/Atom feeds to monitor for world-watch notes + briefings.
 feeds = []
+# Websites to sample during child-stage curiosity exploration.
+sites = []
 # Feed polling cadence in minutes.
 poll_minutes = 30
 

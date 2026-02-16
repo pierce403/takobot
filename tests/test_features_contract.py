@@ -127,6 +127,8 @@ def _probe_app_runtime_strings() -> bool:
         "ctrl+shift+c",
         "incredibly curious about the world",
         "DOSE",
+        "operator.profile.updated",
+        "world.watch.sites.added",
     )
     return all(token in app_text for token in required) and "runtime.log" in cli_text
 

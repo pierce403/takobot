@@ -90,6 +90,9 @@
   - Uses an in-memory EventBus that writes `.tako/state/events.jsonl` for audit while dispatching events directly to Type 1 queues (no JSONL polling loop).
   - Includes world-watch sensors for RSS/Atom monitoring (`RSSSensor`) plus child-stage random curiosity exploration (`CuriositySensor`) across Reddit/Hacker News/Wikipedia.
   - Curiosity exploration persists dedupe state in `.tako/state/curiosity_seen.json` and writes mission-linked questions into world notebook entries/briefings.
+  - Child-stage chat behavior is context-first (one gentle question at a time) and avoids pushing structured plans/tasks unless operator asks.
+  - Child-stage chat captures operator profile notes under `memory/people/operator.md` and persists structured state at `.tako/state/operator_profile.json`.
+  - Child-stage website preferences from operator chat are added to `tako.toml` (`[world_watch].sites`) and sampled by curiosity exploration.
   - Writes deterministic world notebook entries to `memory/world/YYYY-MM-DD.md` and daily Mission Review Lite snapshots to `memory/world/mission-review/YYYY-MM-DD.md`.
   - Maintains world-model scaffold files under `memory/world/` (`model.md`, `entities.md`, `assumptions.md`).
   - Emits bounded proactive briefings when there is signal (new world items/task unblocks/repeated errors), capped per day with cooldown state in `.tako/state/briefing_state.json`.
@@ -147,6 +150,8 @@
   - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
   - [x] Hatchling onboarding order is `name -> purpose -> XMTP handle`.
   - [x] Child stage randomly explores Reddit/Hacker News/Wikipedia and emits mission-linked world questions.
+  - [x] Child-stage chat can capture operator context and write/update `memory/people/operator.md`.
+  - [x] Child-stage chat can capture website URLs and add them to `[world_watch].sites`.
   - [x] Onboarding completion transitions stage to `child` and persists it to `tako.toml`.
   - [x] Freeform naming inputs (e.g. “your name can be SILLYTAKO”) persist only the parsed name in `SOUL.md`.
   - [x] In running chat, “call yourself SILLYTAKO” updates `SOUL.md` without entering a special setup mode.
@@ -360,6 +365,7 @@
   - `RSSSensor` polls configured feeds from `tako.toml` (`[world_watch].feeds`, `[world_watch].poll_minutes`).
   - In `child` stage, `CuriositySensor` randomly samples Reddit/Hacker News/Wikipedia and emits mission-linked questions.
   - Seen-item dedupe state is stored in `.tako/state/rss_seen.json` and `.tako/state/curiosity_seen.json`.
+  - Child-stage curiosity also samples operator-preferred sites from `[world_watch].sites`.
   - Sensor outputs are persisted as deterministic notes under `memory/world/`.
 - **Test Criteria**:
   - [ ] RSS world watch picks up new feed items and writes deterministic notebook entries.

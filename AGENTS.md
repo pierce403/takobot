@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Child-stage chat is now context-first (not task-first)
+
+- What happened: child-stage conversations could feel like immediate planning/interrogation instead of gentle operator context discovery.
+- Fix: child-stage chat prompts now prioritize small, simple context questions (who/where/what they do), capture operator notes in `memory/people/operator.md`, and add operator-shared websites to `[world_watch].sites` for monitoring.
+- Prevention: keep child-stage behavior explicitly encoded in prompt policy + operator-profile capture routines/tests so later prompt changes do not regress into task-first interactions.
+
 ### 2026-02-16 — Child stage now runs random curiosity crawls
 
 - What happened: child-stage world learning relied mostly on configured RSS feeds, so proactive discovery could miss novel signals and felt less researcher-like.

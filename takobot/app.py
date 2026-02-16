@@ -29,6 +29,7 @@ from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
 from .conversation import ConversationStore
 from .config import (
     TakoConfig,
+    add_world_watch_sites,
     explain_tako_toml,
     load_tako_toml,
     set_life_stage,
@@ -63,6 +64,14 @@ from .life_stage import DEFAULT_LIFE_STAGE, normalize_life_stage_name, stage_pol
 from .locks import instance_lock
 from .memory_frontmatter import load_memory_frontmatter_excerpt
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
+from .operator_profile import (
+    apply_operator_profile_update,
+    extract_operator_profile_update,
+    load_operator_profile,
+    next_child_followup_question,
+    save_operator_profile,
+    write_operator_profile_note,
+)
 from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
@@ -902,7 +911,7 @@ class TakoTerminalApp(App[None]):
                 if self.life_stage == DEFAULT_LIFE_STAGE:
                     await self._set_life_stage("child", reason="operator paired session resumed")
                 self._write_tako("terminal is now your local cockpit. chat works here too. type `help`.")
-                if self._today_outcomes_blank():
+                if self._should_prompt_outcomes() and self._today_outcomes_blank():
                     self._write_tako("tiny morning bubble: type `morning` to set 3 outcomes that make today a win.")
                 return
 
@@ -914,7 +923,7 @@ class TakoTerminalApp(App[None]):
                 "hatchling onboarding order: name -> purpose -> XMTP handle. "
                 "after that, we shift into Child world-learning behavior."
             )
-            if self._today_outcomes_blank():
+            if self._should_prompt_outcomes() and self._today_outcomes_blank():
                 self._write_tako("also: type `morning` any time to set 3 outcomes for today.")
         except Exception as exc:  # noqa: BLE001
             self._error_card(
@@ -937,6 +946,9 @@ class TakoTerminalApp(App[None]):
             return not any(item.text.strip() for item in outcomes)
         except Exception:
             return False
+
+    def _should_prompt_outcomes(self) -> bool:
+        return self.life_stage in {"teen", "adult"}
 
     def _request_operator_configuration(self, *, key: str, reason: str, next_steps: list[str]) -> None:
         token = key.strip().lower()
@@ -987,6 +999,7 @@ class TakoTerminalApp(App[None]):
             sensors.append(
                 CuriositySensor(
                     sources=["reddit", "hackernews", "wikipedia"],
+                    site_urls=list(self.config.world_watch.sites),
                     poll_minutes=max(15, self._stage_world_watch_poll_minutes()),
                     seen_path=self.paths.state_dir / "curiosity_seen.json",
                 )
@@ -2093,7 +2106,7 @@ class TakoTerminalApp(App[None]):
 
     def _schedule_identity_onboarding_after_awake(self) -> None:
         self.identity_onboarding_pending = True
-        self._write_tako("once inference is awake, I'll ask about name/goals/objectives.")
+        self._write_tako("once inference is awake, I can ask a couple of small identity/context questions.")
         self._add_activity("identity", "identity setup queued until inference is active")
 
     async def _maybe_start_delayed_identity_onboarding(self) -> None:
@@ -2102,7 +2115,7 @@ class TakoTerminalApp(App[None]):
         if not self._inference_is_awake():
             return
         self.identity_onboarding_pending = False
-        self._write_tako("inference is awake now. want to tune my identity, goals, and mission objectives? let's do it.")
+        self._write_tako("inference is awake now. want to tune my identity notes with a couple of quick questions?")
         self._begin_identity_onboarding()
 
     def _inference_is_awake(self) -> bool:
@@ -2626,9 +2639,12 @@ class TakoTerminalApp(App[None]):
                 return
             if await self._maybe_handle_inline_name_change(text):
                 return
+            child_followups = await self._capture_child_stage_operator_context(text)
             reply = await self._local_chat_reply(text)
             self._record_local_chat_turn(user_text=text, assistant_text=reply)
             self._write_tako(reply)
+            for line in child_followups:
+                self._write_tako(line)
             return
 
         cmd, rest = _parse_command(text)
@@ -2698,6 +2714,7 @@ class TakoTerminalApp(App[None]):
                 f"last_update_check: {update_check_age}\n"
                 f"dose_label: {self.dose_label}\n"
                 f"world_watch_feeds: {len(self.config.world_watch.feeds)}\n"
+                f"world_watch_sites: {len(self.config.world_watch.sites)}\n"
                 f"world_watch_poll_minutes: {self._stage_world_watch_poll_minutes() if self.stage_policy.world_watch_enabled else 0}\n"
                 f"uptime_s: {uptime}\n"
                 f"version: {__version__}\n"
@@ -2746,6 +2763,7 @@ class TakoTerminalApp(App[None]):
                 f"open_tasks: {self.open_tasks_count}",
                 f"open_loops: {loops_count}",
                 f"world_watch_feeds: {len(self.config.world_watch.feeds)}",
+                f"world_watch_sites: {len(self.config.world_watch.sites)}",
                 f"inference_provider: {inference_provider}",
                 f"inference_ready: {inference_ready}",
                 f"last_update_check: {update_check_age}",
@@ -3958,6 +3976,73 @@ class TakoTerminalApp(App[None]):
 
         self._write_tako("unknown local command. type `help`. plain text chat always works here.")
 
+    async def _capture_child_stage_operator_context(self, text: str) -> list[str]:
+        if self.life_stage != "child" or self.paths is None:
+            return []
+        cleaned = _sanitize(text)
+        if not cleaned:
+            return []
+
+        profile = load_operator_profile(self.paths.state_dir)
+        update = extract_operator_profile_update(cleaned)
+        changed_fields, added_sites = apply_operator_profile_update(profile, update)
+        notes: list[str] = []
+
+        if changed_fields or added_sites:
+            profile_path = write_operator_profile_note(repo_root() / "memory", profile)
+            append_daily_note(
+                daily_root(),
+                date.today(),
+                "Child-stage operator profile updated: "
+                + ", ".join(changed_fields + ([f"sites+={len(added_sites)}"] if added_sites else [])),
+            )
+            self._record_event(
+                "operator.profile.updated",
+                "Captured operator context during child-stage chat.",
+                source="memory",
+                metadata={
+                    "changed_fields": changed_fields,
+                    "added_sites": added_sites,
+                    "path": str(profile_path),
+                },
+            )
+            self._add_activity("memory", "operator profile updated")
+            if changed_fields:
+                notes.append("noted. I updated my operator profile notes.")
+
+        if added_sites:
+            ok, summary, monitor_added = await asyncio.to_thread(
+                add_world_watch_sites,
+                repo_root() / "tako.toml",
+                added_sites,
+            )
+            if ok and monitor_added:
+                refreshed_cfg, warn = load_tako_toml(repo_root() / "tako.toml")
+                self.config = refreshed_cfg
+                self.config_warning = warn
+                await self._reload_runtime_stage_policy()
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    "World-watch sites added from operator chat: " + ", ".join(monitor_added[:6]),
+                )
+                self._record_event(
+                    "world.watch.sites.added",
+                    f"Added {len(monitor_added)} operator website(s) to world_watch.sites.",
+                    source="runtime",
+                    metadata={"sites": monitor_added},
+                )
+                self._add_activity("world-watch", f"added {len(monitor_added)} operator site(s)")
+                notes.append("added to watch list: " + ", ".join(monitor_added[:3]))
+            elif not ok:
+                self._write_system(f"world-watch sites update warning: {summary}")
+
+        followup = next_child_followup_question(profile)
+        save_operator_profile(self.paths.state_dir, profile)
+        if followup:
+            notes.append(followup)
+        return notes
+
     def _stream_clear(self) -> None:
         self.stream_active = False
         self.stream_provider = "none"
@@ -4656,6 +4741,7 @@ class TakoTerminalApp(App[None]):
             f"- input queue: {self._queued_input_total()}\n"
             f"- world-watch routine: {'active' if self.stage_policy.world_watch_enabled else 'paused'}\n"
             f"- world-watch feeds: {len(self.config.world_watch.feeds)} (poll {world_poll}m)\n"
+            f"- world-watch sites: {len(self.config.world_watch.sites)}\n"
             f"- explore cadence: every {self.stage_policy.explore_interval_minutes}m\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- type1 processed: {self.type1_processed}\n"
@@ -5094,6 +5180,16 @@ def _build_terminal_chat_prompt(
     memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
     stage_line = life_stage.strip().lower() or DEFAULT_LIFE_STAGE
     tone_line = " ".join((stage_tone or "").split()).strip() or "steady"
+    if stage_line == "child":
+        stage_behavior = (
+            "Child-stage behavior: start small and warm. Ask one gentle question at a time about operator context "
+            "(where they are, who they are, what they do, and what websites they read). "
+            "Do not push structured plans, tasks, or outcome frameworks unless the operator explicitly asks.\n"
+        )
+    else:
+        stage_behavior = (
+            "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
+        )
     control_surface_line = (
         "Operator control surfaces: terminal app and paired XMTP channel.\n"
         if operator_paired
@@ -5107,7 +5203,7 @@ def _build_terminal_chat_prompt(
         f"Mission objectives: {objectives_line}\n"
         f"Life stage: {stage_line} ({tone_line}).\n"
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
-        "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
+        f"{stage_behavior}"
         "Use MEMORY.md frontmatter spec to decide what belongs in memory vs execution structures.\n"
         "Terminal chat is always available.\n"
         "Hard boundary: only the operator may change identity/config/tools/permissions/routines.\n"

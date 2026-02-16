@@ -36,6 +36,7 @@ title: "tako.toml Reference"
 ## `[world_watch]`
 
 - `feeds` — RSS/Atom feed URLs for world-watch monitoring
+- `sites` — website URLs captured from child-stage operator context for random monitoring
 - `poll_minutes` — feed poll cadence in minutes
 - Child stage also runs built-in random curiosity sampling across Reddit, Hacker News, and Wikipedia (dedupe state in `.tako/state/curiosity_seen.json`)
 

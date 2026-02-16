@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from takobot.inference import (
     InferenceRuntime,
@@ -16,6 +17,7 @@ from takobot.inference import (
     _detect_ollama,
     _detect_pi,
     _provider_env,
+    _run_pi,
     _workspace_node_bin_dir,
     auto_repair_inference_runtime,
     discover_inference_runtime,
@@ -100,6 +102,30 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertTrue(env["PATH"].startswith(str(node_bin) + os.pathsep))
         self.assertEqual(str(nvm_dir), env["NVM_DIR"])
         self.assertEqual(str(agent_dir), env["PI_CODING_AGENT_DIR"])
+
+    def test_run_pi_does_not_disable_tools_or_skills(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        with patch(
+            "takobot.inference.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+        ) as run_mock:
+            output = _run_pi(runtime, "hello world", env={}, timeout_s=10.0)
+
+        self.assertEqual("ok", output)
+        called_cmd = run_mock.call_args.args[0]
+        self.assertIn("--print", called_cmd)
+        self.assertIn("--mode", called_cmd)
+        self.assertIn("--no-session", called_cmd)
+        self.assertNotIn("--no-tools", called_cmd)
+        self.assertNotIn("--no-extensions", called_cmd)
+        self.assertNotIn("--no-skills", called_cmd)
 
     def test_detect_pi_requires_node_runtime_for_ready(self) -> None:
         with TemporaryDirectory() as tmp:

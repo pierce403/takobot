@@ -266,7 +266,7 @@ def _probe_starter_skills() -> bool:
             key = f"skill:{skill.slug}"
             if key not in installed:
                 return False
-            if bool(installed[key].get("enabled")):
+            if not bool(installed[key].get("enabled")):
                 return False
         pi_skill = workspace / "skills" / "agent-cli-inferencing" / "playbook.md"
         if not pi_skill.exists():

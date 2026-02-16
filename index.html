@@ -691,7 +691,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><b>Emotion system</b>: deterministic DOSE state (<code>.tako/state/dose.json</code>) that biases escalation sensitivity and tone.</li>
               <li><b>Productivity system</b>: GTD + PARA execution structure (<code>tasks/</code>, <code>projects/</code>, <code>areas/</code>, <code>resources/</code>, <code>archives/</code>) plus open loops (<code>.tako/state/open_loops.json</code>).</li>
               <li><b>Life stages</b>: <code>hatchling</code> → <code>child</code> → <code>teen</code> → <code>adult</code> with stage policies in <code>tako.toml</code>.</li>
-              <li><b>Safety boundary</b>: operator control + quarantine-first skill/tool installs (analyze → install disabled → enable).</li>
+              <li><b>Safety boundary</b>: operator control + quarantine-first skill/tool installs (analyze → operator accept → install enabled).</li>
             </ul>
             <p style="margin-top: 12px; color: var(--muted-2); font-size: 13px">
               Tako stays git-first: memory and productivity artifacts are reviewable; runtime state lives under <code>.tako/</code> and is never committed.
@@ -819,7 +819,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>If git identity is missing, startup/heartbeat auto-configure repo-local identity from bot name (<code>&lt;name&gt; &lt;name.tako.eth@xmtp.mx&gt;</code>) and retry commit.</li>
               <li>If runtime health detects actionable problems, Tako auto-creates/reuses matching follow-up tasks under <code>tasks/</code>.</li>
               <li>Ensures a git-ignored <code>code/</code> directory exists for repo clones and code-work sandboxes.</li>
-              <li>Seeds an OpenClaw-informed starter skill pack into <code>skills/</code> (disabled by default) and registers those skills as installed extensions.</li>
+              <li>Seeds an OpenClaw-informed starter skill pack into <code>skills/</code>, registers those skills, and auto-enables installed extensions.</li>
               <li>If required setup is missing and auto-remediation fails (for example git identity), asks the operator in-app with concrete fix steps.</li>
               <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
               <li>Uses XMTP typing indicators for outbound replies when supported by the installed XMTP SDK/runtime.</li>
@@ -854,7 +854,8 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>
               <li><code>doctor</code> auto-runs inference repair first (workspace pi runtime/auth), then runs offline diagnostics (provider CLI probes + recent inference error scan) without needing inference.</li>
-              <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>
+              <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>tool-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>
+              <li>Pi chat inference runs with tools/skills/extensions enabled and can use workspace <code>skills/</code> + <code>tools/</code> directly.</li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, plain-text chat, and local operator configuration commands.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>

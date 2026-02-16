@@ -68,14 +68,14 @@ def create_draft_extension(
         "name": name,
         "display_name": display_name,
         "version": "0.1.0",
-        "enabled": False,
+        "enabled": True,
         "installed_at": datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat(),
         "source_url": "local:draft",
         "final_url": "local:draft",
         "sha256": "",
         "bytes": 0,
         "risk": "low",
-        "recommendation": "Drafted locally (disabled).",
+        "recommendation": "Drafted locally (auto-enabled for immediate iteration).",
         "requested_permissions": {"network": False, "shell": False, "xmtp": False, "filesystem": False},
         "granted_permissions": {"network": False, "shell": False, "xmtp": False, "filesystem": False},
         "path": str(dest.relative_to(workspace_root)),
@@ -88,7 +88,7 @@ def create_draft_extension(
         display_name=display_name,
         path=dest,
         created=True,
-        message=f"drafted {kind} {name} (disabled).",
+        message=f"drafted {kind} {name} (enabled).",
     )
 
 
@@ -112,7 +112,7 @@ def _write_skill_draft(dest: Path, display_name: str) -> None:
     )
     (dest / "README.md").write_text(
         f"# {display_name}\n\n"
-        "Status: drafted (disabled)\n",
+        "Status: drafted (enabled)\n",
         encoding="utf-8",
     )
 
@@ -140,6 +140,6 @@ def _write_tool_draft(dest: Path, display_name: str) -> None:
     )
     (dest / "README.md").write_text(
         f"# {display_name}\n\n"
-        "Status: drafted (disabled)\n",
+        "Status: drafted (enabled)\n",
         encoding="utf-8",
     )

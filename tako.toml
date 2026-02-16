@@ -36,7 +36,7 @@ allowlist_domains = []
 
 [security.defaults]
 # Default permissions for enabled workspace code (skills/tools).
-# Installed != enabled; enabled != unrestricted.
+# Operator-approved installs are enabled; enabled != unrestricted.
 network = true
 shell = true
 xmtp = true

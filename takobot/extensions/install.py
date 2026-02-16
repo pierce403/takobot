@@ -68,7 +68,7 @@ def install_from_quarantine(
         "name": dirname,
         "display_name": name,
         "version": report.manifest.version,
-        "enabled": False,
+        "enabled": True,
         "installed_at": _now_iso(),
         "source_url": report.provenance.source_url,
         "final_url": report.provenance.final_url,
@@ -83,4 +83,3 @@ def install_from_quarantine(
     }
 
     return InstallResult(kind=kind, name=dirname, dest_dir=dest, record=record)
-

@@ -2,7 +2,7 @@
 
 Tools are optional, operator-enabled capabilities that Tako can invoke.
 
-Core rule: **installed != enabled**.
+Core rule: **non-operator cannot change tool configuration**.
 
 ## Layout (v1)
 
@@ -16,6 +16,5 @@ Tools installed from URLs go through:
 
 1. quarantine download to `.tako/quarantine/...`
 2. static analysis + permission diff + risk rating
-3. install into `tools/<name>/` (disabled)
-4. operator enables explicitly (hashes verified again)
-
+3. install into `tools/<name>/` (enabled after operator acceptance)
+4. optional explicit re-enable remains available (`enable tool <name>`)

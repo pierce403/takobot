@@ -131,3 +131,25 @@ def list_installed(path: Path, *, kind: Kind | None = None) -> list[dict[str, An
         items = [item for item in items if str(item.get("kind")) == kind]
     return sorted(items, key=lambda x: (str(x.get("kind") or ""), str(x.get("name") or "")))
 
+
+def enable_all_installed(path: Path) -> tuple[int, int]:
+    data = load_registry(path)
+    installed = data.get("installed", {})
+    if not isinstance(installed, dict):
+        return 0, 0
+
+    enabled_now = 0
+    total = 0
+    for value in installed.values():
+        if not isinstance(value, dict):
+            continue
+        total += 1
+        if bool(value.get("enabled")):
+            continue
+        value["enabled"] = True
+        enabled_now += 1
+
+    if enabled_now:
+        data["installed"] = installed
+        save_registry(path, data)
+    return enabled_now, total

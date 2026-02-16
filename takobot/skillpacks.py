@@ -208,6 +208,23 @@ OPENCLAW_STARTER_SKILLS: tuple[StarterSkill, ...] = (
         source="https://clawhub.ai/api/v1/skills/skill-creator",
     ),
     StarterSkill(
+        slug="tool-creator",
+        display_name="Tool Creator",
+        rank=57,
+        downloads=6012,
+        stars=14,
+        summary="Guide for drafting, validating, and enabling new workspace tools safely.",
+        trigger="Use when operator asks to create or refine a custom tool implementation.",
+        commands=(
+            "draft tool <name>",
+            "enable tool <name>",
+            "review pending",
+        ),
+        prerequisites=("A concrete tool behavior contract is defined by operator intent.",),
+        permissions={"network": False, "shell": False, "xmtp": False, "filesystem": True},
+        source="https://github.com/pierce403/takobot",
+    ),
+    StarterSkill(
         slug="mcporter-mcp",
         display_name="MCP Tooling (mcporter)",
         rank=24,
@@ -310,14 +327,14 @@ def _register_skill_if_missing(
         "name": skill.slug,
         "display_name": skill.display_name,
         "version": "0.1.0",
-        "enabled": False,
+        "enabled": True,
         "installed_at": datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat(),
         "source_url": skill.source,
         "final_url": skill.source,
         "sha256": "",
         "bytes": 0,
         "risk": _risk_for_permissions(permissions),
-        "recommendation": "Built-in OpenClaw starter skill (disabled by default).",
+        "recommendation": "Built-in starter skill (auto-enabled for operator autonomy).",
         "requested_permissions": permissions,
         "granted_permissions": permissions,
         "path": str(skill_dir.relative_to(workspace_root)),
@@ -360,7 +377,7 @@ def _policy_text(skill: StarterSkill) -> str:
 def _readme_text(skill: StarterSkill) -> str:
     return (
         f"# {skill.display_name}\n\n"
-        "Status: built-in starter skill (disabled).\n\n"
+        "Status: built-in starter skill (enabled).\n\n"
         f"- Source slug: `{skill.slug}`\n"
         f"- OpenClaw rank (downloads snapshot): #{skill.rank}\n"
         f"- Downloads: {skill.downloads}\n"

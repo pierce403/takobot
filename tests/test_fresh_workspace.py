@@ -7,7 +7,7 @@ import unittest
 
 from takobot.config import load_tako_toml, set_workspace_name
 from takobot.extensions.draft import create_draft_extension
-from takobot.extensions.registry import load_registry
+from takobot.extensions.registry import enable_all_installed, load_registry, record_installed
 from takobot.mission import activity_alignment_score, is_activity_mission_aligned
 from takobot.skillpacks import OPENCLAW_STARTER_SKILLS, seed_openclaw_starter_skills
 from takobot.soul import DEFAULT_SOUL_ROLE, read_identity_mission, update_identity_mission
@@ -77,7 +77,7 @@ class TestFreshWorkspace(unittest.TestCase):
         self.assertEqual("", warn)
         self.assertEqual("SHELLY", cfg.workspace.name)
 
-    def test_starter_skills_seed_and_register_disabled(self) -> None:
+    def test_starter_skills_seed_and_register_enabled(self) -> None:
         seeded = seed_openclaw_starter_skills(self.workspace, registry_path=self.registry_path)
         total = len(seeded.created_skills) + len(seeded.existing_skills)
         self.assertEqual(len(OPENCLAW_STARTER_SKILLS), total)
@@ -102,14 +102,14 @@ class TestFreshWorkspace(unittest.TestCase):
 
             key = f"skill:{skill.slug}"
             self.assertIn(key, installed, f"missing registry entry {key}")
-            self.assertFalse(bool(installed[key].get("enabled")), f"{key} should remain disabled")
+            self.assertTrue(bool(installed[key].get("enabled")), f"{key} should be enabled")
 
         pi_skill = self.workspace / "skills" / "agent-cli-inferencing" / "playbook.md"
         pi_text = pi_skill.read_text(encoding="utf-8")
         self.assertIn("@mariozechner/pi-ai", pi_text)
         self.assertIn("github.com/badlogic/pi-mono", pi_text)
 
-    def test_draft_skill_and_tool_create_disabled_extensions(self) -> None:
+    def test_draft_skill_and_tool_create_enabled_extensions(self) -> None:
         skill = create_draft_extension(
             self.workspace,
             registry_path=self.registry_path,
@@ -137,8 +137,8 @@ class TestFreshWorkspace(unittest.TestCase):
         self.assertFalse(duplicate.created)
 
         registry = load_registry(self.registry_path)
-        self.assertFalse(bool(registry["installed"][f"skill:{skill.name}"]["enabled"]))
-        self.assertFalse(bool(registry["installed"][f"tool:{tool.name}"]["enabled"]))
+        self.assertTrue(bool(registry["installed"][f"skill:{skill.name}"]["enabled"]))
+        self.assertTrue(bool(registry["installed"][f"tool:{tool.name}"]["enabled"]))
 
     def test_default_tools_and_default_skills_are_mission_aligned(self) -> None:
         with local_html_server(title="Takobot Mission Probe", body="mission aligned") as url:
@@ -165,3 +165,34 @@ class TestFreshWorkspace(unittest.TestCase):
             score = activity_alignment_score(activity, mission)
             self.assertGreater(score, 0.0, activity)
             self.assertTrue(is_activity_mission_aligned(activity, mission), activity)
+
+    def test_enable_all_installed_flips_disabled_entries(self) -> None:
+        record_installed(
+            self.registry_path,
+            {
+                "kind": "skill",
+                "name": "tmp-skill",
+                "display_name": "Tmp Skill",
+                "version": "0.1.0",
+                "enabled": False,
+                "path": "skills/tmp-skill",
+            },
+        )
+        record_installed(
+            self.registry_path,
+            {
+                "kind": "tool",
+                "name": "tmp-tool",
+                "display_name": "Tmp Tool",
+                "version": "0.1.0",
+                "enabled": False,
+                "path": "tools/tmp-tool",
+            },
+        )
+
+        enabled_now, total = enable_all_installed(self.registry_path)
+        self.assertEqual((2, 2), (enabled_now, total))
+
+        registry = load_registry(self.registry_path)
+        self.assertTrue(bool(registry["installed"]["skill:tmp-skill"]["enabled"]))
+        self.assertTrue(bool(registry["installed"]["tool:tmp-tool"]["enabled"]))

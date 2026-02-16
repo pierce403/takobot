@@ -21,7 +21,7 @@ Required files (must exist):
 Root directories (must exist):
 
 - `tools/` (tool implementations + manifests)
-- `skills/` (skills/playbooks + policies; installed but disabled by default)
+- `skills/` (skills/playbooks + policies; starter + operator-approved installs are enabled)
 - `memory/` (committed memory store: `dailies/`, `world/`, `reflections/`, `contradictions/`)
 - `tasks/` (GTD next actions; committed)
 - `projects/` (PARA projects; committed)
@@ -71,6 +71,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-16 — Pi chat now runs with full tool/skill access
+
+- What happened: operator chat could answer as if live web/tooling access was unavailable because pi inference was launched with `--no-tools --no-extensions --no-skills` and starter capabilities could remain disabled.
+- Fix: pi inference now keeps tools/extensions/skills enabled, workspace `skills/` and `tools/` are linked into pi runtime context, starter skills include both `skill-creator` and `tool-creator`, and installed extensions are auto-enabled for operator-approved autonomy.
+- Prevention: keep inference execution flags, extension enable defaults, and starter-capability docs/tests aligned so runtime behavior matches operator expectations.
 
 ### 2026-02-16 — Operator-requested purpose edits now apply directly in chat
 

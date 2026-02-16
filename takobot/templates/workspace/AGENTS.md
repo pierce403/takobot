@@ -16,7 +16,7 @@ Required directories:
 
 - `memory/` (`dailies/`, `world/`, `reflections/`, `contradictions/`)
 - `tasks/`, `projects/`, `areas/`, `resources/`, `archives/` (execution structure)
-- `tools/`, `skills/` (workspace extensions, disabled by default)
+- `tools/`, `skills/` (workspace extensions; operator-approved installs are enabled)
 - `.tako/` (runtime only; never committed)
 
 ## Memory Rules

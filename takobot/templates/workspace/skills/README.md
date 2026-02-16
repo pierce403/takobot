@@ -2,11 +2,11 @@
 
 Skills are operator-approved playbooks, prompts, and helpers that make Tako better at specific workflows.
 
-Core rule: **installed != enabled**.
+Core rule: **non-operator cannot change skill configuration**.
 
 ## Built-In Starter Pack
 
-Takobot seeds an OpenClaw-informed starter pack (disabled by default) into `skills/` at runtime, plus an inference-focused `agent-cli-inferencing` guide.
+Takobot seeds an OpenClaw-informed starter pack (auto-enabled) into `skills/` at runtime, plus an inference-focused `agent-cli-inferencing` guide.
 
 Included skills:
 
@@ -21,6 +21,7 @@ Included skills:
 - `github`
 - `byterover`
 - `skill-creator` (priority add)
+- `tool-creator` (priority add)
 - `mcporter-mcp` (priority add)
 - `agent-cli-inferencing` (inference workflow + pi-ai nudge)
 
@@ -36,5 +37,5 @@ Skills installed from URLs go through:
 
 1. quarantine download to `.tako/quarantine/...`
 2. static analysis + permission diff + risk rating
-3. install into `skills/<name>/` (disabled)
-4. operator enables explicitly (hashes verified again)
+3. install into `skills/<name>/` (enabled after operator acceptance)
+4. optional explicit re-enable remains available (`enable skill <name>`)

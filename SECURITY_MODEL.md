@@ -1,4 +1,4 @@
-# SECURITY_MODEL.md — Operator Control, Extensions, and Default-Deny
+# SECURITY_MODEL.md — Operator Control and Extension Safety
 
 ## Operator Imprint
 
@@ -24,9 +24,9 @@ Workspace code is allowed under:
 - `tools/<name>/...`
 - `skills/<name>/...`
 
-Core invariant:
+Core invariants:
 
-- **Installed != enabled**
+- **Non-operator != control-plane authority**
 - **Enabled != unrestricted**
 
 ### Install Pipeline (Quarantine First)
@@ -44,7 +44,7 @@ Installing from a URL never writes directly into `tools/` or `skills/`.
 
 ### Operator Approval Gate
 
-- Operator chooses: install (disabled), install+enable, or reject.
+- Operator chooses: install (enabled immediately) or reject.
 - If not operator: only quarantine download + request operator review.
 
 ### Integrity on Enable
@@ -55,9 +55,8 @@ On enable:
 - Verify file hashes match what was installed.
 - Refuse enablement if files changed since install until re-reviewed.
 
-## Default-Deny
+## Operator-First Defaults
 
-- New code is disabled by default.
-- Default permissions are deny-all unless explicitly granted by the operator.
-- Permission checks must be enforced at execution time (network/shell/xmtp/files).
-
+- Built-in starter skills are auto-enabled so Tako has immediate capability coverage.
+- Operator-approved installs are enabled immediately after `install accept`.
+- Permission checks must still be enforced at execution time (network/shell/xmtp/files).

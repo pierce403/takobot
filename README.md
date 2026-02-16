@@ -8,6 +8,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
 - Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`) and auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
+- Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
@@ -24,7 +25,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
-- Built-in starter skills are auto-seeded into `skills/` (disabled): OpenClaw top-10, priority `skill-creator` + MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
+- Built-in starter skills are auto-seeded into `skills/` and auto-enabled: OpenClaw top skills, `skill-creator`, `tool-creator`, MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators
 - Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
@@ -101,8 +102,8 @@ Committed (git-tracked):
 - `memory/world/` (`YYYY-MM-DD.md`, `model.md`, `entities.md`, `assumptions.md`)
 - `memory/reflections/`, `memory/contradictions/` (reflection + contradiction tracking)
 - `tasks/`, `projects/`, `areas/`, `resources/`, `archives/` (execution structure)
-- `tools/` (workspace tools; installed but disabled by default)
-- `skills/` (workspace skills; installed but disabled by default)
+- `tools/` (workspace tools; operator-approved installs are auto-enabled)
+- `skills/` (workspace skills; starter pack + operator-approved installs are auto-enabled)
 
 Runtime-only (ignored):
 
@@ -140,7 +141,7 @@ Runtime-only (ignored):
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
 - Starts the runtime service (heartbeat + exploration + sensors) and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
 - Type 2 escalation uses the required pi runtime after the first interactive turn; if pi is unavailable/fails, Type 2 falls back to heuristic guidance.
-- Seeds starter skills into `skills/` and registers them as installed-but-disabled runtime extensions.
+- Seeds starter skills into `skills/`, registers them, and auto-enables installed extensions.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit with plain-text chat still available.
 
 ## Configuration

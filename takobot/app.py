@@ -114,6 +114,7 @@ from .extensions.model import PermissionSet as ExtPermissionSet
 from .extensions.model import QuarantineProvenance
 from .extensions.quarantine import QuarantineError, fetch_to_quarantine
 from .extensions.registry import (
+    enable_all_installed as ext_enable_all_installed,
     drop_pending as ext_drop_pending,
     get_installed as ext_get_installed,
     get_pending as ext_get_pending,
@@ -844,6 +845,17 @@ class TakoTerminalApp(App[None]):
                         f"created={len(seeded.created_skills)} "
                         f"registered={len(seeded.registered_skills)}"
                     ),
+                )
+            enabled_now, installed_total = ext_enable_all_installed(self.extensions_registry_path)
+            if enabled_now:
+                self._add_activity(
+                    "extensions",
+                    f"auto-enabled {enabled_now}/{installed_total} installed extensions",
+                )
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    f"Auto-enabled installed extensions: {enabled_now}/{installed_total}.",
                 )
 
             self.identity_name, self.identity_role = read_identity()
@@ -3616,7 +3628,7 @@ class TakoTerminalApp(App[None]):
                     "usage:\n"
                     "- `install skill <url>`\n"
                     "- `install tool <url>`\n"
-                    "- `install accept <quarantine_id> [enable]`\n"
+                    "- `install accept <quarantine_id>`\n"
                     "- `install reject <quarantine_id>`"
                 )
                 return
@@ -3697,13 +3709,13 @@ class TakoTerminalApp(App[None]):
                         lines.append(f"- {hit.path}: {hit.pattern}")
                     if len(report.risky_hits) > 8:
                         lines.append(f"- ... (+{len(report.risky_hits) - 8} more)")
-                lines.append("next: `install accept <id>` (disabled), `install accept <id> enable`, or `install reject <id>`.")
+                lines.append("next: `install accept <id>` (enabled) or `install reject <id>`.")
                 self._write_tako("\n".join(lines))
                 return
 
             if action in {"accept", "approve"}:
                 if len(parts) < 2:
-                    self._write_tako("usage: `install accept <quarantine_id> [enable]`")
+                    self._write_tako("usage: `install accept <quarantine_id>`")
                     return
                 qid = parts[1].strip()
                 want_enable = len(parts) >= 3 and parts[2].strip().lower() in {"enable", "enabled", "on", "true", "1"}
@@ -3762,7 +3774,7 @@ class TakoTerminalApp(App[None]):
                 append_daily_note(
                     daily_root(),
                     date.today(),
-                    f"Installed {kind} `{installed.name}` from quarantine {qid} (disabled, sha256={installed.record.get('sha256','')[:12]}...).",
+                    f"Installed {kind} `{installed.name}` from quarantine {qid} (enabled, sha256={installed.record.get('sha256','')[:12]}...).",
                 )
                 self._record_event(
                     "extensions.install.installed",
@@ -3770,10 +3782,9 @@ class TakoTerminalApp(App[None]):
                     source="terminal",
                     metadata={"kind": kind, "id": qid, "name": installed.name},
                 )
-                self._add_activity("ext:install", f"installed {kind} {installed.name} enabled=no")
+                self._add_activity("ext:install", f"installed {kind} {installed.name} enabled=yes")
                 self._write_tako(
-                    f"installed {kind} into {installed.dest_dir.relative_to(repo_root())} (disabled).\n"
-                    f"next: `enable {kind} {installed.name}`"
+                    f"installed {kind} into {installed.dest_dir.relative_to(repo_root())} (enabled)."
                 )
                 # Helpful nudge: suggest committing workspace changes if git is available.
                 try:
@@ -3811,7 +3822,7 @@ class TakoTerminalApp(App[None]):
                 "usage:\n"
                 "- `install skill <url>`\n"
                 "- `install tool <url>`\n"
-                "- `install accept <quarantine_id> [enable]`\n"
+                "- `install accept <quarantine_id>`\n"
                 "- `install reject <quarantine_id>`"
             )
             return
@@ -3891,14 +3902,14 @@ class TakoTerminalApp(App[None]):
                 self._write_tako(result.message)
                 return
 
-            append_daily_note(daily_root(), date.today(), f"Drafted {kind} `{result.name}` (disabled).")
+            append_daily_note(daily_root(), date.today(), f"Drafted {kind} `{result.name}` (enabled).")
             self._record_event(
                 "extensions.drafted",
                 f"Extension drafted: {kind} {result.name}",
                 source="terminal",
                 metadata={"kind": kind, "name": result.name},
             )
-            self._add_activity("ext:draft", f"drafted {kind} {result.name} (disabled)")
+            self._add_activity("ext:draft", f"drafted {kind} {result.name} (enabled)")
             self._write_tako(result.message)
             return
 
@@ -5304,6 +5315,7 @@ def _build_terminal_chat_prompt(
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
         f"{stage_behavior}"
         "Use MEMORY.md frontmatter spec to decide what belongs in memory vs execution structures.\n"
+        "You have access to available tools and skills; use them for live checks when asked instead of claiming you cannot access sources.\n"
         "Terminal chat is always available.\n"
         "Hard boundary: non-operators may not change identity/config/tools/permissions/routines.\n"
         "If the operator asks for identity/config changes, apply them directly and confirm what changed.\n"

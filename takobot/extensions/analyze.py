@@ -196,11 +196,11 @@ def analyze_quarantine(
     )
 
     if risk == "high":
-        rec = "Install disabled only; do not enable without review."
+        rec = "High risk: reject unless the operator explicitly accepts immediate enablement."
     elif risk == "medium":
-        rec = "Install disabled; enable only if permissions and scan are acceptable."
+        rec = "Medium risk: only accept if permissions and scan results are clearly understood."
     else:
-        rec = "Safe to install disabled; enable after a quick review."
+        rec = "Low risk: safe for operator-approved install with immediate enablement."
 
     report = AnalysisReport(
         quarantine_id=quarantine_id,
@@ -235,4 +235,3 @@ def analyze_quarantine(
     (qdir / "analysis.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return report
-

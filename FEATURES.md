@@ -121,7 +121,9 @@
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.
-  - Runtime auto-seeds an OpenClaw-informed starter skill pack into `skills/` (disabled), including `agent-cli-inferencing` (pi-ai nudge), and registers those skills in extension registry.
+  - Runtime auto-seeds an OpenClaw-informed starter skill pack into `skills/` (auto-enabled), including `skill-creator`, `tool-creator`, `mcporter-mcp`, and `agent-cli-inferencing` (pi-ai nudge).
+  - Runtime auto-enables installed extensions so operator-approved tools/skills are immediately available.
+  - Pi inference runs with tools/extensions/skills enabled and uses workspace `skills/` + `tools/` via the pi agent context.
   - `workspace.name` in `tako.toml` is treated as the bot identity name and kept synced on rename flows.
   - Auto-update policy is configurable in `tako.toml` under `[updates].auto_apply` (default `true`).
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.
@@ -175,7 +177,7 @@
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
   - [x] Local `web` command writes a daily-log note for each successful fetch.
   - [x] `config` command explains `tako.toml` sections/options and live values.
-  - [x] Starter skills are auto-seeded (including `agent-cli-inferencing`) and extension-registered as installed-but-disabled.
+  - [x] Starter skills are auto-seeded (including `agent-cli-inferencing`) and extension-registered as enabled.
   - [x] Auto-update setting defaults to on and is visible/toggleable from the TUI.
   - [x] App mode auto-applies available package updates and restarts when update changes are applied.
   - [x] Terminal chat inference streams output to the bubble-stream panel while generating.
@@ -222,21 +224,21 @@
   - [ ] `compress` adds a progressive summary block to today’s daily log.
   - [ ] `promote <note>` appends an operator-approved durable note to `MEMORY.md`.
 
-### Skills / tools install pipeline (quarantine + analysis + enablement gate)
+### Skills / tools install pipeline (quarantine + analysis + operator approval)
 - **Stability**: in-progress
-- **Description**: Install workspace extensions from URLs with a quarantine-first pipeline and a default-deny enablement gate.
+- **Description**: Install workspace extensions from URLs with a quarantine-first pipeline and operator-approved immediate availability.
 - **Properties**:
   - `install skill <url>` and `install tool <url>` download into `.tako/quarantine/<id>/` (no execution).
   - Static analysis produces a report (provenance, hashes, risky API scan, permission diff vs `tako.toml`).
   - Operator chooses to accept/reject the quarantine item.
-  - Accepted installs land in `skills/<name>/` or `tools/<name>/` but remain disabled by default.
-  - `enable skill <name>` / `enable tool <name>` re-check hashes and permissions before enabling.
+  - Accepted installs land in `skills/<name>/` or `tools/<name>/` and are enabled immediately.
+  - `enable skill <name>` / `enable tool <name>` remains available for explicit re-enable flows.
   - If files change after install (hash mismatch), enablement refuses until re-reviewed.
 - **Test Criteria**:
   - [ ] `install skill <url>` creates a quarantine entry and prints a security report.
-  - [ ] `install accept <id>` installs the skill disabled and records a daily log note.
+  - [ ] `install accept <id>` installs the skill enabled and records a daily log note.
   - [ ] Modifying an installed file causes `enable ...` to refuse due to hash mismatch.
-  - [ ] `draft skill <name>` / `draft tool <name>` create disabled extension skeletons in the workspace.
+  - [ ] `draft skill <name>` / `draft tool <name>` create enabled extension skeletons in the workspace.
 
 ### Local runtime keys (`.tako/keys.json`)
 - **Stability**: stable

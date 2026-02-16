@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib import request as urllib_request
 from typing import Any, Callable, Mapping
 
-from .paths import ensure_runtime_dirs, runtime_paths
+from .paths import ensure_runtime_dirs, repo_root, runtime_paths
 
 
 PROVIDER_PRIORITY = ("pi",)
@@ -1813,9 +1813,6 @@ def _run_pi(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], time
         "--mode",
         "text",
         "--no-session",
-        "--no-tools",
-        "--no-extensions",
-        "--no-skills",
         prompt,
     ]
     proc = subprocess.run(
@@ -1872,6 +1869,7 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
     env["TEMP"] = tmp_value
     if provider == "pi":
         pi_agent_dir = _workspace_pi_agent_dir()
+        _sync_workspace_agent_capabilities(pi_agent_dir)
         _ensure_workspace_pi_auth(pi_agent_dir)
         env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
         node_bin_dir = _workspace_node_bin_dir()
@@ -1880,6 +1878,45 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
             env["PATH"] = f"{node_bin_dir}{os.pathsep}{current_path}" if current_path else str(node_bin_dir)
             env["NVM_DIR"] = str(_workspace_nvm_dir())
     return env
+
+
+def _sync_workspace_agent_capabilities(agent_dir: Path) -> None:
+    workspace = repo_root()
+    _sync_agent_link(agent_dir / "skills", workspace / "skills")
+    _sync_agent_link(agent_dir / "tools", workspace / "tools")
+
+
+def _sync_agent_link(target: Path, source: Path) -> None:
+    if not source.exists():
+        return
+
+    with contextlib.suppress(Exception):
+        if target.is_symlink():
+            if target.resolve() == source.resolve():
+                return
+            target.unlink()
+        elif target.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(source, target_is_directory=source.is_dir())
+        return
+    except Exception:
+        pass
+
+    # Fallback for systems that block symlink creation.
+    try:
+        if source.is_dir():
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    except Exception:
+        return
 
 
 def _workspace_tmp_dir() -> Path:

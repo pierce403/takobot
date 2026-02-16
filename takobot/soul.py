@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Iterable
 
 from .paths import repo_root
 
@@ -8,6 +10,8 @@ from .paths import repo_root
 DEFAULT_SOUL_NAME = "Tako"
 DEFAULT_SOUL_ROLE = "Help the operator think clearly, decide wisely, and act safely while staying incredibly curious about the world."
 DEFAULT_SOUL_MISSION = DEFAULT_SOUL_ROLE
+MISSION_OBJECTIVES_HEADER = "## Mission Objectives"
+MISSION_OBJECTIVES_PLACEHOLDER = "No explicit mission objectives yet."
 
 
 def soul_path(path: Path | None = None) -> Path:
@@ -19,6 +23,44 @@ def soul_path(path: Path | None = None) -> Path:
 def _sanitize(value: str) -> str:
     cleaned = " ".join(value.strip().split())
     return cleaned
+
+
+def _strip_objective_prefix(value: str) -> str:
+    stripped = value.strip()
+    stripped = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", stripped)
+    return stripped
+
+
+def parse_mission_objectives_text(text: str) -> list[str]:
+    raw = text.replace("\r", "\n")
+    candidates: list[str] = []
+    for line in raw.split("\n"):
+        chunk = line.strip()
+        if not chunk:
+            continue
+        parts = [part.strip() for part in chunk.split(";") if part.strip()]
+        for part in parts:
+            cleaned = _sanitize(_strip_objective_prefix(part))
+            if cleaned:
+                candidates.append(cleaned)
+    if not candidates:
+        single = _sanitize(_strip_objective_prefix(raw))
+        if single:
+            candidates = [single]
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in candidates:
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_mission_objectives(objectives: Iterable[str]) -> list[str]:
+    merged = parse_mission_objectives_text("\n".join(str(item) for item in objectives))
+    return merged or [MISSION_OBJECTIVES_PLACEHOLDER]
 
 
 def read_identity(path: Path | None = None) -> tuple[str, str]:
@@ -50,6 +92,47 @@ def read_identity(path: Path | None = None) -> tuple[str, str]:
 
 def read_identity_mission(path: Path | None = None) -> tuple[str, str]:
     return read_identity(path)
+
+
+def read_mission_objectives(path: Path | None = None) -> list[str]:
+    target = soul_path(path)
+    if not target.exists():
+        return []
+
+    lines = target.read_text(encoding="utf-8").splitlines()
+    in_section = False
+    objectives: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped == MISSION_OBJECTIVES_HEADER:
+            in_section = True
+            continue
+        if in_section and stripped.startswith("## "):
+            break
+        if not in_section or not stripped:
+            continue
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            item = _sanitize(_strip_objective_prefix(stripped))
+            if item:
+                objectives.append(item)
+            continue
+        if re.match(r"^\d+[.)]\s+", stripped):
+            item = _sanitize(_strip_objective_prefix(stripped))
+            if item:
+                objectives.append(item)
+            continue
+        if objectives:
+            objectives[-1] = _sanitize(f"{objectives[-1]} {stripped}")
+    filtered = [item for item in objectives if item and item != MISSION_OBJECTIVES_PLACEHOLDER]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in filtered:
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
 
 
 def update_identity(name: str, role: str, path: Path | None = None) -> tuple[str, str]:
@@ -131,3 +214,88 @@ def update_identity(name: str, role: str, path: Path | None = None) -> tuple[str
 
 def update_identity_mission(name: str, mission: str, path: Path | None = None) -> tuple[str, str]:
     return update_identity(name, mission, path)
+
+
+def update_mission_objectives(objectives: Iterable[str], path: Path | None = None) -> list[str]:
+    target = soul_path(path)
+    normalized = _normalize_mission_objectives(objectives)
+
+    if not target.exists():
+        content = (
+            "# SOUL.md — Identity & Boundaries (Not Memory)\n\n"
+            "## Identity\n\n"
+            f"- Name: {DEFAULT_SOUL_NAME}\n"
+            f"- Role: {DEFAULT_SOUL_ROLE}\n\n"
+            f"{MISSION_OBJECTIVES_HEADER}\n\n"
+            + "\n".join(f"- {item}" for item in normalized)
+            + "\n"
+        )
+        target.write_text(content, encoding="utf-8")
+        return [] if normalized == [MISSION_OBJECTIVES_PLACEHOLDER] else normalized
+
+    lines = target.read_text(encoding="utf-8").splitlines()
+    out: list[str] = []
+    in_identity = False
+    in_mission = False
+    saw_identity = False
+    saw_mission = False
+    inserted_after_identity = False
+
+    def _append_mission_section() -> None:
+        if out and out[-1] != "":
+            out.append("")
+        out.append(MISSION_OBJECTIVES_HEADER)
+        out.append("")
+        out.extend(f"- {item}" for item in normalized)
+        out.append("")
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "## Identity":
+            saw_identity = True
+            in_identity = True
+            out.append(line)
+            continue
+
+        if in_identity and stripped.startswith("## "):
+            if not saw_mission and not inserted_after_identity:
+                _append_mission_section()
+                inserted_after_identity = True
+            in_identity = False
+
+        if stripped == MISSION_OBJECTIVES_HEADER:
+            saw_mission = True
+            in_mission = True
+            _append_mission_section()
+            continue
+
+        if in_mission:
+            if stripped.startswith("## "):
+                in_mission = False
+                out.append(line)
+            continue
+
+        out.append(line)
+
+    if not saw_mission:
+        if not inserted_after_identity and saw_identity:
+            _append_mission_section()
+        elif not saw_identity:
+            if out and out[-1] != "":
+                out.append("")
+            out.extend(
+                [
+                    "## Identity",
+                    "",
+                    f"- Name: {DEFAULT_SOUL_NAME}",
+                    f"- Role: {DEFAULT_SOUL_ROLE}",
+                    "",
+                ]
+            )
+            _append_mission_section()
+        elif out and out[-1] != "":
+            out.append("")
+            _append_mission_section()
+
+    target.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+    return [] if normalized == [MISSION_OBJECTIVES_PLACEHOLDER] else normalized

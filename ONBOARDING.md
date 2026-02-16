@@ -52,7 +52,7 @@ This is the “first wake” checklist for bringing up a new Tako instance.
 - During runtime, Tako appends daemon/app diagnostics to `.tako/logs/runtime.log` and `.tako/logs/app.log`.
 - During inference provider subprocess execution, Tako pins temp writes to `.tako/tmp/` via `TMPDIR`/`TMP`/`TEMP`.
 - During `BOOTING`, inference execution remains gated; first model calls are allowed only after the first interactive chat turn.
-- During `RUNNING`, identity/goals/routines prompts are delayed until inference has actually run (or can be started manually with `setup`).
+- During `RUNNING`, identity/goals/objective prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - During `RUNNING`, Tako keeps heartbeat + event-log cognition active (Type 1 triage with Type 2 escalation for serious events).
 - During heartbeat, Tako checks for pending git changes and auto-commits when possible.
 - If heartbeat auto-commit is blocked by missing git identity, Tako auto-configures local repo identity from bot name (`<name> <name.tako.eth@xmtp.mx>`) and retries commit.

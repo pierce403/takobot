@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from takobot.cli import (
+    _ConversationWithTyping,
     RuntimeHooks,
     _canonical_identity_name,
     _chat_prompt,
@@ -30,6 +31,19 @@ class _DummySyncClosable:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _DummyConversation:
+    def __init__(self) -> None:
+        self.peer_inbox_id = "peer-inbox-123456"
+        self.sent: list[object] = []
+
+    async def send(self, content: object, content_type: object | None = None) -> object:
+        if content_type is None:
+            self.sent.append(content)
+        else:
+            self.sent.append((content, content_type))
+        return {"ok": True}
 
 
 class TestCliXmtpResilience(unittest.TestCase):
@@ -95,6 +109,19 @@ class TestCliXmtpResilience(unittest.TestCase):
                     )
                 )
         self.assertIsNone(rebuilt)
+
+    def test_conversation_send_emits_outbound_hook(self) -> None:
+        outbound: list[tuple[str, str]] = []
+
+        def _capture(recipient: str, text: str) -> None:
+            outbound.append((recipient, text))
+
+        convo = _DummyConversation()
+        wrapped = _ConversationWithTyping(convo, hooks=RuntimeHooks(outbound_message=_capture, emit_console=False))
+        with patch("takobot.cli.set_typing_indicator", return_value=False):
+            asyncio.run(wrapped.send("hello from takobot"))
+        self.assertEqual(["hello from takobot"], convo.sent)
+        self.assertEqual([("peer-inbox-123456", "hello from takobot")], outbound)
 
 
 if __name__ == "__main__":

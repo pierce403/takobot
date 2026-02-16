@@ -83,6 +83,7 @@ XMTP_CLIENT_REBUILD_COOLDOWN_S = 30.0
 class RuntimeHooks:
     log: Callable[[str, str], None] | None = None
     inbound_message: Callable[[str, str], None] | None = None
+    outbound_message: Callable[[str, str], None] | None = None
     emit_console: bool = True
     log_file: Path | None = None
 
@@ -784,10 +785,12 @@ class _ConversationWithTyping:
         if typing_enabled:
             await asyncio.sleep(XMTP_TYPING_LEAD_S)
         try:
-            return await self._send_with_retry(content)
+            result = await self._send_with_retry(content)
         finally:
             if typing_enabled:
                 await self._toggle_typing(False)
+        self._emit_outbound_message(content)
+        return result
 
     async def _send_with_retry(self, content: object, *, content_type: object | None = None):
         attempts = max(1, int(XMTP_SEND_RETRY_ATTEMPTS))
@@ -836,6 +839,17 @@ class _ConversationWithTyping:
 
     def __getattr__(self, name: str):
         return getattr(self._conversation, name)
+
+    def _emit_outbound_message(self, text: str) -> None:
+        if not text.strip():
+            return
+        hooks = self._hooks
+        if hooks is None or hooks.outbound_message is None:
+            return
+        recipient_inbox_id = getattr(self._conversation, "peer_inbox_id", None)
+        if not isinstance(recipient_inbox_id, str):
+            recipient_inbox_id = ""
+        hooks.outbound_message(recipient_inbox_id, text)
 
 
 async def _handle_incoming_message(

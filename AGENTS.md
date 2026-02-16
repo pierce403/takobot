@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — XMTP replies mirrored in TUI + mission objectives formalized
+
+- What happened: remote XMTP replies were not visible in the local TUI transcript, and mission/objective notes captured during onboarding were loosely stored and could feel non-durable.
+- Fix: daemon outbound XMTP sends now emit app hooks so replies appear in the TUI transcript/activity feed; mission objectives are now persisted as a formal `## Mission Objectives` section in `SOUL.md` with local `mission show|set|add|clear` controls.
+- Prevention: keep operator-facing state in canonical git-tracked docs (`SOUL.md`) and mirror remote conversation I/O into local observability surfaces.
+
 ### 2026-02-16 — TUI input queue prevents local chat stalls
 
 - What happened: while a long inference turn was active, terminal input handling could feel blocked because submissions awaited routing inline.

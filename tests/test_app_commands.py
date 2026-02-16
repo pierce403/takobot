@@ -44,6 +44,8 @@ class TestAppCommands(unittest.TestCase):
     def test_looks_like_local_command_new_shortcuts(self) -> None:
         self.assertTrue(_looks_like_local_command("stats"))
         self.assertTrue(_looks_like_local_command("models"))
+        self.assertTrue(_looks_like_local_command("mission"))
+        self.assertTrue(_looks_like_local_command("mission set keep things safe; stay curious"))
         self.assertTrue(_looks_like_local_command("upgrade check"))
         self.assertTrue(_looks_like_local_command("dose o 0.4"))
         self.assertTrue(_looks_like_local_command("/"))
@@ -51,6 +53,7 @@ class TestAppCommands(unittest.TestCase):
     def test_slash_command_matches_lists_new_commands(self) -> None:
         items = _slash_command_matches("", limit=128)
         commands = {command for command, _summary in items}
+        self.assertIn("/mission", commands)
         self.assertIn("/models", commands)
         self.assertIn("/upgrade", commands)
         self.assertIn("/stats", commands)
@@ -102,6 +105,7 @@ class TestAppCommands(unittest.TestCase):
             text="hello",
             identity_name="ProTako",
             identity_role="Your highly autonomous octopus friend",
+            mission_objectives=["Keep outcomes clear", "Stay curious"],
             mode="paired",
             state="RUNNING",
             operator_paired=True,
@@ -110,6 +114,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("You are ProTako", prompt)
         self.assertIn("Canonical identity name: ProTako", prompt)
         self.assertIn("Never claim your name is `Tako`", prompt)
+        self.assertIn("Mission objectives: Keep outcomes clear | Stay curious", prompt)
         self.assertIn("Operator control surfaces: terminal app and paired XMTP channel.", prompt)
 
     def test_local_input_queue_count_includes_active_processing(self) -> None:

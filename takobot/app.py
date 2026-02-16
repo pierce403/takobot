@@ -61,7 +61,15 @@ from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, 
 from .problem_tasks import ensure_problem_tasks
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
-from .soul import DEFAULT_SOUL_NAME, DEFAULT_SOUL_ROLE, read_identity, update_identity
+from .soul import (
+    DEFAULT_SOUL_NAME,
+    DEFAULT_SOUL_ROLE,
+    parse_mission_objectives_text,
+    read_identity,
+    read_mission_objectives,
+    update_identity,
+    update_mission_objectives,
+)
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, hint_for_xmtp_error, probe_xmtp_import
 from .productivity import open_loops as prod_open_loops
@@ -113,6 +121,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/stats", "Show counters and metrics"),
     ("/health", "Show health summary"),
     ("/config", "Explain tako.toml settings"),
+    ("/mission", "Show or set mission objectives"),
     ("/models", "Show pi and inference auth config"),
     ("/dose", "Show or tune DOSE levels"),
     ("/task", "Create a task"),
@@ -160,6 +169,7 @@ LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
     "help",
     "inference",
     "install",
+    "mission",
     "models",
     "morning",
     "outcomes",
@@ -320,6 +330,7 @@ class TakoTerminalApp(App[None]):
 
         self.identity_name = DEFAULT_SOUL_NAME
         self.identity_role = DEFAULT_SOUL_ROLE
+        self.mission_objectives: list[str] = []
         self.routines = ""
 
         self.operator_inbox_id: str | None = None
@@ -782,6 +793,24 @@ class TakoTerminalApp(App[None]):
                 )
 
             self.identity_name, self.identity_role = read_identity()
+            self.mission_objectives = read_mission_objectives()
+            legacy_routines_path = self.paths.state_dir / "routines.txt"
+            if not self.mission_objectives and legacy_routines_path.exists():
+                with contextlib.suppress(Exception):
+                    legacy_routines = _sanitize_for_display(legacy_routines_path.read_text(encoding="utf-8")).strip()
+                    if legacy_routines and legacy_routines.lower() not in {
+                        "no explicit routines yet.",
+                        "no explicit mission objectives yet.",
+                    }:
+                        migrated_objectives = parse_mission_objectives_text(legacy_routines)
+                        if migrated_objectives:
+                            self.mission_objectives = update_mission_objectives(migrated_objectives)
+                            self._add_activity("identity", "mission objectives migrated from legacy routines file")
+            self.routines = (
+                "; ".join(self.mission_objectives)
+                if self.mission_objectives
+                else "No explicit mission objectives yet."
+            )
             config_path = root / "tako.toml"
             configured_name = _sanitize_for_display(str(self.config.workspace.name or "")).strip()
             if configured_name.lower() in {"tako-workspace", "takobot-workspace"}:
@@ -1559,19 +1588,36 @@ class TakoTerminalApp(App[None]):
         self._add_activity("identity", f"name/role updated ({self.identity_name})")
         self._write_tako(f"identity tucked away in my little shell: {self.identity_name} — {self.identity_role}")
         self._set_state(SessionState.ONBOARDING_ROUTINES)
-        self._write_tako("last onboarding nibble: what should I watch or do daily? free-form note.")
+        self._write_tako(
+            "last onboarding nibble: what mission objectives should guide me? "
+            "send 1-3 items separated by `;`."
+        )
 
     async def _handle_routines_onboarding(self, text: str) -> None:
         if text.strip().lower() in {"skip", "later"}:
-            self.routines = "No explicit routines yet."
+            objectives = list(self.mission_objectives)
         else:
-            self.routines = text or "No explicit routines yet."
+            objectives = parse_mission_objectives_text(text)
+        if not objectives:
+            objectives = [self.identity_role]
+        try:
+            persisted_objectives = update_mission_objectives(objectives)
+        except Exception as exc:  # noqa: BLE001
+            persisted_objectives = objectives
+            self._write_system(f"mission sync warning: {_summarize_error(exc)}")
+        self.mission_objectives = persisted_objectives or [self.identity_role]
+        self.routines = "; ".join(self.mission_objectives)
         if self.paths is not None:
             routines_path = self.paths.state_dir / "routines.txt"
             routines_path.write_text(self.routines + "\n", encoding="utf-8")
-        append_daily_note(daily_root(), date.today(), f"Routine note captured: {self.routines}")
-        self._record_event("onboarding.routines.saved", "Routine preferences captured.", source="onboarding")
-        self._add_activity("identity", "daily routines captured")
+        append_daily_note(daily_root(), date.today(), f"Mission objectives captured: {self.routines}")
+        self._record_event(
+            "onboarding.mission.saved",
+            "Mission objectives captured.",
+            source="onboarding",
+            metadata={"count": len(self.mission_objectives)},
+        )
+        self._add_activity("identity", f"mission objectives set ({len(self.mission_objectives)})")
         await self._finalize_onboarding()
 
     async def _handle_xmtp_handle_prompt(self, text: str) -> None:
@@ -1819,13 +1865,13 @@ class TakoTerminalApp(App[None]):
             self.mode = "paired"
             self._record_event("onboarding.completed", "Onboarding completed with operator pairing.", source="onboarding")
             self._set_state(SessionState.RUNNING)
-            self._write_tako("identity + routines updated. current stays strong.")
+            self._write_tako("identity + mission objectives updated. current stays strong.")
             return
 
         self.mode = "local-only"
         self._record_event("onboarding.completed", "Onboarding completed in local-only mode.", source="onboarding")
         self._set_state(SessionState.RUNNING)
-        self._write_tako("identity + routines updated. local mode stays active.")
+        self._write_tako("identity + mission objectives updated. local mode stays active.")
 
     def _begin_identity_onboarding(self) -> None:
         self.mode = "onboarding"
@@ -1848,7 +1894,7 @@ class TakoTerminalApp(App[None]):
 
     def _schedule_identity_onboarding_after_awake(self) -> None:
         self.identity_onboarding_pending = True
-        self._write_tako("once inference is awake, I'll ask about name/goals/routines.")
+        self._write_tako("once inference is awake, I'll ask about name/goals/objectives.")
         self._add_activity("identity", "identity setup queued until inference is active")
 
     async def _maybe_start_delayed_identity_onboarding(self) -> None:
@@ -1857,7 +1903,7 @@ class TakoTerminalApp(App[None]):
         if not self._inference_is_awake():
             return
         self.identity_onboarding_pending = False
-        self._write_tako("inference is awake now. want to tune my identity and goals? let's do it.")
+        self._write_tako("inference is awake now. want to tune my identity, goals, and mission objectives? let's do it.")
         self._begin_identity_onboarding()
 
     def _inference_is_awake(self) -> bool:
@@ -1882,6 +1928,7 @@ class TakoTerminalApp(App[None]):
         hooks = RuntimeHooks(
             log=self._on_runtime_log,
             inbound_message=self._on_runtime_inbound,
+            outbound_message=self._on_runtime_outbound,
             emit_console=False,
             log_file=self.paths.logs_dir / "runtime.log",
         )
@@ -2231,9 +2278,10 @@ class TakoTerminalApp(App[None]):
             return
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, stats, health, config, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "local cockpit commands: help, status, stats, health, config, mission, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
                 "inference controls: `inference refresh`, `inference auth`, `inference provider <...>`, `inference ollama model <name>`, `inference key list|set|clear`\n"
-                "slash commands: type `/` to show available command shortcuts (`/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
+                "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
+                "slash commands: type `/` to show available command shortcuts (`/mission`, `/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
@@ -2332,6 +2380,70 @@ class TakoTerminalApp(App[None]):
 
         if cmd in {"config", "toml"}:
             self._write_tako(explain_tako_toml(self.config, path=repo_root() / "tako.toml"))
+            return
+
+        if cmd == "mission":
+            action_raw = rest.strip()
+            action = action_raw.lower()
+            if action in {"help", "?"}:
+                self._write_tako(
+                    "usage:\n"
+                    "- `mission` or `mission show`\n"
+                    "- `mission set <objective 1; objective 2; ...>`\n"
+                    "- `mission add <objective>`\n"
+                    "- `mission clear` (reset to identity role)"
+                )
+                return
+
+            if action.startswith("set "):
+                payload = action_raw.split(maxsplit=1)[1] if len(action_raw.split(maxsplit=1)) == 2 else ""
+                parsed = parse_mission_objectives_text(payload)
+                if not parsed:
+                    self._write_tako("mission set needs at least one objective (separate multiple with `;`).")
+                    return
+                objectives = parsed
+            elif action.startswith("add "):
+                payload = action_raw.split(maxsplit=1)[1] if len(action_raw.split(maxsplit=1)) == 2 else ""
+                parsed = parse_mission_objectives_text(payload)
+                if not parsed:
+                    self._write_tako("mission add needs a non-empty objective.")
+                    return
+                objectives = list(self.mission_objectives) + parsed
+            elif action in {"clear", "reset"}:
+                objectives = [self.identity_role]
+            elif action in {"", "show", "status"}:
+                active = self.mission_objectives or [self.identity_role]
+                lines = ["mission objectives:"]
+                for idx, objective in enumerate(active, start=1):
+                    lines.append(f"{idx}. {objective}")
+                self._write_tako("\n".join(lines))
+                return
+            else:
+                self._write_tako("usage: `mission`, `mission set <obj1; obj2>`, `mission add <obj>`, `mission clear`")
+                return
+
+            try:
+                persisted = update_mission_objectives(objectives)
+            except Exception as exc:  # noqa: BLE001
+                self._write_tako(f"mission update failed: {_summarize_error(exc)}")
+                return
+            self.mission_objectives = persisted or [self.identity_role]
+            self.routines = "; ".join(self.mission_objectives)
+            if self.paths is not None:
+                with contextlib.suppress(Exception):
+                    (self.paths.state_dir / "routines.txt").write_text(self.routines + "\n", encoding="utf-8")
+            append_daily_note(daily_root(), date.today(), f"Mission objectives updated: {self.routines}")
+            self._record_event(
+                "mission.objectives.updated",
+                "Mission objectives updated from terminal.",
+                source="terminal",
+                metadata={"count": len(self.mission_objectives)},
+            )
+            self._add_activity("identity", f"mission objectives updated ({len(self.mission_objectives)})")
+            self._write_tako(
+                "mission objectives updated:\n"
+                + "\n".join(f"{idx}. {objective}" for idx, objective in enumerate(self.mission_objectives, start=1))
+            )
             return
 
         if cmd == "models":
@@ -3538,6 +3650,7 @@ class TakoTerminalApp(App[None]):
             text=text,
             identity_name=self.identity_name,
             identity_role=self.identity_role,
+            mission_objectives=self.mission_objectives,
             mode=self.mode,
             state=self.state.value,
             operator_paired=self.operator_paired,
@@ -3750,6 +3863,18 @@ class TakoTerminalApp(App[None]):
             "Inbound XMTP message received.",
             source="xmtp",
             metadata={"sender_inbox_id": sender_inbox_id, "preview": _summarize_text(safe_text)},
+        )
+
+    def _on_runtime_outbound(self, recipient_inbox_id: str, text: str) -> None:
+        short_recipient = recipient_inbox_id[:10] if recipient_inbox_id else "unknown"
+        safe_text = _mask_sensitive_inference_command(text)
+        self._write_tako(f"[xmtp->{short_recipient}] {safe_text}")
+        self._add_activity("xmtp", f"outbound to {short_recipient}")
+        self._record_event(
+            "xmtp.outbound.message",
+            "Outbound XMTP message sent.",
+            source="xmtp",
+            metadata={"recipient_inbox_id": recipient_inbox_id, "preview": _summarize_text(safe_text)},
         )
 
     async def _shutdown_background_tasks(self) -> None:
@@ -3992,12 +4117,17 @@ class TakoTerminalApp(App[None]):
         )
 
         event_log_value = str(self.event_log_path) if self.event_log_path is not None else "not ready"
+        mission_objectives = self.mission_objectives or [self.identity_role]
+        mission_preview = "; ".join(mission_objectives[:3])
+        if len(mission_objectives) > 3:
+            mission_preview += f" (+{len(mission_objectives) - 3} more)"
         memory = (
             "Memory\n"
             f"- name: {self.identity_name}\n"
             f"- role: {self.identity_role}\n"
+            f"- mission objectives: {mission_preview}\n"
             f"- daily log: memory/dailies/{date.today().isoformat()}.md\n"
-            f"- routines: {self.routines or 'not captured yet'}\n"
+            f"- routines: {self.routines or mission_preview}\n"
             f"- event log: {event_log_value}"
         )
         self.memory_panel.update(memory)
@@ -4359,6 +4489,8 @@ def _looks_like_local_command(text: str) -> bool:
     tail = rest.strip().lower()
     if cmd in {"help", "h", "?", "status", "stats", "health", "doctor", "config", "toml", "models", "pair", "setup", "profile", "stop", "resume", "quit", "exit", "activity"}:
         return tail == ""
+    if cmd == "mission":
+        return True
     if cmd == "dose":
         return tail in {"", "show", "status", "calm", "explore", "help", "?"} or _parse_dose_set_request(tail) is not None
     if cmd == "morning":
@@ -4430,6 +4562,7 @@ def _build_terminal_chat_prompt(
     text: str,
     identity_name: str,
     identity_role: str,
+    mission_objectives: list[str],
     mode: str,
     state: str,
     operator_paired: bool,
@@ -4439,6 +4572,10 @@ def _build_terminal_chat_prompt(
     history_block = f"{history}\n" if history else "(none)\n"
     name = _canonical_identity_name(identity_name)
     role_line = " ".join((identity_role or "").split()).strip() or "Your highly autonomous octopus friend"
+    objectives = mission_objectives or [role_line]
+    objectives_line = " | ".join(obj.strip() for obj in objectives[:4] if obj.strip())
+    if len(objectives) > 4:
+        objectives_line += f" | (+{len(objectives) - 4} more)"
     control_surface_line = (
         "Operator control surfaces: terminal app and paired XMTP channel.\n"
         if operator_paired
@@ -4449,6 +4586,7 @@ def _build_terminal_chat_prompt(
         f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
         "Never claim your name is `Tako` unless canonical identity name is exactly `Tako`.\n"
         f"Identity mission: {role_line}\n"
+        f"Mission objectives: {objectives_line}\n"
         "Reply with plain text only (no markdown), maximum 4 short lines.\n"
         "Be incredibly curious about the world: ask sharp follow-up questions and suggest quick research when uncertain.\n"
         "Terminal chat is always available.\n"

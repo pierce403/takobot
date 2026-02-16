@@ -24,6 +24,8 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
 - Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors
+- XMTP outbound replies are mirrored into the local TUI transcript/activity feed so remote conversations stay visible in one place
+- Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
@@ -66,7 +68,7 @@ Pairing flow:
 - During onboarding, Tako asks for XMTP setup ASAP (in-chat):
   - yes: outbound DM pairing (`.eth` or `0x...`) and assumes the recipient is ready
   - no: continue onboarding locally and allow later pairing from terminal
-- Identity/purpose/routine prompts are delayed until inference has actually run (or can be started manually with `setup`).
+- Identity/purpose/objective prompts are delayed until inference has actually run (or can be started manually with `setup`).
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
 - After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
 

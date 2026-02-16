@@ -19,6 +19,7 @@ Common commands:
 - `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`
 - `install`, `review pending`, `enable`, `draft`, `extensions`
 - `safe on`, `safe off`
+- `inference login` starts an assisted pi login workflow. When prompts appear, answer with `inference login answer <text>` or cancel with `inference login cancel`.
 - Type `/` in the input box to open the slash-command dropdown under the input field.
 - Press `Tab` in the input box to autocomplete command names (and cycle candidates).
 

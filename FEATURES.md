@@ -18,6 +18,8 @@
 - **Stability**: deprecated (dev only)
 - **Description**: Repo-local launcher used during engine development.
 - **Properties**:
+  - Packaged as an installed shell script so deployed environments can invoke `tako.sh` directly.
+  - Runs in dual mode: repo checkout mode keeps uv/venv bootstrap behavior; deployed mode dispatches to installed `takobot`.
   - Uses `uv` to create/manage a virtualenv at `.venv/` (repo-local).
   - Installs dependencies from `requirements.txt` via `uv pip` when needed.
   - Defaults to `python -m takobot app`.
@@ -74,6 +76,7 @@
   - Detects required local `pi` runtime/auth at startup (and still reports other provider probes for diagnostics).
   - Enforces pi-only inference execution (no non-pi fallback for model calls).
   - Supports runtime-local inference configuration via `inference ...` commands (provider preference `auto|pi`, persisted API keys, pi OAuth inventory).
+  - Supports assisted pi login in TUI via `inference login`, relaying login prompts and accepting operator replies with `inference login answer <text>`.
   - Inference execution is pi-runtime-only; non-pi CLIs are diagnostic-only and never used for model reply generation.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.

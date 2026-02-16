@@ -35,5 +35,6 @@ What bootstrap does:
 ## Core checks
 
 - `takobot` opens the TUI.
+- `tako.sh` is installed with the package as a shell wrapper; in deployed environments it dispatches to the installed `takobot`.
 - `takobot doctor` reports local/offline diagnostics.
 - `takobot run` starts daemon mode directly.

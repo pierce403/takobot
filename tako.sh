@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/requirements.txt" && -d "$SCRIPT_DIR/takobot" ]]; then
+  ROOT="$SCRIPT_DIR"
+  REPO_MODE="1"
+else
+  ROOT="$(pwd)"
+  REPO_MODE="0"
+fi
 cd "$ROOT"
 LOCAL_RUNTIME_DIR="$ROOT/.tako"
 LOCAL_TMP_DIR="$LOCAL_RUNTIME_DIR/tmp"
@@ -96,6 +103,14 @@ else
 fi
 
 ensure_tui_stdin
+
+if [[ "$REPO_MODE" != "1" ]]; then
+  if command -v takobot >/dev/null 2>&1; then
+    exec takobot "${ARGS[@]}"
+  fi
+  PYTHON="${PYTHON:-python3}"
+  exec "$PYTHON" -m takobot "${ARGS[@]}"
+fi
 
 PYTHON="${PYTHON:-python3}"
 if [[ -n "${UV:-}" ]]; then

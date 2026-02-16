@@ -3,9 +3,11 @@
 Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. By default, Tako is intentionally curious about the world and pushes toward evidence-backed answers. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
+- Installed shell wrapper support: `tako.sh` is packaged and available in deployments (dispatching to installed `takobot` outside repo mode)
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
+- Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`) and auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts

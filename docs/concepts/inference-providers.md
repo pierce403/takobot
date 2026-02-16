@@ -56,6 +56,8 @@ Readiness checks include:
 - runtime-local API keys from `.tako/state/inference-settings.json` (set via `inference key set ...`)
 - workspace-local `.tako/pi/agent/auth.json`
 - fallback auth files in `~/.pi/**` (copied into workspace on first use when possible)
+- local Codex OAuth session tokens from `~/.codex/auth.json` (auto-synced into `.tako/pi/agent/auth.json` as `openai-codex` when available)
+- assisted login workflow (`inference login`) that starts pi login and forwards interactive prompts back to operator input (`inference login answer <text>`)
 
 For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.json` and surfaces them through `inference auth`.
 
@@ -69,4 +71,4 @@ For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.
 
 - `inference` command in TUI reports selected provider and readiness.
 - `inference auth` reports persisted API keys (masked) plus detected pi OAuth providers.
-- `doctor` includes offline inference probes and recent inference error scan.
+- `doctor` auto-repairs workspace-local pi runtime/auth first, then runs offline probes and recent inference error scan.

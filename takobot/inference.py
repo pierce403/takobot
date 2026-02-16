@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -322,6 +323,52 @@ class InferenceRuntime:
         return env
 
 
+@dataclass(frozen=True)
+class PiLoginPlan:
+    auth_ready: bool
+    notes: tuple[str, ...] = ()
+    commands: tuple[tuple[str, ...], ...] = ()
+    reason: str = ""
+
+
+def prepare_pi_login_plan(runtime: InferenceRuntime | None = None) -> PiLoginPlan:
+    notes: list[str] = []
+    bootstrap_note = _ensure_workspace_pi_runtime_if_needed()
+    if bootstrap_note:
+        notes.extend(part.strip() for part in bootstrap_note.split("|") if part.strip())
+
+    auth_notes = _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
+    notes.extend(auth_notes)
+
+    auth_ready = _has_pi_auth(_read_json(_workspace_pi_agent_dir() / "auth.json"))
+    cli_path = _pi_cli_path_for_login(runtime)
+    commands = _pi_login_commands(cli_path)
+    reason = ""
+    if auth_ready:
+        reason = "pi auth is already available in workspace runtime state."
+    elif not commands:
+        reason = "pi CLI is unavailable; run `inference refresh` to bootstrap workspace-local pi runtime first."
+
+    return PiLoginPlan(
+        auth_ready=auth_ready,
+        notes=tuple(_dedupe_non_empty_lines(notes)),
+        commands=tuple(tuple(command) for command in commands),
+        reason=reason,
+    )
+
+
+def build_pi_login_env(runtime: InferenceRuntime | None = None) -> dict[str, str]:
+    active_runtime = runtime or InferenceRuntime(
+        statuses={},
+        selected_provider=None,
+        selected_auth_kind="none",
+        selected_key_env_var=None,
+        selected_key_source=None,
+        _api_keys={},
+    )
+    return _provider_env(active_runtime, "pi")
+
+
 def discover_inference_runtime() -> InferenceRuntime:
     home = Path.home()
     settings = load_inference_settings()
@@ -395,6 +442,44 @@ def discover_inference_runtime() -> InferenceRuntime:
         _api_keys=api_keys,
         _provider_env_overrides=provider_env_overrides,
     )
+
+
+def _pi_cli_path_for_login(runtime: InferenceRuntime | None) -> str | None:
+    if runtime is not None:
+        status = runtime.statuses.get("pi")
+        if status and status.cli_path:
+            return status.cli_path
+    workspace_cli = _workspace_pi_cli_path()
+    if workspace_cli.exists():
+        return str(workspace_cli)
+    return shutil.which("pi")
+
+
+def _pi_login_commands(cli_path: str | None) -> list[list[str]]:
+    if not cli_path:
+        return []
+
+    help_text = _safe_help_text(cli_path).lower()
+    candidates: list[list[str]] = []
+    if "auth login" in help_text or (" auth" in help_text and " login" in help_text):
+        candidates.append([cli_path, "auth", "login"])
+        candidates.append([cli_path, "login"])
+    elif " login" in help_text or "login " in help_text:
+        candidates.append([cli_path, "login"])
+        candidates.append([cli_path, "auth", "login"])
+    else:
+        candidates.append([cli_path, "auth", "login"])
+        candidates.append([cli_path, "login"])
+
+    deduped: list[list[str]] = []
+    seen: set[str] = set()
+    for command in candidates:
+        token = " ".join(command)
+        if token in seen:
+            continue
+        seen.add(token)
+        deduped.append(command)
+    return deduped
 
 
 def _adopt_local_system_api_key_for_pi(
@@ -569,10 +654,20 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
     return lines
 
 
+def auto_repair_inference_runtime() -> list[str]:
+    note = _ensure_workspace_pi_runtime_if_needed()
+    if not note:
+        return []
+    return [item.strip() for item in note.split(" | ") if item.strip()]
+
+
 def _ensure_workspace_pi_runtime_if_needed() -> str:
     workspace_cli = _workspace_pi_cli_path()
     if workspace_cli.exists() and _pi_node_available():
-        return ""
+        auth_notes = _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
+        if not auth_notes:
+            return ""
+        return " | ".join(auth_notes)
     ok, detail = _ensure_workspace_pi_runtime()
     prefix = "workspace pi bootstrap complete" if ok else "workspace pi bootstrap failed"
     return f"{prefix}: {detail}"
@@ -610,8 +705,11 @@ def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
 
     pi_bin = _workspace_pi_cli_path()
     if pi_bin.exists():
-        _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
-        return True, f"workspace-local pi runtime already present ({pi_bin})"
+        auth_notes = _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
+        detail = f"workspace-local pi runtime already present ({pi_bin})"
+        if auth_notes:
+            detail = f"{detail} | {' | '.join(auth_notes)}"
+        return True, detail
 
     packages = [
         f"@mariozechner/pi-ai@{PI_PACKAGE_VERSION}",
@@ -643,8 +741,11 @@ def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
     if not pi_bin.exists():
         return False, f"npm install completed but `{pi_bin}` is missing"
 
-    _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
-    return True, f"workspace-local pi runtime installed at `{pi_bin}`"
+    auth_notes = _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
+    detail = f"workspace-local pi runtime installed at `{pi_bin}`"
+    if auth_notes:
+        detail = f"{detail} | {' | '.join(auth_notes)}"
+    return True, detail
 
 
 def _install_workspace_nvm_node_lts(*, tmp_dir: Path) -> tuple[bool, str]:
@@ -1839,24 +1940,202 @@ def _pi_node_available() -> bool:
     return _workspace_node_bin_dir() is not None
 
 
-def _ensure_workspace_pi_auth(agent_dir: Path) -> None:
+def _ensure_workspace_pi_auth(agent_dir: Path) -> list[str]:
+    notes: list[str] = []
     target = agent_dir / "auth.json"
-    if target.exists():
-        return
     home = Path.home()
-    candidates = (
-        home / ".pi" / "agent" / "auth.json",
-        home / ".pi" / "auth.json",
-    )
+    if not target.exists():
+        candidates = (
+            home / ".pi" / "agent" / "auth.json",
+            home / ".pi" / "auth.json",
+        )
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(candidate.read_text(encoding="utf-8"), encoding="utf-8")
+                with contextlib.suppress(Exception):
+                    os.chmod(target, 0o600)
+                notes.append(f"synced workspace pi auth from `{_tilde_path(candidate)}`")
+                break
+            except Exception:
+                continue
+
+    sync_note = _sync_codex_oauth_into_pi_auth(target, home=home)
+    if sync_note:
+        notes.append(sync_note)
+    return notes
+
+
+def _sync_codex_oauth_into_pi_auth(target: Path, *, home: Path) -> str:
+    codex_payload = _read_json(home / ".codex" / "auth.json")
+    credential = _codex_oauth_credential_from_auth(codex_payload)
+    if credential is None:
+        return ""
+
+    existing_payload = _read_json(target)
+    existing_doc: dict[str, Any] = existing_payload if isinstance(existing_payload, dict) else {}
+    existing_entry = existing_doc.get("openai-codex")
+    existing_oauth = existing_entry if isinstance(existing_entry, dict) else None
+
+    changed = existing_oauth is None
+    if existing_oauth is not None:
+        for key in ("type", "access", "refresh", "expires", "accountId"):
+            if existing_oauth.get(key) != credential.get(key):
+                changed = True
+                break
+
+    if not changed:
+        return ""
+
+    existing_doc["openai-codex"] = credential
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(existing_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with contextlib.suppress(Exception):
+            os.chmod(target, 0o600)
+    except Exception:
+        return ""
+
+    if isinstance(existing_payload, dict) and existing_oauth is not None:
+        return "updated workspace pi auth from local Codex OAuth session."
+    if isinstance(existing_payload, dict):
+        return "imported local Codex OAuth session into workspace pi auth."
+    return "repaired workspace pi auth from local Codex OAuth session."
+
+
+def _codex_oauth_credential_from_auth(payload: dict[str, Any] | list[Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    candidates: list[dict[str, Any]] = []
+    for key in ("tokens", "oauth", "auth", "session"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+    candidates.append(payload)
+
+    access = ""
+    refresh = ""
+    id_token = ""
+    account_id = ""
+    expires = 0
     for candidate in candidates:
-        if not candidate.exists():
-            continue
+        if not access:
+            access = str(
+                candidate.get("access_token")
+                or candidate.get("access")
+                or candidate.get("token")
+                or ""
+            ).strip()
+        if not refresh:
+            refresh = str(candidate.get("refresh_token") or candidate.get("refresh") or "").strip()
+        if not id_token:
+            id_token = str(candidate.get("id_token") or candidate.get("idToken") or "").strip()
+        if not account_id:
+            account_id = str(
+                candidate.get("account_id")
+                or candidate.get("accountId")
+                or candidate.get("chatgpt_account_id")
+                or ""
+            ).strip()
+        if not expires:
+            expires = _coerce_epoch_ms(candidate.get("expires_at") or candidate.get("expiresAt") or candidate.get("expires"))
+            if not expires:
+                expires = _coerce_epoch_ms(candidate.get("expiry") or candidate.get("expiryMs"))
+        if access and refresh:
+            break
+
+    if not access or not refresh:
+        return None
+
+    account_id = account_id or _codex_account_id_from_token(id_token) or _codex_account_id_from_token(access)
+    expires = expires or _jwt_expiry_ms(access) or _jwt_expiry_ms(id_token) or int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+
+    credential: dict[str, Any] = {
+        "type": "oauth",
+        "access": access,
+        "refresh": refresh,
+        "expires": int(expires),
+    }
+    if account_id:
+        credential["accountId"] = account_id
+    return credential
+
+
+def _codex_account_id_from_token(token: str) -> str:
+    payload = _jwt_payload(token)
+    if not payload:
+        return ""
+
+    direct = str(payload.get("chatgpt_account_id") or payload.get("account_id") or "").strip()
+    if direct:
+        return direct
+    auth_payload = payload.get("https://api.openai.com/auth")
+    if isinstance(auth_payload, dict):
+        nested = str(auth_payload.get("chatgpt_account_id") or auth_payload.get("account_id") or "").strip()
+        if nested:
+            return nested
+    return ""
+
+
+def _jwt_payload(token: str) -> dict[str, Any] | None:
+    encoded = token.strip()
+    if not encoded:
+        return None
+    parts = encoded.split(".")
+    if len(parts) < 2:
+        return None
+    body = parts[1].strip()
+    if not body:
+        return None
+    padding = "=" * (-len(body) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode((body + padding).encode("utf-8"))
+        payload = json.loads(decoded.decode("utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _jwt_expiry_ms(token: str) -> int | None:
+    payload = _jwt_payload(token)
+    if not payload:
+        return None
+    exp_raw = payload.get("exp")
+    try:
+        exp = int(exp_raw)
+    except Exception:
+        return None
+    if exp <= 0:
+        return None
+    if exp < 10_000_000_000:
+        return exp * 1000
+    return exp
+
+
+def _coerce_epoch_ms(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        stamp = float(value)
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return 0
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(candidate.read_text(encoding="utf-8"), encoding="utf-8")
-            return
+            stamp = float(raw)
         except Exception:
-            continue
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except Exception:
+                return 0
+            stamp = parsed.timestamp()
+    if stamp <= 0:
+        return 0
+    if stamp < 10_000_000_000:
+        return int(stamp * 1000)
+    return int(stamp)
 
 
 def _has_pi_auth(payload: dict[str, Any] | list[Any] | None) -> bool:
@@ -1866,7 +2145,10 @@ def _has_pi_auth(payload: dict[str, Any] | list[Any] | None) -> bool:
         return False
     for value in payload.values():
         if isinstance(value, dict):
-            if _find_first_key(value, {"apiKey", "api_key", "access_token", "refresh_token"}):
+            if _find_first_key(
+                value,
+                {"apiKey", "api_key", "access_token", "refresh_token", "access", "refresh"},
+            ):
                 return True
         if isinstance(value, str) and value.strip():
             return True
@@ -1911,6 +2193,20 @@ def _mask_secret(value: str) -> str:
     if len(cleaned) <= 8:
         return "*" * len(cleaned)
     return f"{cleaned[:4]}...{cleaned[-4:]}"
+
+
+def _dedupe_non_empty_lines(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in lines:
+        cleaned = " ".join((raw or "").split()).strip()
+        if not cleaned:
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
 
 
 def _new_workspace_temp_file(*, prefix: str, suffix: str) -> Path:

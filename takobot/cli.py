@@ -25,10 +25,12 @@ from .inference import (
     CONFIGURABLE_API_KEY_VARS,
     SUPPORTED_PROVIDER_PREFERENCES,
     InferenceRuntime,
+    auto_repair_inference_runtime,
     clear_inference_api_key,
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_runtime_lines,
+    prepare_pi_login_plan,
     run_inference_prompt_with_fallback,
     set_inference_api_key,
     set_inference_preferred_provider,
@@ -273,6 +275,13 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
         f"- env: {env}",
         f"- keys: {'present' if paths.keys_json.exists() else 'missing'}",
     ]
+    repair_actions = auto_repair_inference_runtime()
+    if repair_actions:
+        lines.append("- inference auto-fix: applied")
+        lines.extend(f"- inference auto-fix detail: {action}" for action in repair_actions)
+    else:
+        lines.append("- inference auto-fix: no changes needed")
+
     git_identity_name = _preferred_git_identity_name(root)
     git_identity_ok, git_identity_detail, git_identity_auto_configured = ensure_local_git_identity(
         root,
@@ -365,7 +374,7 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
 
 def _provider_auth_problem(provider: str) -> str:
     if provider == "pi":
-        return "pi auth missing: configure pi auth profile or set one supported API key."
+        return "pi auth missing after auto-fix: configure a pi auth profile or set one supported API key."
     if provider == "ollama":
         return "ollama model missing: set `inference ollama model <name>` or set `OLLAMA_MODEL`."
     if provider == "codex":
@@ -1203,6 +1212,7 @@ async def _handle_incoming_message(
                 "- inference\n"
                 "- inference refresh\n"
                 "- inference auth\n"
+                "- inference login\n"
                 "- inference provider <auto|pi>\n"
                 "- inference key list\n"
                 "- inference key set <ENV_VAR> <value>\n"
@@ -1217,6 +1227,25 @@ async def _handle_incoming_message(
             return
         if action in {"auth", "tokens"}:
             await convo.send("\n".join(format_inference_auth_inventory()))
+            return
+        if action in {"login", "auth login"}:
+            plan = prepare_pi_login_plan(inference_runtime)
+            lines = ["pi login workflow:"]
+            for note in plan.notes:
+                lines.append(f"- prep: {note}")
+            if plan.auth_ready:
+                _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+                lines.append("- auth is ready in workspace state; refreshed inference runtime.")
+            elif plan.commands:
+                lines.append("- interactive login requires terminal operator input.")
+                lines.append(
+                    "- run this in the local terminal app: "
+                    "`inference login` then follow `inference login answer <text>` prompts"
+                )
+                lines.append(f"- first command candidate: `{' '.join(plan.commands[0])}`")
+            else:
+                lines.append(f"- cannot start login: {plan.reason or 'pi CLI unavailable'}")
+            await convo.send("\n".join(lines))
             return
         if action.startswith("provider "):
             target = action_raw.split(maxsplit=1)[1] if len(action_raw.split(maxsplit=1)) == 2 else "auto"
@@ -1671,6 +1700,7 @@ def _help_text() -> str:
         "- promote <durable note>\n"
         "- inference (status)\n"
         "- inference auth\n"
+        "- inference login\n"
         "- inference provider <auto|pi>\n"
         "- inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>\n"
         "- update (or `update check`)\n"

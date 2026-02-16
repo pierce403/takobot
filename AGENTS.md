@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Deployment now installs `tako.sh` and pi login is operator-assisted
+
+- What happened: package installs did not guarantee `tako.sh` was installed, and pi auth onboarding relied mostly on passive token discovery without an explicit assisted login flow.
+- Fix: packaging now includes `tako.sh` as an installed script, the wrapper supports deployed-mode dispatch, and `inference login` now runs an operator-assisted pi login relay with prompt/answer handling while still auto-importing Codex OAuth into workspace pi auth.
+- Prevention: keep shell-wrapper packaging under test (`pyproject.toml` + `MANIFEST.in`) and keep interactive auth workflows explicit in both TUI command surface and inference runtime helpers.
+
 ### 2026-02-16 — EventBus replaced JSONL queue polling
 
 - What happened: runtime cognition was writing events to `.tako/state/events.jsonl` and separately polling that file as a queue, which added latency and duplicate moving parts.

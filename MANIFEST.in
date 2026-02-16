@@ -1,5 +1,6 @@
 include pyproject.toml
 include README.md
+include tako.sh
 
 recursive-include takobot *.py
 recursive-include takobot/templates *

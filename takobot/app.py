@@ -37,10 +37,12 @@ from .inference import (
     CONFIGURABLE_API_KEY_VARS,
     SUPPORTED_PROVIDER_PREFERENCES,
     InferenceRuntime,
+    build_pi_login_env,
     clear_inference_api_key,
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_runtime_lines,
+    prepare_pi_login_plan,
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
     set_inference_api_key,
@@ -351,6 +353,11 @@ class TakoTerminalApp(App[None]):
 
         self.runtime_task: asyncio.Task[None] | None = None
         self.runtime_service: Runtime | None = None
+        self.pi_login_task: asyncio.Task[None] | None = None
+        self.pi_login_proc: asyncio.subprocess.Process | None = None
+        self.pi_login_waiting_for_input = False
+        self.pi_login_last_prompt = ""
+        self.pi_login_started_at: float | None = None
         self.type1_task: asyncio.Task[None] | None = None
         self.type2_task: asyncio.Task[None] | None = None
         self.input_worker_task: asyncio.Task[None] | None = None
@@ -2162,6 +2169,175 @@ class TakoTerminalApp(App[None]):
         self._write_tako(message)
         self._add_activity("briefing", _summarize_text(message))
 
+    def _pi_login_active(self) -> bool:
+        return self.pi_login_task is not None and not self.pi_login_task.done()
+
+    async def _start_pi_login(self) -> None:
+        if self._pi_login_active():
+            self._write_tako("pi login is already running. use `inference login answer <text>` or `inference login cancel`.")
+            return
+
+        plan = prepare_pi_login_plan(self.inference_runtime)
+        for note in plan.notes:
+            self._write_system(f"pi login prep: {note}")
+
+        if plan.auth_ready:
+            self._initialize_inference_runtime()
+            self._write_tako("pi auth is already ready (workspace auth refreshed from available sources).")
+            return
+
+        if not plan.commands:
+            reason = plan.reason or "pi login cannot start because no pi CLI command is available."
+            self._write_tako(reason)
+            return
+
+        env = build_pi_login_env(self.inference_runtime)
+        commands = [list(command) for command in plan.commands]
+        self.pi_login_waiting_for_input = False
+        self.pi_login_last_prompt = ""
+        self.pi_login_started_at = time.monotonic()
+        self.pi_login_task = asyncio.create_task(
+            self._run_pi_login_session(commands, env),
+            name="tako-pi-login",
+        )
+        self._write_tako(
+            "pi login workflow started. I will mirror prompts here; reply with "
+            "`inference login answer <text>` (or `inference login cancel`)."
+        )
+        self._add_activity("inference", "pi login workflow started")
+
+    async def _run_pi_login_session(self, commands: list[list[str]], env: dict[str, str]) -> None:
+        combined_output: list[str] = []
+        success = False
+        attempted: list[str] = []
+        try:
+            for command in commands:
+                attempted.append(" ".join(command))
+                self._write_system(f"pi login: running `{ ' '.join(command) }`")
+                self.pi_login_waiting_for_input = False
+                self.pi_login_last_prompt = ""
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        *command,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        env=env,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    combined_output.append(f"launch error: {_summarize_error(exc)}")
+                    continue
+
+                self.pi_login_proc = proc
+                out_lines: list[str] = []
+                stdout_task = asyncio.create_task(self._forward_pi_login_stream(proc.stdout, out_lines))
+                stderr_task = asyncio.create_task(self._forward_pi_login_stream(proc.stderr, out_lines))
+                try:
+                    return_code = await asyncio.wait_for(proc.wait(), timeout=15 * 60)
+                except asyncio.TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                    with contextlib.suppress(Exception):
+                        await proc.wait()
+                    return_code = -1
+                    out_lines.append("pi login timed out after 900s")
+
+                with contextlib.suppress(Exception):
+                    await stdout_task
+                with contextlib.suppress(Exception):
+                    await stderr_task
+
+                combined_output.extend(out_lines)
+                self.pi_login_proc = None
+                self.pi_login_waiting_for_input = False
+                self.pi_login_last_prompt = ""
+
+                if return_code == 0:
+                    success = True
+                    break
+                if not _looks_like_login_subcommand_failure(out_lines):
+                    break
+        finally:
+            self.pi_login_proc = None
+            self.pi_login_waiting_for_input = False
+            self.pi_login_last_prompt = ""
+            self.pi_login_started_at = None
+            self.pi_login_task = None
+
+        if success:
+            self._initialize_inference_runtime()
+            self._record_event("inference.login.completed", "pi login workflow completed successfully.", source="inference")
+            self._write_tako("pi login complete. inference runtime refreshed.")
+            self._add_activity("inference", "pi login completed")
+            return
+
+        detail = _summarize_text(" | ".join(combined_output[-8:])) if combined_output else "unknown error"
+        attempted_text = ", ".join(attempted) if attempted else "(none)"
+        self._record_event(
+            "inference.login.failed",
+            f"pi login workflow failed: {detail}",
+            severity="warn",
+            source="inference",
+            metadata={"attempted": attempted},
+        )
+        self._write_tako(
+            "pi login workflow failed.\n"
+            f"attempted: {attempted_text}\n"
+            f"detail: {detail}\n"
+            "If prompts were not visible, run `inference login` again or use `inference auth` to inspect available tokens."
+        )
+        self._add_activity("inference", f"pi login failed: {detail}")
+
+    async def _forward_pi_login_stream(self, stream: asyncio.StreamReader | None, sink: list[str]) -> None:
+        if stream is None:
+            return
+        while True:
+            raw = await stream.readline()
+            if not raw:
+                return
+            line = _sanitize_for_display(raw.decode("utf-8", errors="replace")).strip()
+            if not line:
+                continue
+            sink.append(line)
+            self._write_tako(f"[pi login] {line}")
+            if _looks_like_pi_login_prompt(line):
+                self.pi_login_waiting_for_input = True
+                self.pi_login_last_prompt = line
+                self._write_tako("pi login is waiting for operator input. reply: `inference login answer <text>`.")
+
+    async def _answer_pi_login_prompt(self, answer: str) -> None:
+        payload = answer.strip()
+        if not payload:
+            self._write_tako("usage: `inference login answer <text>`")
+            return
+        if not self._pi_login_active() or self.pi_login_proc is None or self.pi_login_proc.stdin is None:
+            self._write_tako("pi login is not active right now.")
+            return
+        self.pi_login_proc.stdin.write((payload + "\n").encode("utf-8"))
+        with contextlib.suppress(Exception):
+            await self.pi_login_proc.stdin.drain()
+        self.pi_login_waiting_for_input = False
+        self._add_activity("inference", "pi login answer forwarded")
+
+    async def _cancel_pi_login(self) -> None:
+        was_active = self._pi_login_active() or (self.pi_login_proc is not None and self.pi_login_proc.returncode is None)
+        if not was_active:
+            return
+        if self.pi_login_proc is not None and self.pi_login_proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                self.pi_login_proc.kill()
+        if self.pi_login_task is not None:
+            self.pi_login_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.pi_login_task
+        self.pi_login_task = None
+        self.pi_login_proc = None
+        self.pi_login_waiting_for_input = False
+        self.pi_login_last_prompt = ""
+        self.pi_login_started_at = None
+        self._write_tako("pi login workflow cancelled.")
+        self._add_activity("inference", "pi login cancelled")
+
     async def _run_git_autocommit(self) -> None:
         result = await asyncio.to_thread(
             auto_commit_pending,
@@ -2208,6 +2384,7 @@ class TakoTerminalApp(App[None]):
     async def _enable_safe_mode(self) -> None:
         self.safe_mode = True
         self.mode = "safe"
+        await self._cancel_pi_login()
         await self._stop_local_heartbeat()
         await self._stop_xmtp_runtime()
         self.runtime_mode = "safe"
@@ -2247,7 +2424,7 @@ class TakoTerminalApp(App[None]):
         if cmd in {"help", "h", "?"}:
             self._write_tako(
                 "local cockpit commands: help, status, stats, health, config, mission, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
-                "inference controls: `inference refresh`, `inference auth`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
+                "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
                 "slash commands: type `/` to show available command shortcuts (`/mission`, `/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
@@ -2876,6 +3053,10 @@ class TakoTerminalApp(App[None]):
                     "- inference\n"
                     "- inference refresh\n"
                     "- inference auth\n"
+                    "- inference login\n"
+                    "- inference login status\n"
+                    "- inference login answer <text>\n"
+                    "- inference login cancel\n"
                     "- inference provider <auto|pi>\n"
                     "- inference key list\n"
                     "- inference key set <ENV_VAR> <value>\n"
@@ -2892,6 +3073,34 @@ class TakoTerminalApp(App[None]):
 
             if action in {"auth", "tokens"}:
                 self._write_tako("\n".join(format_inference_auth_inventory()))
+                return
+
+            if action in {"login", "auth login"}:
+                await self._start_pi_login()
+                return
+
+            if action.startswith("login answer "):
+                payload = action_raw.split(maxsplit=2)[2] if len(action_raw.split(maxsplit=2)) == 3 else ""
+                await self._answer_pi_login_prompt(payload)
+                return
+
+            if action in {"login cancel", "login stop"}:
+                await self._cancel_pi_login()
+                return
+
+            if action == "login status":
+                if not self._pi_login_active():
+                    self._write_tako("pi login status: idle")
+                    return
+                prompt = self.pi_login_last_prompt or "(waiting for output)"
+                waiting = "yes" if self.pi_login_waiting_for_input else "no"
+                elapsed = int(time.monotonic() - self.pi_login_started_at) if self.pi_login_started_at else 0
+                self._write_tako(
+                    "pi login status: active\n"
+                    f"waiting_for_input: {waiting}\n"
+                    f"elapsed_s: {elapsed}\n"
+                    f"last_prompt: {prompt}"
+                )
                 return
 
             if action.startswith("provider "):
@@ -3910,6 +4119,7 @@ class TakoTerminalApp(App[None]):
                 await self.boot_task
 
         await self._cleanup_pairing_resources()
+        await self._cancel_pi_login()
         await self._stop_periodic_update_checks()
         await self._stop_xmtp_runtime()
         await self._stop_local_heartbeat()
@@ -4653,7 +4863,7 @@ def _inference_setup_hints(runtime: InferenceRuntime) -> list[str]:
     if not pi.cli_installed:
         hints.append("pi runtime missing; refresh/setup will install workspace-local nvm/node and pi tooling.")
     elif not pi.key_present:
-        hints.append("pi auth missing; set a key via `inference key set <ENV_VAR> <value>` or run pi login.")
+        hints.append("pi auth missing; run `inference login` (or set a key via `inference key set <ENV_VAR> <value>`).")
     elif not pi.ready:
         hints.append("pi runtime is present but not ready; run `inference refresh` after node/auth are available.")
 
@@ -4812,6 +5022,40 @@ def _task_hint_from_status_line(line: str) -> str | None:
     if "running command" in lowered:
         return _summarize_text(cleaned)
     return None
+
+
+def _looks_like_login_subcommand_failure(lines: list[str]) -> bool:
+    joined = " | ".join(lines[-12:]).lower()
+    if not joined:
+        return False
+    tokens = (
+        "unknown command",
+        "unrecognized",
+        "invalid command",
+        "did you mean",
+        "usage:",
+    )
+    return any(token in joined for token in tokens)
+
+
+def _looks_like_pi_login_prompt(line: str) -> bool:
+    cleaned = " ".join(_sanitize_for_display(line).split())
+    lowered = cleaned.lower()
+    if not lowered:
+        return False
+    if cleaned.endswith((":", "?", ">")):
+        return True
+    prompt_tokens = (
+        "[y/n]",
+        "(y/n)",
+        "yes/no",
+        "enter code",
+        "verification code",
+        "paste",
+        "token",
+        "press enter",
+    )
+    return any(token in lowered for token in prompt_tokens)
 
 
 def _dose_productivity_hint(state: dose.DoseState) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,14 +11,18 @@ from takobot.inference import (
     InferenceRuntime,
     InferenceProviderStatus,
     InferenceSettings,
+    _codex_oauth_credential_from_auth,
+    _ensure_workspace_pi_auth,
     _detect_ollama,
     _detect_pi,
     _provider_env,
     _workspace_node_bin_dir,
+    auto_repair_inference_runtime,
     discover_inference_runtime,
     clear_inference_api_key,
     format_inference_auth_inventory,
     load_inference_settings,
+    prepare_pi_login_plan,
     set_inference_api_key,
     set_inference_ollama_host,
     set_inference_ollama_model,
@@ -212,3 +217,94 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY", text)
         self.assertNotIn("sk-super-secret-value", text)
         self.assertIn("pi oauth providers:", text)
+
+    def test_workspace_pi_auth_imports_codex_oauth_tokens(self) -> None:
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "tokens": {
+                            "access_token": "codex-access-token",
+                            "refresh_token": "codex-refresh-token",
+                            "account_id": "acct_123",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            agent_dir = Path(tmp) / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+
+            with patch("takobot.inference.Path.home", return_value=home):
+                notes = _ensure_workspace_pi_auth(agent_dir)
+
+            auth_payload = json.loads((agent_dir / "auth.json").read_text(encoding="utf-8"))
+            self.assertIsInstance(auth_payload, dict)
+            codex_entry = auth_payload.get("openai-codex")
+            self.assertIsInstance(codex_entry, dict)
+            assert isinstance(codex_entry, dict)
+            self.assertEqual("oauth", codex_entry.get("type"))
+            self.assertEqual("codex-access-token", codex_entry.get("access"))
+            self.assertEqual("codex-refresh-token", codex_entry.get("refresh"))
+            self.assertEqual("acct_123", codex_entry.get("accountId"))
+            self.assertGreater(int(codex_entry.get("expires", 0)), 0)
+            self.assertTrue(any("Codex OAuth session" in note for note in notes))
+
+    def test_auto_repair_runtime_returns_split_actions(self) -> None:
+        with patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value="step one | step two"):
+            actions = auto_repair_inference_runtime()
+        self.assertEqual(["step one", "step two"], actions)
+
+    def test_codex_oauth_credential_accepts_nested_oauth_shapes(self) -> None:
+        credential = _codex_oauth_credential_from_auth(
+            {
+                "oauth": {
+                    "access": "nested-access",
+                    "refresh": "nested-refresh",
+                    "accountId": "acct_nested",
+                    "expires_at": "2026-02-16T12:00:00+00:00",
+                }
+            }
+        )
+        self.assertIsNotNone(credential)
+        assert credential is not None
+        self.assertEqual("nested-access", credential["access"])
+        self.assertEqual("nested-refresh", credential["refresh"])
+        self.assertEqual("acct_nested", credential["accountId"])
+        self.assertGreater(int(credential["expires"]), 0)
+
+    def test_prepare_pi_login_plan_reports_ready_auth_and_command_candidates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace_auth = Path(tmp) / "auth.json"
+            workspace_auth.write_text(
+                json.dumps(
+                    {
+                        "openai-codex": {
+                            "type": "oauth",
+                            "access": "a",
+                            "refresh": "r",
+                            "expires": 1737000000000,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            workspace_cli = Path(tmp) / "pi"
+            workspace_cli.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            with (
+                patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value="repair note | auth note"),
+                patch("takobot.inference._ensure_workspace_pi_auth", return_value=["synced codex oauth"]),
+                patch("takobot.inference._workspace_pi_agent_dir", return_value=workspace_auth.parent),
+                patch("takobot.inference._workspace_pi_cli_path", return_value=workspace_cli),
+                patch("takobot.inference._safe_help_text", return_value="usage: pi auth login"),
+            ):
+                plan = prepare_pi_login_plan()
+
+        self.assertTrue(plan.auth_ready)
+        self.assertIn("synced codex oauth", plan.notes)
+        self.assertTrue(any("repair note" in note for note in plan.notes))
+        self.assertGreaterEqual(len(plan.commands), 1)
+        self.assertIn("pi auth is already available", plan.reason)

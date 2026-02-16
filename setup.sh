@@ -131,17 +131,14 @@ install_pi_runtime() {
       rm -f "$nvm_tar"
       rm -rf "$nvm_unpack"
       if ! curl -fsSL "https://github.com/nvm-sh/nvm/archive/refs/tags/$NVM_VERSION.tar.gz" -o "$nvm_tar"; then
-        log "inference(pi): failed to download nvm; continuing with other inference providers"
-        return 0
+        die "inference(pi): failed to download nvm archive"
       fi
       if ! tar -xzf "$nvm_tar" -C "$tmp_dir"; then
-        log "inference(pi): failed to unpack nvm archive; continuing with other inference providers"
-        return 0
+        die "inference(pi): failed to unpack nvm archive"
       fi
       rm -rf "$nvm_dir"
       if ! mv "$nvm_unpack" "$nvm_dir"; then
-        log "inference(pi): failed to place nvm under workspace runtime; continuing with other inference providers"
-        return 0
+        die "inference(pi): failed to place nvm under workspace runtime"
       fi
     fi
 
@@ -149,12 +146,10 @@ install_pi_runtime() {
     # shellcheck disable=SC1090
     source "$nvm_dir/nvm.sh"
     if ! nvm install --lts >/dev/null 2>&1; then
-      log "inference(pi): local nvm could not install Node LTS; continuing with other inference providers"
-      return 0
+      die "inference(pi): local nvm could not install Node LTS"
     fi
     if ! nvm use --lts >/dev/null 2>&1; then
-      log "inference(pi): local nvm could not activate Node LTS; continuing with other inference providers"
-      return 0
+      die "inference(pi): local nvm could not activate Node LTS"
     fi
     local node_path
     node_path="$(command -v node || true)"
@@ -164,8 +159,7 @@ install_pi_runtime() {
   fi
 
   if ! command -v npm >/dev/null 2>&1; then
-    log "inference(pi): npm still unavailable; continuing with other inference providers"
-    return 0
+    die "inference(pi): npm is unavailable after node bootstrap"
   fi
 
   local prefix="$WORKDIR/.tako/pi/node"
@@ -176,7 +170,7 @@ install_pi_runtime() {
     return 0
   fi
 
-  log "inference(pi): installing local pi runtime (@mariozechner/pi-ai + @mariozechner/pi-coding-agent)"
+  log "inference(pi): installing required local pi runtime (@mariozechner/pi-ai + @mariozechner/pi-coding-agent)"
   mkdir -p "$prefix"
   if npm --cache "$npm_cache" --prefix "$prefix" install --no-audit --no-fund --silent \
     "@mariozechner/pi-ai@$PI_PACKAGE_VERSION" \
@@ -194,7 +188,7 @@ install_pi_runtime() {
     return 0
   fi
 
-  log "inference(pi): install failed; continuing with other inference providers"
+  die "inference(pi): install failed"
 }
 
 materialize_templates() {

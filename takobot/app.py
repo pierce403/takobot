@@ -46,8 +46,6 @@ from .inference import (
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
     set_inference_api_key,
-    set_inference_ollama_host,
-    set_inference_ollama_model,
     set_inference_preferred_provider,
     stream_inference_prompt_with_fallback,
 )
@@ -107,6 +105,7 @@ ACTIVITY_LOG_MAX = 80
 TRANSCRIPT_LOG_MAX = 2000
 STREAM_BOX_MAX_CHARS = 8000
 STREAM_BOX_MAX_STATUS_LINES = 40
+LIVE_WORK_ITEMS_MAX = 12
 INPUT_HISTORY_MAX = 200
 CHAT_CONTEXT_USER_TURNS = 12
 CHAT_CONTEXT_MAX_CHARS = 8_000
@@ -420,6 +419,7 @@ class TakoTerminalApp(App[None]):
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
         self.stream_provider = "none"
         self.stream_status_lines: list[str] = []
+        self.live_work_items: deque[str] = deque(maxlen=LIVE_WORK_ITEMS_MAX)
         self.stream_reply = ""
         self.stream_active = False
         self.stream_focus = ""
@@ -2279,7 +2279,7 @@ class TakoTerminalApp(App[None]):
         if cmd in {"help", "h", "?"}:
             self._write_tako(
                 "local cockpit commands: help, status, stats, health, config, mission, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
-                "inference controls: `inference refresh`, `inference auth`, `inference provider <...>`, `inference ollama model <name>`, `inference key list|set|clear`\n"
+                "inference controls: `inference refresh`, `inference auth`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
                 "slash commands: type `/` to show available command shortcuts (`/mission`, `/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
@@ -2882,9 +2882,7 @@ class TakoTerminalApp(App[None]):
                     "- inference\n"
                     "- inference refresh\n"
                     "- inference auth\n"
-                    "- inference provider <auto|pi|ollama|codex|claude|gemini>\n"
-                    "- inference ollama model <name> (or empty to clear)\n"
-                    "- inference ollama host <url> (or empty to clear)\n"
+                    "- inference provider <auto|pi>\n"
                     "- inference key list\n"
                     "- inference key set <ENV_VAR> <value>\n"
                     "- inference key clear <ENV_VAR>\n"
@@ -2910,26 +2908,8 @@ class TakoTerminalApp(App[None]):
                 self._write_tako(summary)
                 return
 
-            if action.startswith("ollama model"):
-                model = ""
-                parts = action_raw.split(maxsplit=2)
-                if len(parts) == 3:
-                    model = parts[2]
-                ok, summary = set_inference_ollama_model(model)
-                if ok:
-                    self._initialize_inference_runtime()
-                self._write_tako(summary)
-                return
-
-            if action.startswith("ollama host"):
-                host = ""
-                parts = action_raw.split(maxsplit=2)
-                if len(parts) == 3:
-                    host = parts[2]
-                ok, summary = set_inference_ollama_host(host)
-                if ok:
-                    self._initialize_inference_runtime()
-                self._write_tako(summary)
+            if action.startswith("ollama model") or action.startswith("ollama host"):
+                self._write_tako("pi-only inference is enabled; ollama settings are disabled.")
                 return
 
             if action.startswith("key "):
@@ -3445,6 +3425,7 @@ class TakoTerminalApp(App[None]):
             if not target:
                 self._write_tako("usage: `web <https://...>`")
                 return
+            self._note_live_work(f"browsing {target}")
             self._add_activity("tool:web", f"fetching {target}")
             previous_indicator = self.indicator
             self._set_indicator("acting")
@@ -3469,6 +3450,7 @@ class TakoTerminalApp(App[None]):
                 self._write_tako("usage: `run <shell command>`")
                 return
             workdir = self.code_dir or ensure_code_dir(repo_root())
+            self._note_live_work(f"running command: {command}")
             self._add_activity("tool:run", f"executing `{command}`")
             previous_indicator = self.indicator
             self._set_indicator("acting")
@@ -3537,6 +3519,7 @@ class TakoTerminalApp(App[None]):
         self.stream_active = True
         self.stream_provider = "starting"
         self.stream_status_lines = []
+        self.live_work_items.clear()
         self.stream_reply = ""
         self.stream_focus = _stream_focus_summary(focus)
         self.stream_started_at = time.monotonic()
@@ -3551,10 +3534,26 @@ class TakoTerminalApp(App[None]):
             self._stream_render(force=True)
             return
 
+        if kind == "task":
+            line = _sanitize_for_display(payload).strip()
+            if not line:
+                return
+            self._note_live_work(line)
+            self.stream_status_lines.append(f"task: {line}")
+            if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
+                self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
+            self._append_app_log("inference", f"task={_summarize_text(line)}")
+            self._add_activity("research", line)
+            self._stream_render()
+            return
+
         if kind == "status":
             line = _sanitize_for_display(payload).strip()
             if not line:
                 return
+            hinted_task = _task_hint_from_status_line(line)
+            if hinted_task:
+                self._note_live_work(hinted_task)
             self.stream_status_lines.append(line)
             if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
                 self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
@@ -3571,6 +3570,15 @@ class TakoTerminalApp(App[None]):
                 self.stream_reply = self.stream_reply[-STREAM_BOX_MAX_CHARS :]
             self._stream_render()
             return
+
+    def _note_live_work(self, detail: str) -> None:
+        item = _summarize_text(" ".join(_sanitize_for_display(detail).split()))
+        if not item:
+            return
+        if self.live_work_items and self.live_work_items[0] == item:
+            return
+        self.live_work_items.appendleft(item)
+        self._refresh_panels()
 
     def _stream_render(self, *, force: bool = False) -> None:
         now = time.monotonic()
@@ -4082,6 +4090,7 @@ class TakoTerminalApp(App[None]):
         loops_age_s = float(self.open_loops_summary.get("oldest_age_s") or 0.0)
         loops_age = f"{int(loops_age_s // 3600)}h" if loops_age_s >= 3600 else f"{int(loops_age_s)}s"
         thinking = self._thinking_visual()
+        active_work = _active_work_summary(list(self.live_work_items))
         tasks = (
             "Tasks\n"
             f"- state: {self.state.value}\n"
@@ -4089,6 +4098,7 @@ class TakoTerminalApp(App[None]):
             f"- next: {pair_next}\n"
             f"- runtime: {self.runtime_mode}\n"
             f"- mind: {thinking}\n"
+            f"- active work: {active_work}\n"
             f"- safe mode: {'on' if self.safe_mode else 'off'}\n"
             f"- auto updates: {'on' if self.auto_updates_enabled else 'off'}\n"
             f"- inference gate: {'open' if self.inference_gate_open else 'closed'}\n"
@@ -4614,39 +4624,15 @@ def _inference_setup_hints(runtime: InferenceRuntime) -> list[str]:
     hints: list[str] = []
 
     pi = runtime.statuses.get("pi")
-    if pi and not pi.ready:
-        if not pi.cli_installed:
-            hints.append("pi runtime missing; run bootstrap/setup to install workspace-local pi tooling.")
-        else:
-            hints.append("run `inference auth` to inspect pi oauth tokens, or set API keys via `inference key set ...`.")
-
-    ollama = runtime.statuses.get("ollama")
-    if ollama and not ollama.ready:
-        if not ollama.cli_installed:
-            hints.append("install Ollama and pull a model (or use another provider).")
-        else:
-            hints.append("set `inference ollama model <name>` (or `OLLAMA_MODEL`) so ollama can answer prompts.")
-
-    codex = runtime.statuses.get("codex")
-    if codex and not codex.ready:
-        if not codex.cli_installed:
-            hints.append("install Codex CLI (`npm i -g @openai/codex`) or add `codex` to PATH.")
-        else:
-            hints.append("run `codex login` or set `OPENAI_API_KEY`.")
-
-    claude = runtime.statuses.get("claude")
-    if claude and not claude.ready:
-        if not claude.cli_installed:
-            hints.append("install Claude CLI and add `claude` to PATH.")
-        else:
-            hints.append("set `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) for Claude inference.")
-
-    gemini = runtime.statuses.get("gemini")
-    if gemini and not gemini.ready:
-        if not gemini.cli_installed:
-            hints.append("install Gemini CLI and add `gemini` to PATH.")
-        else:
-            hints.append("run `gemini` and complete auth, or set `GEMINI_API_KEY` / `GOOGLE_API_KEY`.")
+    if pi is None:
+        hints.append("pi runtime status unavailable; run `inference refresh` to re-scan.")
+        return hints
+    if not pi.cli_installed:
+        hints.append("pi runtime missing; refresh/setup will install workspace-local nvm/node and pi tooling.")
+    elif not pi.key_present:
+        hints.append("pi auth missing; set a key via `inference key set <ENV_VAR> <value>` or run pi login.")
+    elif not pi.ready:
+        hints.append("pi runtime is present but not ready; run `inference refresh` after node/auth are available.")
 
     return hints
 
@@ -4762,6 +4748,34 @@ def _activity_text(entries: list[str]) -> str:
     for entry in entries[:10]:
         lines.append(f"- {entry}")
     return "\n".join(lines)
+
+
+def _active_work_summary(items: list[str]) -> str:
+    if not items:
+        return "idle"
+    current = _summarize_text(_sanitize_for_display(items[0]))
+    if len(items) == 1:
+        return current
+    return f"{current} (+{len(items) - 1} more)"
+
+
+def _task_hint_from_status_line(line: str) -> str | None:
+    cleaned = " ".join(_sanitize_for_display(line).split())
+    lowered = cleaned.lower()
+    if not lowered:
+        return None
+    url_match = re.search(r"https?://\S+", cleaned)
+    if url_match:
+        return f"browsing {url_match.group(0)}"
+    if "web_search" in lowered or "web search" in lowered:
+        return "browsing the web"
+    if "browse" in lowered and "web" in lowered:
+        return "browsing the web"
+    if "searching files" in lowered or "file_search" in lowered:
+        return "searching local files"
+    if "running command" in lowered:
+        return _summarize_text(cleaned)
+    return None
 
 
 def _dose_productivity_hint(state: dose.DoseState) -> str:

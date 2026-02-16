@@ -72,6 +72,18 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-16 — Pi runtime is now required for all inference
+
+- What happened: multi-provider fallback could mask missing pi runtime and drifted from the desired local-first agent setup.
+- Fix: inference now enforces pi-only execution, runtime discovery auto-installs workspace-local nvm/node + pi packages when missing, and local-system API keys are adopted for pi when available.
+- Prevention: keep inference policy explicit in app/CLI/docs/tests and ensure workspace-local runtime bootstrapping remains automatic and observable.
+
+### 2026-02-16 — Live research task visibility in TUI
+
+- What happened: during long research turns, operators could see the stream spinner but not concrete current work (for example web browsing/search/tool activity).
+- Fix: inference stream tool events are now parsed into task updates and surfaced in the TUI as `active work` in the Tasks panel; local `web`/`run` commands also update active-work state.
+- Prevention: whenever streamed inference/tooling behavior changes, keep operator-facing progress telemetry explicit in Tasks/Activity panels and test task-event parsing.
+
 ### 2026-02-16 — XMTP replies mirrored in TUI + mission objectives formalized
 
 - What happened: remote XMTP replies were not visible in the local TUI transcript, and mission/objective notes captured during onboarding were loosely stored and could feel non-durable.

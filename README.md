@@ -4,7 +4,8 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
-- Inference-provider discovery with ordered fallback (`pi`, `ollama`, Codex, Claude, Gemini) and key-source detection
+- Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection
+- Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
@@ -20,6 +21,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - Built-in starter skills are auto-seeded into `skills/` (disabled): OpenClaw top-10, priority `skill-creator` + MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and an animated ASCII octopus panel with Takobot version + DOSE indicators
+- Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
@@ -122,14 +124,14 @@ Runtime-only (ignored):
 - Launches the interactive terminal app main loop (`takobot`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - If required setup is missing, emits an in-app operator request with direct remediation steps.
-- Detects available inference CLIs (`pi`, `ollama`, `codex`, `claude`, `gemini`) and key/auth sources, then persists runtime metadata to `.tako/state/inference.json`.
-- Detects local `pi` runtime first (then `ollama`/`codex`/`claude`/`gemini`) and runs inference with ordered provider fallback.
+- Detects pi runtime/auth/key sources and persists runtime metadata to `.tako/state/inference.json`.
+- If workspace-local pi runtime is missing, runtime discovery bootstraps workspace-local nvm/node and installs pi tooling under `.tako/`.
 - Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
 - Runs onboarding as an explicit state machine inside the app, starting with XMTP channel setup.
 - Shows an activity panel in the TUI so you can see inference/tool/runtime actions as they happen.
 - Shows the top-right octopus panel with Takobot version and compact DOSE indicators (D/O/S/E).
 - Starts heartbeat + event-log ingestion and continuously applies Type 1 triage; serious events trigger Type 2 tasks with depth-based handling.
-- Type 2 escalation uses discovered inference providers with fallback across ready CLIs after the first interactive chat turn, then falls back to heuristic guidance if inference calls fail.
+- Type 2 escalation uses the required pi runtime after the first interactive turn; if pi is unavailable/fails, Type 2 falls back to heuristic guidance.
 - Seeds starter skills into `skills/` and registers them as installed-but-disabled runtime extensions.
 - If paired, starts background XMTP runtime and keeps terminal as local cockpit with plain-text chat still available.
 
@@ -141,7 +143,7 @@ Workspace configuration lives in `tako.toml` (no secrets).
 - `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
 - Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
-- Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference, ollama host/model, API keys, pi OAuth inventory).
+- Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference `auto|pi`, API keys, pi OAuth inventory).
 - `doctor` runs local/offline inference diagnostics (CLI probes + recent inference error scan) and does not depend on inference being available.
 - Extension downloads are always HTTPS; non-HTTPS is not allowed.
 - Security permission defaults for enabled extensions are now permissive by default (`network/shell/xmtp/filesystem = true`), and can be tightened in `tako.toml`.
@@ -167,7 +169,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Runtime event log lives at `.tako/state/events.jsonl` and is consumed by the Type 1/Type 2 cognition pipeline.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
 - Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
-- Codex inference subprocesses are launched with sandbox/approval bypass flags so agentic chat does not falsely assume a read-only environment.
+- Inference now runs through workspace-local pi runtime; if pi is not available, Takobot falls back to non-inference heuristic responses.
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
 - Chat context is persisted in `.tako/state/conversations/` (`sessions.json` + per-session JSONL transcripts) and recent turns are injected into prompt context.
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.

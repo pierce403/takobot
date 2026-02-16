@@ -45,9 +45,8 @@ This is the “first wake” checklist for bringing up a new Tako instance.
   - `ONBOARDING_ROUTINES`
   - `RUNNING`
 - During `BOOTING`, Tako runs a startup health check (instance context, lock state, and resource probes).
-- During `BOOTING`, Tako scans local inference bridges (`codex`, `claude`, `gemini`) and records runtime metadata in `.tako/state/inference.json`.
-- During `BOOTING`, Tako scans local inference bridges (`pi`, `ollama`, `codex`, `claude`, `gemini`) and records runtime metadata in `.tako/state/inference.json`.
-- During `RUNNING`, `inference` commands can directly manage provider preference, ollama host/model, persisted API keys, and pi OAuth inventory via runtime-local `.tako/state/inference-settings.json`.
+- During `BOOTING`, Tako ensures required workspace-local pi runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) is available and records inference metadata in `.tako/state/inference.json`.
+- During `RUNNING`, `inference` commands can directly manage provider preference (`auto|pi`), persisted API keys, and pi OAuth inventory via runtime-local `.tako/state/inference-settings.json`.
 - During bootstrap, Tako installs pi runtime by default under `.tako/pi/node`; if Node/npm are missing, it bootstraps workspace-local `nvm` + Node under `.tako/nvm`.
 - During runtime, Tako appends daemon/app diagnostics to `.tako/logs/runtime.log` and `.tako/logs/app.log`.
 - During inference provider subprocess execution, Tako pins temp writes to `.tako/tmp/` via `TMPDIR`/`TMP`/`TEMP`.

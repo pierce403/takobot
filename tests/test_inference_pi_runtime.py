@@ -8,11 +8,13 @@ from unittest.mock import patch
 
 from takobot.inference import (
     InferenceRuntime,
+    InferenceProviderStatus,
     InferenceSettings,
     _detect_ollama,
     _detect_pi,
     _provider_env,
     _workspace_node_bin_dir,
+    discover_inference_runtime,
     clear_inference_api_key,
     format_inference_auth_inventory,
     load_inference_settings,
@@ -24,6 +26,31 @@ from takobot.inference import (
 
 
 class TestInferencePiRuntime(unittest.TestCase):
+    @staticmethod
+    def _status(
+        provider: str,
+        *,
+        cli_installed: bool,
+        ready: bool,
+        auth_kind: str = "none",
+        key_env_var: str | None = None,
+        key_source: str | None = None,
+        key_present: bool = False,
+        note: str = "",
+    ) -> InferenceProviderStatus:
+        return InferenceProviderStatus(
+            provider=provider,
+            cli_name=provider,
+            cli_path=f"/usr/bin/{provider}" if cli_installed else None,
+            cli_installed=cli_installed,
+            auth_kind=auth_kind,
+            key_env_var=key_env_var,
+            key_source=key_source,
+            key_present=key_present,
+            ready=ready,
+            note=note,
+        )
+
     def test_workspace_node_bin_dir_picks_latest_installed_node(self) -> None:
         with TemporaryDirectory() as tmp:
             nvm_dir = Path(tmp) / "nvm"
@@ -97,21 +124,23 @@ class TestInferencePiRuntime(unittest.TestCase):
             self.assertTrue(status_discovered.ready)
             self.assertEqual("model:qwen2.5-coder:7b", status_discovered.key_source)
 
-    def test_inference_settings_support_provider_ollama_and_api_keys(self) -> None:
+    def test_inference_settings_enforce_pi_provider_and_api_keys(self) -> None:
         with TemporaryDirectory() as tmp:
             settings_path = Path(tmp) / "inference-settings.json"
             ok_provider, _msg_provider = set_inference_preferred_provider("ollama", path=settings_path)
+            ok_provider_pi, _msg_provider_pi = set_inference_preferred_provider("pi", path=settings_path)
             ok_model, _msg_model = set_inference_ollama_model("llama3.2", path=settings_path)
             ok_host, _msg_host = set_inference_ollama_host("http://127.0.0.1:11434", path=settings_path)
             ok_key, _msg_key = set_inference_api_key("OPENAI_API_KEY", "sk-test-value", path=settings_path)
 
-            self.assertTrue(ok_provider)
+            self.assertFalse(ok_provider)
+            self.assertTrue(ok_provider_pi)
             self.assertTrue(ok_model)
             self.assertTrue(ok_host)
             self.assertTrue(ok_key)
 
             settings = load_inference_settings(settings_path)
-            self.assertEqual("ollama", settings.preferred_provider)
+            self.assertEqual("pi", settings.preferred_provider)
             self.assertEqual("llama3.2", settings.ollama_model)
             self.assertEqual("http://127.0.0.1:11434", settings.ollama_host)
             self.assertEqual("sk-test-value", settings.api_keys.get("OPENAI_API_KEY"))
@@ -120,6 +149,50 @@ class TestInferencePiRuntime(unittest.TestCase):
             self.assertTrue(ok_clear)
             settings_cleared = load_inference_settings(settings_path)
             self.assertNotIn("OPENAI_API_KEY", settings_cleared.api_keys)
+
+    def test_discover_runtime_attempts_workspace_bootstrap_when_pi_missing(self) -> None:
+        pi_status = self._status("pi", cli_installed=False, ready=False, note="install workspace-local pi runtime")
+        offline = self._status("ollama", cli_installed=False, ready=False)
+        with (
+            patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value="workspace pi bootstrap complete: installed"),
+            patch("takobot.inference._detect_pi", return_value=(pi_status, None)),
+            patch("takobot.inference._detect_ollama", return_value=(offline, None)),
+            patch("takobot.inference._detect_codex", return_value=(self._status("codex", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_claude", return_value=(self._status("claude", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_gemini", return_value=(self._status("gemini", cli_installed=False, ready=False), None)),
+        ):
+            runtime = discover_inference_runtime()
+
+        self.assertIsNone(runtime.selected_provider)
+        self.assertFalse(runtime.ready)
+        self.assertIn("workspace pi bootstrap complete", runtime.statuses["pi"].note)
+
+    def test_discover_runtime_adopts_local_system_key_for_pi(self) -> None:
+        pi_status = self._status("pi", cli_installed=True, ready=True, note="pi runtime detected")
+        codex_status = self._status(
+            "codex",
+            cli_installed=False,
+            ready=False,
+            auth_kind="api_key",
+            key_env_var="OPENAI_API_KEY",
+            key_source="file:~/.codex/auth.json#OPENAI_API_KEY",
+            key_present=True,
+        )
+        with (
+            patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value=""),
+            patch("takobot.inference._detect_pi", return_value=(pi_status, None)),
+            patch("takobot.inference._detect_ollama", return_value=(self._status("ollama", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_codex", return_value=(codex_status, "sk-system-openai")),
+            patch("takobot.inference._detect_claude", return_value=(self._status("claude", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_gemini", return_value=(self._status("gemini", cli_installed=False, ready=False), None)),
+        ):
+            runtime = discover_inference_runtime()
+
+        self.assertEqual("pi", runtime.selected_provider)
+        self.assertTrue(runtime.ready)
+        self.assertEqual("OPENAI_API_KEY", runtime.selected_key_env_var)
+        self.assertEqual("sk-system-openai", runtime._api_keys.get("pi"))
+        self.assertIn("local system", runtime.statuses["pi"].note)
 
     def test_auth_inventory_masks_api_keys(self) -> None:
         settings = InferenceSettings(

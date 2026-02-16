@@ -31,8 +31,6 @@ from .inference import (
     format_runtime_lines,
     run_inference_prompt_with_fallback,
     set_inference_api_key,
-    set_inference_ollama_host,
-    set_inference_ollama_model,
     set_inference_preferred_provider,
 )
 from .keys import derive_eth_address, load_or_create_keys
@@ -321,7 +319,7 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
     problems: list[str] = []
 
     lines.append("- inference doctor: local offline diagnostics")
-    for provider in ("pi", "ollama", "codex", "claude", "gemini"):
+    for provider in ("pi",):
         status = runtime.statuses.get(provider)
         if status is None:
             continue
@@ -337,12 +335,7 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
         if not version_ok:
             problems.append(f"{provider} CLI appears installed but --version failed: {version_detail}")
 
-        if provider == "codex":
-            command_probe = [cli_exec, "exec", "--help"]
-        elif provider == "ollama":
-            command_probe = [cli_exec, "list"]
-        else:
-            command_probe = [cli_exec, "--help"]
+        command_probe = [cli_exec, "--help"]
         command_ok, command_detail = _probe_cli_command(command_probe, timeout_s=7.0)
         lines.append(
             f"- {provider} probe: {' '.join(command_probe[1:])} "
@@ -359,7 +352,7 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
             lines.append(f"- {provider} note: {status.note}")
 
     if not runtime.ready:
-        problems.append("inference is unavailable: no ready provider found (see probes above).")
+        problems.append("inference is unavailable: required pi runtime is not ready (see probes above).")
 
     recent = _recent_inference_error_lines(paths.state_dir / "events.jsonl", limit=3)
     for item in recent:
@@ -1210,9 +1203,7 @@ async def _handle_incoming_message(
                 "- inference\n"
                 "- inference refresh\n"
                 "- inference auth\n"
-                "- inference provider <auto|pi|ollama|codex|claude|gemini>\n"
-                "- inference ollama model <name> (or empty to clear)\n"
-                "- inference ollama host <url> (or empty to clear)\n"
+                "- inference provider <auto|pi>\n"
                 "- inference key list\n"
                 "- inference key set <ENV_VAR> <value>\n"
                 "- inference key clear <ENV_VAR>\n"
@@ -1234,25 +1225,8 @@ async def _handle_incoming_message(
                 _replace_inference_runtime(inference_runtime, discover_inference_runtime())
             await convo.send(summary)
             return
-        if action.startswith("ollama model"):
-            model = ""
-            parts = action_raw.split(maxsplit=2)
-            if len(parts) == 3:
-                model = parts[2]
-            ok, summary = set_inference_ollama_model(model)
-            if ok:
-                _replace_inference_runtime(inference_runtime, discover_inference_runtime())
-            await convo.send(summary)
-            return
-        if action.startswith("ollama host"):
-            host = ""
-            parts = action_raw.split(maxsplit=2)
-            if len(parts) == 3:
-                host = parts[2]
-            ok, summary = set_inference_ollama_host(host)
-            if ok:
-                _replace_inference_runtime(inference_runtime, discover_inference_runtime())
-            await convo.send(summary)
+        if action.startswith("ollama model") or action.startswith("ollama host"):
+            await convo.send("pi-only inference is enabled; ollama settings are disabled.")
             return
         if action.startswith("key "):
             parts = action_raw.split(maxsplit=3)
@@ -1697,8 +1671,7 @@ def _help_text() -> str:
         "- promote <durable note>\n"
         "- inference (status)\n"
         "- inference auth\n"
-        "- inference provider <auto|pi|ollama|codex|claude|gemini>\n"
-        "- inference ollama model <name> / inference ollama host <url>\n"
+        "- inference provider <auto|pi>\n"
         "- inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>\n"
         "- update (or `update check`)\n"
         "- web <https://...>\n"

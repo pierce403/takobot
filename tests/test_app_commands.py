@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from takobot.app import (
+    _active_work_summary,
     _build_terminal_chat_prompt,
     _canonical_identity_name,
     _command_completion_context,
@@ -14,6 +15,7 @@ from takobot.app import (
     _parse_dose_set_request,
     _slash_command_matches,
     _stream_focus_summary,
+    _task_hint_from_status_line,
     TakoTerminalApp,
     run_terminal_app,
 )
@@ -89,6 +91,22 @@ class TestAppCommands(unittest.TestCase):
         summarized = _stream_focus_summary(long_text)
         self.assertTrue(len(summarized) <= 120)
         self.assertTrue(summarized.endswith("..."))
+
+    def test_task_hint_from_status_line_detects_research_actions(self) -> None:
+        self.assertEqual(
+            "browsing https://example.com/docs",
+            _task_hint_from_status_line("tool:web fetching https://example.com/docs"),
+        )
+        self.assertEqual("browsing the web", _task_hint_from_status_line("item.started web_search_call"))
+        self.assertEqual("searching local files", _task_hint_from_status_line("item.started file_search_call"))
+
+    def test_active_work_summary_shows_queue_depth(self) -> None:
+        self.assertEqual("idle", _active_work_summary([]))
+        self.assertEqual("browsing the web", _active_work_summary(["browsing the web"]))
+        self.assertEqual(
+            "browsing the web (+1 more)",
+            _active_work_summary(["browsing the web", "searching files for tests"]),
+        )
 
     def test_run_terminal_app_uses_default_mouse_mode(self) -> None:
         with patch.object(TakoTerminalApp, "run", return_value=None) as run_mock:

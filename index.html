@@ -772,15 +772,13 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Runs a startup health check to classify environment state (brand-new vs established), verify lock/safety, and probe resources.
               </li>
               <li>
-                Detects local inference providers in priority order (<code>pi</code>, <code>ollama</code>, <code>codex</code>, <code>claude</code>, <code>gemini</code>) and key/auth sources, then writes runtime metadata to <code>.tako/state/inference.json</code>.
+                Ensures required workspace-local <code>pi</code> runtime/auth is available and writes inference metadata to <code>.tako/state/inference.json</code>.
               </li>
               <li>Loads auto-update policy from <code>tako.toml</code> (<code>[updates].auto_apply</code>, default <code>true</code>).</li>
-              <li>
-                Invokes Codex inference with sandbox/approval bypass flags so agentic chat reflects real workspace write capability.
-              </li>
+              <li>Inference is pi-runtime-first and required; when pi is unavailable, Tako falls back to heuristic guidance instead of alternate model CLIs.</li>
               <li>Installs pi runtime by default under <code>.tako/pi/node</code>; if Node/npm are missing, bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
-              <li>Supports direct inference configuration from commands: provider preference, ollama host/model, persisted API keys, and pi OAuth inventory.</li>
+              <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, and pi OAuth inventory.</li>
               <li>Pins inference subprocess temp output and <code>TMPDIR/TMP/TEMP</code> to <code>.tako/tmp/</code> (workspace-local only).</li>
               <li>
                 Keeps inference execution gated until the first interactive chat turn, so startup remains deterministic.
@@ -858,6 +856,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Outbound XMTP replies are mirrored into the local TUI transcript/activity feed for a unified conversation view.</li>
               <li>Mission objectives are formalized in <code>SOUL.md</code> (<code>## Mission Objectives</code>) and editable in-app via <code>mission show|set|add|clear</code>.</li>
               <li>Bubble stream now shows the active request focus and elapsed thinking/responding time for long responses.</li>
+              <li>During streamed inference, tool/research progress is surfaced as live "active work" in the Tasks panel (for example browsing/search/tool steps).</li>
               <li>TUI right-click on selected transcript/stream text copies that selection in-app without clearing it.</li>
               <li>XMTP runtime is more resilient: transient send errors are retried and repeated poll/stream failures trigger client-session rebuilds.</li>
               <li>Inference stream emits periodic debug wait updates and applies a total local-chat timeout budget to avoid indefinite response stalls.</li>
@@ -882,7 +881,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 Runtime cognition consumes <code>.tako/state/events.jsonl</code> with Type 1 triage and escalates critical signals to Type 2 depth tasks.
               </li>
               <li>
-                Type 2 uses detected inference providers with automatic fallback across ready CLIs; if all fail, Tako falls back to heuristic safety recommendations.
+                Type 2 uses the required pi runtime for model reasoning; if pi is unavailable/fails, Tako falls back to heuristic safety recommendations.
               </li>
               <li>
                 Before the first interactive turn, Type 2 remains heuristic-only by design.

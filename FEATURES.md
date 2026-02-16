@@ -71,10 +71,10 @@
 - **Properties**:
   - Includes a scrolling transcript, status bar, input box, and structured side panels (tasks/memory/sensors).
   - Runs startup health checks (instance context, lock state, writable paths, dependency/network probes) before onboarding.
-  - Detects inference providers from local CLI installs (`pi`, `ollama`, `codex`, `claude`, `gemini`) and discovers auth/key sources at startup.
-  - Detects OpenClaw-aligned local `pi` runtime first, then falls back to `ollama`/`codex`/`claude`/`gemini` by readiness.
-  - Supports runtime-local inference configuration via `inference ...` commands (provider preference, ollama host/model, persisted API keys, pi OAuth inventory).
-  - Codex inference subprocesses are invoked with sandbox/approval bypass flags to avoid false read-only replies during agentic chat.
+  - Detects required local `pi` runtime/auth at startup (and still reports other provider probes for diagnostics).
+  - Enforces pi-only inference execution (no non-pi fallback for model calls).
+  - Supports runtime-local inference configuration via `inference ...` commands (provider preference `auto|pi`, persisted API keys, pi OAuth inventory).
+  - Inference execution is pi-runtime-only; non-pi CLIs are diagnostic-only and never used for model reply generation.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).
   - Runs onboarding as explicit states: `BOOTING`, `ASK_XMTP_HANDLE`, `PAIRING_OUTBOUND`, `PAIRED`, `ONBOARDING_IDENTITY`, `ONBOARDING_ROUTINES`, `RUNNING`.
   - Prompts for XMTP control-channel setup first (ASAP), and delays identity/routine prompts until inference has actually run.
@@ -83,7 +83,7 @@
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs heartbeat + event-log ingestion under UI orchestration, then applies Type 1 triage continuously.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
-  - Type 2 invokes discovered inference providers with automatic fallback across ready CLIs.
+  - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
@@ -91,6 +91,7 @@
   - Keeps full local operator control in the terminal for identity/config/tools/permissions/routines, even when XMTP is paired.
   - Queues local terminal input so long-running turns do not block new message entry; status/sensors expose pending input count.
   - Formalizes mission objectives under `SOUL.md` (`## Mission Objectives`) and supports local `mission` command controls (`show|set|add|clear`).
+  - During streamed inference, tool/research progress is surfaced as live "active work" in the Tasks panel (for example web browsing/search/tool-call steps).
   - Includes an activity panel with inference/tool/runtime trace lines.
   - App transcript/system lines are appended to `.tako/logs/app.log`.
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.
@@ -117,7 +118,7 @@
   - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
   - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
-  - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid multi-provider fallback stalls.
+  - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid stalled pi-runtime turns.
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
   - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.

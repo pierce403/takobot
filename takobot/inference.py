@@ -4,28 +4,35 @@ import asyncio
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import tarfile
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib import request as urllib_request
 from typing import Any, Callable, Mapping
 
 from .paths import ensure_runtime_dirs, runtime_paths
 
 
-PROVIDER_PRIORITY = ("pi", "ollama", "codex", "claude", "gemini")
+PROVIDER_PRIORITY = ("pi",)
 SUPPORTED_PROVIDER_PREFERENCES = ("auto", *PROVIDER_PRIORITY)
 CODEX_AGENTIC_EXEC_ARGS = [
     "--skip-git-repo-check",
     "--dangerously-bypass-approvals-and-sandbox",
 ]
 INFERENCE_SETTINGS_FILENAME = "inference-settings.json"
+PI_PACKAGE_VERSION = "0.52.12"
+NVM_VERSION = "v0.40.1"
+KNOWN_INFERENCE_PROVIDERS = ("pi", "ollama", "codex", "claude", "gemini")
 PI_KEY_ENV_VARS = (
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
     "OPENROUTER_API_KEY",
     "XAI_API_KEY",
     "GROQ_API_KEY",
@@ -35,6 +42,9 @@ PI_KEY_ENV_VARS = (
     "ZAI_API_KEY",
     "MINIMAX_API_KEY",
     "KIMI_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "ALI_BAILIAN_API_KEY",
+    "MIDDLEWARE_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
 )
 CONFIGURABLE_API_KEY_VARS = tuple(
@@ -42,7 +52,6 @@ CONFIGURABLE_API_KEY_VARS = tuple(
         {
             *PI_KEY_ENV_VARS,
             "CLAUDE_API_KEY",
-            "GOOGLE_API_KEY",
         }
     )
 )
@@ -318,6 +327,7 @@ def discover_inference_runtime() -> InferenceRuntime:
     settings = load_inference_settings()
     env: dict[str, str] = dict(os.environ)
     env.update(settings.api_keys)
+    bootstrap_note = _ensure_workspace_pi_runtime_if_needed()
     provider_env_overrides: dict[str, dict[str, str]] = {}
     ollama_host = settings.ollama_host or _env_non_empty(env, "OLLAMA_HOST")
     if ollama_host:
@@ -331,6 +341,10 @@ def discover_inference_runtime() -> InferenceRuntime:
     api_keys: dict[str, str] = {}
 
     pi_status, pi_key = _detect_pi(home, env)
+    if bootstrap_note:
+        note = pi_status.note or ""
+        note = f"{note} {bootstrap_note}".strip()
+        pi_status = replace(pi_status, note=note)
     statuses["pi"] = pi_status
     if pi_key:
         api_keys["pi"] = pi_key
@@ -355,22 +369,21 @@ def discover_inference_runtime() -> InferenceRuntime:
     if gemini_key:
         api_keys["gemini"] = gemini_key
 
-    requested_provider = os.environ.get("TAKO_INFERENCE_PROVIDER", "").strip().lower()
-    preferred_provider = settings.preferred_provider if settings.preferred_provider in SUPPORTED_PROVIDER_PREFERENCES else "auto"
-    selected_provider = None
-    if requested_provider in statuses and statuses[requested_provider].ready:
-        selected_provider = requested_provider
-    if not selected_provider and preferred_provider != "auto":
-        status = statuses.get(preferred_provider)
-        if status and status.ready:
-            selected_provider = preferred_provider
-    for provider in PROVIDER_PRIORITY:
-        if selected_provider:
-            break
-        status = statuses.get(provider)
-        if status and status.ready:
-            selected_provider = provider
-            break
+    if not pi_key and not pi_status.key_present:
+        pi_status, pi_key = _adopt_local_system_api_key_for_pi(
+            pi_status,
+            codex_status=codex_status,
+            codex_key=codex_key,
+            claude_status=claude_status,
+            claude_key=claude_key,
+            gemini_status=gemini_status,
+            gemini_key=gemini_key,
+        )
+        statuses["pi"] = pi_status
+        if pi_key:
+            api_keys["pi"] = pi_key
+
+    selected_provider = "pi" if statuses["pi"].ready else None
 
     selected_status = statuses.get(selected_provider or "")
     return InferenceRuntime(
@@ -382,6 +395,43 @@ def discover_inference_runtime() -> InferenceRuntime:
         _api_keys=api_keys,
         _provider_env_overrides=provider_env_overrides,
     )
+
+
+def _adopt_local_system_api_key_for_pi(
+    pi_status: InferenceProviderStatus,
+    *,
+    codex_status: InferenceProviderStatus,
+    codex_key: str | None,
+    claude_status: InferenceProviderStatus,
+    claude_key: str | None,
+    gemini_status: InferenceProviderStatus,
+    gemini_key: str | None,
+) -> tuple[InferenceProviderStatus, str | None]:
+    candidates = (
+        ("OPENAI_API_KEY", codex_key, codex_status.key_source or "file:~/.codex/auth.json"),
+        ("ANTHROPIC_API_KEY", claude_key, claude_status.key_source or "file:~/.claude/credentials.json"),
+        ("GEMINI_API_KEY", gemini_key, gemini_status.key_source or "file:~/.gemini/settings.json"),
+    )
+    for env_var, key_value, key_source in candidates:
+        if not key_value:
+            continue
+        note = (
+            f"{pi_status.note} local system key detected ({env_var}).".strip()
+            if pi_status.note
+            else f"pi runtime detected; key sourced from local system ({env_var})."
+        )
+        return (
+            replace(
+                pi_status,
+                auth_kind="api_key",
+                key_env_var=env_var,
+                key_source=f"system:{key_source}",
+                key_present=True,
+                note=note,
+            ),
+            key_value,
+        )
+    return pi_status, None
 
 
 def persist_inference_runtime(path: Path, runtime: InferenceRuntime) -> None:
@@ -507,7 +557,7 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
         if runtime.selected_key_source:
             lines.append(f"inference key source: {runtime.selected_key_source}")
 
-    for provider in PROVIDER_PRIORITY:
+    for provider in KNOWN_INFERENCE_PROVIDERS:
         status = runtime.statuses.get(provider)
         if not status:
             continue
@@ -519,14 +569,188 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
     return lines
 
 
+def _ensure_workspace_pi_runtime_if_needed() -> str:
+    workspace_cli = _workspace_pi_cli_path()
+    if workspace_cli.exists() and _pi_node_available():
+        return ""
+    ok, detail = _ensure_workspace_pi_runtime()
+    prefix = "workspace pi bootstrap complete" if ok else "workspace pi bootstrap failed"
+    return f"{prefix}: {detail}"
+
+
+def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
+    paths = ensure_runtime_dirs(runtime_paths())
+    tmp_dir = paths.tmp_dir
+    npm_cache = paths.root / "npm-cache"
+    prefix = paths.root / "pi" / "node"
+    npm_cache.mkdir(parents=True, exist_ok=True)
+    prefix.mkdir(parents=True, exist_ok=True)
+
+    env = os.environ.copy()
+    tmp_value = str(tmp_dir)
+    env["TMPDIR"] = tmp_value
+    env["TMP"] = tmp_value
+    env["TEMP"] = tmp_value
+
+    node_bin_dir = _workspace_node_bin_dir()
+    if node_bin_dir is None and shutil.which("node") is None:
+        ok, detail = _install_workspace_nvm_node_lts(tmp_dir=tmp_dir)
+        if not ok:
+            return False, detail
+        node_bin_dir = _workspace_node_bin_dir()
+
+    if node_bin_dir is not None:
+        current_path = env.get("PATH", "")
+        env["PATH"] = f"{node_bin_dir}{os.pathsep}{current_path}" if current_path else str(node_bin_dir)
+        env["NVM_DIR"] = str(_workspace_nvm_dir())
+
+    npm_exec = _workspace_npm_executable(node_bin_dir=node_bin_dir) or shutil.which("npm")
+    if not npm_exec:
+        return False, "npm is unavailable; cannot install workspace-local pi runtime"
+
+    pi_bin = _workspace_pi_cli_path()
+    if pi_bin.exists():
+        _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
+        return True, f"workspace-local pi runtime already present ({pi_bin})"
+
+    packages = [
+        f"@mariozechner/pi-ai@{PI_PACKAGE_VERSION}",
+        f"@mariozechner/pi-coding-agent@{PI_PACKAGE_VERSION}",
+    ]
+    cmd = [
+        npm_exec,
+        "--cache",
+        str(npm_cache),
+        "--prefix",
+        str(prefix),
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--silent",
+        *packages,
+    ]
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=600,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+        return False, f"npm install failed: {_summarize_error_text(detail)}"
+    if not pi_bin.exists():
+        return False, f"npm install completed but `{pi_bin}` is missing"
+
+    _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
+    return True, f"workspace-local pi runtime installed at `{pi_bin}`"
+
+
+def _install_workspace_nvm_node_lts(*, tmp_dir: Path) -> tuple[bool, str]:
+    nvm_dir = _workspace_nvm_dir()
+    nvm_sh = nvm_dir / "nvm.sh"
+    if not nvm_sh.exists():
+        ok, detail = _download_workspace_nvm(tmp_dir=tmp_dir, nvm_dir=nvm_dir)
+        if not ok:
+            return False, detail
+
+    bash_path = shutil.which("bash")
+    if not bash_path:
+        return False, "bash is required to bootstrap workspace-local nvm/node"
+
+    env = os.environ.copy()
+    tmp_value = str(tmp_dir)
+    env["TMPDIR"] = tmp_value
+    env["TMP"] = tmp_value
+    env["TEMP"] = tmp_value
+
+    script = (
+        "set -euo pipefail; "
+        f"export NVM_DIR={shlex.quote(str(nvm_dir))}; "
+        "source \"$NVM_DIR/nvm.sh\"; "
+        "nvm install --lts >/dev/null; "
+        "nvm use --lts >/dev/null"
+    )
+    proc = subprocess.run(
+        [bash_path, "-lc", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=900,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+        return False, f"workspace-local nvm/node install failed: {_summarize_error_text(detail)}"
+
+    node_bin_dir = _workspace_node_bin_dir()
+    if node_bin_dir is None:
+        return False, "workspace-local nvm completed but node binary was not found under `.tako/nvm`"
+    return True, f"workspace-local node runtime ready ({node_bin_dir})"
+
+
+def _download_workspace_nvm(*, tmp_dir: Path, nvm_dir: Path) -> tuple[bool, str]:
+    archive_name = f"nvm-{NVM_VERSION.lstrip('v')}.tar.gz"
+    archive_path = tmp_dir / archive_name
+    unpack_dir = tmp_dir / f"nvm-{NVM_VERSION.lstrip('v')}"
+    url = f"https://github.com/nvm-sh/nvm/archive/refs/tags/{NVM_VERSION}.tar.gz"
+
+    with contextlib.suppress(Exception):
+        archive_path.unlink(missing_ok=True)
+    with contextlib.suppress(Exception):
+        if unpack_dir.exists():
+            shutil.rmtree(unpack_dir)
+
+    try:
+        with urllib_request.urlopen(url, timeout=60) as response:
+            archive_path.write_bytes(response.read())
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed to download nvm archive: {_summarize_error_text(str(exc))}"
+
+    try:
+        with tarfile.open(archive_path, "r:gz") as archive:
+            archive.extractall(tmp_dir)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed to unpack nvm archive: {_summarize_error_text(str(exc))}"
+
+    if not unpack_dir.exists():
+        return False, f"unpacked nvm directory missing: {unpack_dir}"
+
+    with contextlib.suppress(Exception):
+        if nvm_dir.exists():
+            shutil.rmtree(nvm_dir)
+    try:
+        shutil.move(str(unpack_dir), str(nvm_dir))
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed to place nvm under workspace runtime: {_summarize_error_text(str(exc))}"
+    return True, f"workspace-local nvm ready ({nvm_dir})"
+
+
+def _workspace_npm_executable(*, node_bin_dir: Path | None = None) -> str | None:
+    bin_dir = node_bin_dir or _workspace_node_bin_dir()
+    if bin_dir is None:
+        return None
+    names = ("npm.cmd", "npm") if os.name == "nt" else ("npm", "npm.cmd")
+    for name in names:
+        candidate = bin_dir / name
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
     cli_name = "pi"
     workspace_cli = _workspace_pi_cli_path()
-    if workspace_cli.exists():
-        cli_path = str(workspace_cli)
-    else:
-        cli_path = shutil.which(cli_name)
+    workspace_cli_exists = workspace_cli.exists()
+    cli_path = str(workspace_cli) if workspace_cli_exists else None
     cli_installed = cli_path is not None
+    global_cli = shutil.which(cli_name) if not workspace_cli_exists else None
+    global_cli_note = (
+        f" global `{cli_name}` detected at `{global_cli}` but workspace-local runtime is required."
+        if global_cli
+        else ""
+    )
     node_ready = _pi_node_available()
 
     for env_var in PI_KEY_ENV_VARS:
@@ -599,10 +823,11 @@ def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderSta
             key_present=False,
             ready=False,
             note=(
-                "install pi runtime and configure auth to enable."
+                "install workspace-local pi runtime and configure auth to enable."
                 if node_ready
                 else "node runtime missing; setup will install workspace-local nvm/node before pi runtime."
-            ),
+            )
+            + global_cli_note,
         ),
         None,
     )
@@ -1218,6 +1443,18 @@ async def _stream_codex(
     cmd = ["codex", "exec", *CODEX_AGENTIC_EXEC_ARGS, "--color", "never", "--json", prompt]
     final_messages: list[str] = []
     streamed_any_delta = False
+    last_task_message = ""
+
+    def emit_task(message: str) -> None:
+        nonlocal last_task_message
+        cleaned = _short_status_text(message, max_chars=180)
+        if not cleaned:
+            return
+        if cleaned == last_task_message:
+            return
+        last_task_message = cleaned
+        if on_event:
+            on_event("task", cleaned)
 
     def handle_stdout_line(line: str) -> None:
         nonlocal streamed_any_delta
@@ -1238,6 +1475,12 @@ async def _stream_codex(
             return
 
         event_type = payload.get("type")
+        event_name = event_type.strip().lower() if isinstance(event_type, str) else ""
+        if event_name:
+            task_message = _codex_task_from_payload(event_name, payload)
+            if task_message:
+                emit_task(task_message)
+
         if isinstance(event_type, str) and event_type in {"thread.started", "turn.started"}:
             if on_event:
                 on_event("status", event_type)
@@ -1294,6 +1537,118 @@ async def _stream_codex(
     if not streamed_any_delta:
         await _simulate_stream(combined, on_event=on_event)
     return combined
+
+
+def _codex_task_from_payload(event_name: str, payload: dict[str, Any]) -> str | None:
+    if not event_name.startswith("item.") and not event_name.startswith("response.output_item."):
+        return None
+    item = payload.get("item")
+    if not isinstance(item, dict):
+        return None
+    return _codex_item_task_message(event_name, item)
+
+
+def _codex_item_task_message(event_name: str, item: dict[str, Any]) -> str | None:
+    item_type_raw = str(item.get("type") or "").strip()
+    item_type = item_type_raw.lower()
+    if not item_type or item_type == "agent_message":
+        return None
+
+    args = (
+        _coerce_json_mapping(item.get("arguments"))
+        or _coerce_json_mapping(item.get("args"))
+        or _coerce_json_mapping(item.get("input"))
+        or _coerce_json_mapping(item.get("parameters"))
+        or {}
+    )
+    tool_name = _first_non_empty(item, args, keys=("name", "tool_name", "tool", "title"))
+    command = _first_non_empty(item, args, keys=("command", "cmd", "shell_command", "shell", "exec"))
+    url = _first_non_empty(item, args, keys=("url", "href", "target_url", "link"))
+    query = _first_non_empty(item, args, keys=("query", "search_query", "q", "keywords", "search"))
+
+    if command:
+        action = f"running command: {command}"
+    elif "web" in item_type or "browser" in item_type:
+        if url:
+            action = f"browsing {url}"
+        elif query:
+            action = f"browsing web for {query}"
+        else:
+            action = "browsing the web"
+    elif "file" in item_type and "search" in item_type:
+        if query:
+            action = f"searching files for {query}"
+        else:
+            action = "searching files"
+    elif "search" in item_type:
+        if url:
+            action = f"checking {url}"
+        elif query:
+            action = f"searching for {query}"
+        else:
+            action = "searching"
+    elif "function" in item_type or "tool" in item_type:
+        if tool_name and query:
+            action = f"using {tool_name} for {query}"
+        elif tool_name and url:
+            action = f"using {tool_name} on {url}"
+        elif tool_name:
+            action = f"using {tool_name}"
+        else:
+            action = f"using {item_type.replace('_', ' ')}"
+    else:
+        label = item_type.replace("_", " ")
+        if tool_name:
+            action = f"working on {label} ({tool_name})"
+        else:
+            action = f"working on {label}"
+
+    if event_name.endswith("completed") or event_name.endswith(".done"):
+        return f"completed {action}"
+    return action
+
+
+def _coerce_json_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate.startswith("{"):
+        return None
+    try:
+        payload = json.loads(candidate)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _first_non_empty(*mappings: Mapping[str, Any], keys: tuple[str, ...]) -> str:
+    for mapping in mappings:
+        if not isinstance(mapping, Mapping):
+            continue
+        for key in keys:
+            value = mapping.get(key)
+            if isinstance(value, str):
+                cleaned = _short_status_text(value, max_chars=120)
+                if cleaned:
+                    return cleaned
+            elif value is not None and not isinstance(value, (dict, list, tuple, set)):
+                cleaned = _short_status_text(str(value), max_chars=120)
+                if cleaned:
+                    return cleaned
+    return ""
+
+
+def _short_status_text(value: str, *, max_chars: int) -> str:
+    cleaned = " ".join(value.split())
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return f"{cleaned[: max_chars - 3]}..."
 
 
 async def _run_streaming_process(

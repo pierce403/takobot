@@ -10,6 +10,7 @@ from takobot.app import (
     _command_completion_context,
     _command_completion_matches,
     _dose_channel_label,
+    _local_chat_unavailable_message,
     _looks_like_local_command,
     _parse_command,
     _parse_dose_set_request,
@@ -145,6 +146,17 @@ class TestAppCommands(unittest.TestCase):
 
         app.input_processing = True
         self.assertEqual(2, app._queued_input_total())
+
+    def test_local_chat_unavailable_message_is_clear(self) -> None:
+        message = _local_chat_unavailable_message(
+            operator_paired=True,
+            runtime=None,
+            last_error="inference timed out",
+        )
+        self.assertIn("Inference is unavailable right now", message)
+        self.assertIn("Chat remains available here and over XMTP.", message)
+        self.assertIn("Run `doctor` to auto-repair runtime/auth.", message)
+        self.assertIn("Last inference error: inference timed out.", message)
 
 
 if __name__ == "__main__":

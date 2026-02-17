@@ -123,6 +123,7 @@
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
   - Manual `explore` bypasses normal sensor poll windows so operator-triggered exploration runs immediately and auto-topic selection avoids immediate repeats.
+  - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports a highlighted insight to the operator.
   - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
@@ -159,6 +160,7 @@
   - [x] Hatchling onboarding order is `name -> purpose -> XMTP handle`.
   - [x] Child stage randomly explores Reddit/Hacker News/Wikipedia and emits mission-linked world questions.
   - [x] Manual `explore` bypasses sensor poll windows, avoids immediate auto-topic repeats, and reports scan stats when no new world items are found.
+  - [x] Manual `explore <topic>` writes structured world notes and surfaces an explicit “just learned” highlight.
   - [x] Child-stage chat can capture operator context and write/update `memory/people/operator.md`.
   - [x] Child-stage chat can capture website URLs and add them to `[world_watch].sites`.
   - [x] Onboarding completion transitions stage to `child` and persists it to `tako.toml`.

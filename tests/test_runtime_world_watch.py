@@ -6,9 +6,11 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from takobot.runtime.events import EventBus
 from takobot.runtime.runtime import Runtime
+from takobot.topic_research import TopicResearchNote, TopicResearchResult
 
 
 class OneShotWorldSensor:
@@ -340,6 +342,78 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             first_topic, _ = asyncio.run(runtime.request_explore(""))
             second_topic, _ = asyncio.run(runtime.request_explore(""))
             self.assertNotEqual(first_topic, second_topic)
+
+    def test_manual_explore_topic_writes_structured_topic_research_notes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_dir = root / ".tako" / "state"
+            memory_root = root / "memory"
+            daily_root = memory_root / "dailies"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            memory_root.mkdir(parents=True, exist_ok=True)
+            daily_root.mkdir(parents=True, exist_ok=True)
+
+            runtime = Runtime(
+                event_bus=EventBus(state_dir / "events.jsonl"),
+                state_dir=state_dir,
+                memory_root=memory_root,
+                daily_log_root=daily_root,
+                sensors=[CountingSensor()],
+                heartbeat_interval_s=1.0,
+                heartbeat_jitter_ratio=0.0,
+                explore_interval_s=3600.0,
+                explore_jitter_ratio=0.0,
+                mission_objectives_getter=lambda: ["Maintain mission agility."],
+            )
+            fake_result = TopicResearchResult(
+                topic="potatoes",
+                notes=(
+                    TopicResearchNote(
+                        source="Wikipedia",
+                        title="Potato",
+                        link="https://en.wikipedia.org/wiki/Potato",
+                        summary="Potatoes are starchy tubers originally domesticated in the Andes.",
+                        mission_relevance="Could affect mission planning for food resilience research.",
+                        question="What assumption should we test next about tuber yield?",
+                    ),
+                    TopicResearchNote(
+                        source="Hacker News",
+                        title="Open potato breeding datasets",
+                        link="https://news.ycombinator.com/item?id=123",
+                        summary="Developers are discussing open agronomy datasets for crop improvement.",
+                        mission_relevance="Could unlock faster evidence gathering for mission choices.",
+                        question="Should we track these datasets as a recurring signal?",
+                    ),
+                ),
+                highlight="Potatoes were domesticated in the Andes and spread globally as a dense energy crop.",
+            )
+
+            with patch("takobot.runtime.runtime.collect_topic_research", return_value=fake_result):
+                selected_topic, new_world_count = asyncio.run(runtime.request_explore("potatoes"))
+
+            self.assertEqual("potatoes", selected_topic)
+            self.assertEqual(0, new_world_count)
+            self.assertEqual(2, int(runtime.last_explore_report.get("topic_research_notes", 0)))
+            self.assertIn("Potatoes were domesticated", str(runtime.last_explore_report.get("topic_research_highlight", "")))
+
+            today = date.today().isoformat()
+            notebook_path = memory_root / "world" / f"{today}.md"
+            notebook_text = notebook_path.read_text(encoding="utf-8")
+            self.assertIn("### Topic Explore — potatoes", notebook_text)
+            self.assertIn("Interesting thing learned:", notebook_text)
+            self.assertIn("Research note 1 (Wikipedia)", notebook_text)
+            self.assertIn("Research note 2 (Hacker News)", notebook_text)
+
+            daily_text = (daily_root / f"{today}.md").read_text(encoding="utf-8")
+            self.assertIn("Topic explore captured 2 note(s) for `potatoes`.", daily_text)
+
+            events = [
+                json.loads(line)
+                for line in (state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            event_types = [str(event.get("type", "")) for event in events]
+            self.assertIn("world.research.topic", event_types)
 
 
 if __name__ == "__main__":

@@ -3067,21 +3067,16 @@ class TakoTerminalApp(App[None]):
                     self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
             self.explore_ticks = self.runtime_service.explore_ticks
             self.last_explore_at = self.runtime_service.last_explore_at
-            topic_note = "auto-selected topic" if not requested_topic else "topic"
             report = dict(getattr(self.runtime_service, "last_explore_report", {}) or {})
-            lines = [
-                "explore complete.",
-                f"{topic_note}: {selected_topic}",
-                f"new world items: {int(new_world_count)}",
-            ]
-            if int(new_world_count) == 0:
-                lines.append(
-                    "sensor scan: "
-                    f"{int(report.get('sensor_count', len(self.runtime_service.sensors)))} sensor(s), "
-                    f"{int(report.get('sensor_events', 0))} event(s), "
-                    f"{int(report.get('sensor_failures', 0))} failure(s)"
+            self._write_tako(
+                _format_explore_completion_message(
+                    requested_topic=requested_topic,
+                    selected_topic=selected_topic,
+                    new_world_count=int(new_world_count),
+                    report=report,
+                    sensor_count=len(self.runtime_service.sensors),
                 )
-            self._write_tako("\n".join(lines))
+            )
             return
 
         if cmd == "task":
@@ -5314,6 +5309,40 @@ def _dose_channel_label(channel: str) -> str:
 
 def _format_level(value: float) -> str:
     return f"{max(0.0, min(1.0, value)):.2f}".rstrip("0").rstrip(".")
+
+
+def _format_explore_completion_message(
+    *,
+    requested_topic: str,
+    selected_topic: str,
+    new_world_count: int,
+    report: dict[str, Any],
+    sensor_count: int,
+) -> str:
+    topic_note = "auto-selected topic" if not requested_topic.strip() else "topic"
+    lines = [
+        "explore complete.",
+        f"{topic_note}: {selected_topic}",
+        f"new world items: {int(new_world_count)}",
+    ]
+    if int(new_world_count) == 0:
+        lines.append(
+            "sensor scan: "
+            f"{int(report.get('sensor_count', sensor_count))} sensor(s), "
+            f"{int(report.get('sensor_events', 0))} event(s), "
+            f"{int(report.get('sensor_failures', 0))} failure(s)"
+        )
+
+    topic_notes = int(report.get("topic_research_notes", 0) or 0)
+    if topic_notes > 0:
+        notes_path = " ".join(str(report.get("topic_research_path", "")).split())
+        if not notes_path:
+            notes_path = f"memory/world/{date.today().isoformat()}.md"
+        lines.append(f"topic research notes: {topic_notes} ({notes_path})")
+        highlight = " ".join(str(report.get("topic_research_highlight", "")).split())
+        if highlight:
+            lines.append(f"I just learned something exciting: {highlight}")
+    return "\n".join(lines)
 
 
 def _looks_like_local_command(text: str) -> bool:

@@ -13,6 +13,7 @@ from takobot.app import (
     _command_completion_context,
     _command_completion_matches,
     _dose_channel_label,
+    _format_explore_completion_message,
     _local_chat_unavailable_message,
     _looks_like_local_command,
     _parse_command,
@@ -175,6 +176,26 @@ class TestAppCommands(unittest.TestCase):
         self.assertTrue(lines[1].rstrip().endswith("O ○○○○"))
         self.assertTrue(lines[2].rstrip().endswith("S ○○○○"))
         self.assertTrue(lines[3].rstrip().endswith("E ○○○○"))
+
+    def test_explore_completion_message_includes_topic_learning_highlight(self) -> None:
+        message = _format_explore_completion_message(
+            requested_topic="potatoes",
+            selected_topic="potatoes",
+            new_world_count=0,
+            report={
+                "sensor_count": 2,
+                "sensor_events": 5,
+                "sensor_failures": 0,
+                "topic_research_notes": 4,
+                "topic_research_path": "memory/world/2026-02-17.md",
+                "topic_research_highlight": "Potatoes spread globally because tubers store dense energy and travel well.",
+            },
+            sensor_count=2,
+        )
+        self.assertIn("topic: potatoes", message)
+        self.assertIn("topic research notes: 4", message)
+        self.assertIn("I just learned something exciting:", message)
+        self.assertIn("Potatoes spread globally", message)
 
     def test_local_input_queue_count_includes_active_processing(self) -> None:
         app = TakoTerminalApp(interval=5.0)

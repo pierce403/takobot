@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from ..daily import append_daily_note, ensure_daily_log
 from ..sensors.base import Sensor, SensorContext
+from ..topic_research import TopicResearchResult, collect_topic_research
 from .events import EventBus
 
 BRIEFING_MAX_PER_DAY = 3
@@ -100,6 +101,9 @@ class Runtime:
             "sensor_failures": 0,
             "world_items": 0,
             "new_world_items": 0,
+            "topic_research_notes": 0,
+            "topic_research_highlight": "",
+            "topic_research_path": "",
         }
 
         self._world_dir = self.memory_root / "world"
@@ -273,6 +277,45 @@ class Runtime:
                     )
                     self._emit_activity("world-watch", f"{new_world_count} new items")
 
+            topic_research_notes = 0
+            topic_research_highlight = ""
+            topic_research_path = ""
+            if trigger == "manual" and topic_focus:
+                research_result = await asyncio.to_thread(
+                    collect_topic_research,
+                    topic_focus,
+                    mission_objectives=mission_objectives,
+                    timeout_s=self.sensor_timeout_s,
+                    user_agent=self.sensor_user_agent,
+                )
+                if research_result.notes:
+                    notes_path, topic_research_notes = _append_topic_research_entries(self._world_dir, today, research_result)
+                    topic_research_path = str(notes_path)
+                    topic_research_highlight = _clean_value(research_result.highlight)
+                    append_daily_note(
+                        self.daily_log_root,
+                        today,
+                        f"Topic explore captured {topic_research_notes} note(s) for `{topic_focus}`.",
+                    )
+                    self.event_bus.publish_event(
+                        "world.research.topic",
+                        f"Topic explore captured {topic_research_notes} note(s) for `{topic_focus}`.",
+                        source="runtime",
+                        metadata={
+                            "topic": topic_focus,
+                            "path": topic_research_path,
+                            "notes": int(topic_research_notes),
+                            "highlight": topic_research_highlight,
+                        },
+                    )
+                    self._emit_activity("research", f"topic `{topic_focus}` -> {topic_research_notes} notes")
+                else:
+                    append_daily_note(
+                        self.daily_log_root,
+                        today,
+                        f"Topic explore found no structured notes for `{topic_focus}`.",
+                    )
+
             self.last_explore_report = {
                 "trigger": trigger,
                 "topic": topic_focus,
@@ -281,6 +324,9 @@ class Runtime:
                 "sensor_failures": int(sensor_failures),
                 "world_items": len(world_items),
                 "new_world_items": int(new_world_count),
+                "topic_research_notes": int(topic_research_notes),
+                "topic_research_highlight": topic_research_highlight,
+                "topic_research_path": topic_research_path,
             }
             if trigger == "manual" and new_world_count == 0:
                 append_daily_note(
@@ -678,6 +724,48 @@ def _append_world_notebook_entries(world_dir: Path, day: date, items: list[World
                 handle.write(f"    - {question}\n")
     _append_world_entities(world_dir / "entities.md", day, pending)
     return path, len(pending)
+
+
+def _append_topic_research_entries(world_dir: Path, day: date, result: TopicResearchResult) -> tuple[Path, int]:
+    world_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_world_memory_scaffold(world_dir)
+    path = world_dir / f"{day.isoformat()}.md"
+    if not path.exists():
+        path.write_text(f"# World Notebook — {day.isoformat()}\n\n", encoding="utf-8")
+
+    text = path.read_text(encoding="utf-8")
+    section_header = f"## {day.isoformat()}"
+    if section_header not in text:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += f"\n{section_header}\n"
+        path.write_text(text, encoding="utf-8")
+
+    notes = list(result.notes)
+    if not notes:
+        return path, 0
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n### Topic Explore — {result.topic}\n")
+        highlight = _clean_value(result.highlight)
+        if highlight:
+            handle.write(f"- Interesting thing learned: {highlight}\n")
+        handle.write(f"- Notes captured: {len(notes)}\n")
+        for idx, note in enumerate(notes, start=1):
+            source = _clean_value(note.source) or "source"
+            title = _clean_value(note.title) or "(untitled)"
+            link = _clean_value(note.link) or "(no link)"
+            learned = _clean_value(note.summary) or "(no summary)"
+            relevance = _clean_value(note.mission_relevance)
+            question = _clean_value(note.question)
+            handle.write(f"- Research note {idx} ({source})\n")
+            handle.write(f"  - Title: {title}\n")
+            handle.write(f"  - Link: {link}\n")
+            handle.write(f"  - What I learned: {learned}\n")
+            handle.write(f"  - Possible mission relevance: {relevance}\n")
+            handle.write(f"  - Question: {question}\n")
+        handle.write("\n")
+    return path, len(notes)
 
 
 def _ensure_world_memory_scaffold(world_dir: Path) -> None:

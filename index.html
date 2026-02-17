@@ -860,6 +860,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><code>doctor</code> auto-runs inference repair first (workspace pi runtime/auth), then runs offline diagnostics (provider CLI probes + recent inference error scan) without needing inference.</li>
               <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>tool-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>
               <li>Pi chat inference runs with tools/skills/extensions enabled and can use workspace <code>skills/</code> + <code>tools/</code> directly.</li>
+              <li>Workspace ships standard web tool names under <code>tools/</code>: <code>web_search</code> (discovery) and <code>web_fetch</code> (source extraction, optional Playwright rendering).</li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, plain-text chat, and local operator configuration commands.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>

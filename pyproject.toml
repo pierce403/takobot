@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "takobot"
-version = "0.1.58"
+version = "0.1.59"
 description = "Takobot: your highly autonomous and incredibly curious octopus friend"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -47,7 +47,7 @@ include = ["takobot*"]
 script-files = ["tako.sh"]
 
 [tool.setuptools.package-data]
-takobot = ["templates/**/*.md", "templates/**/*.toml"]
+takobot = ["templates/**/*.md", "templates/**/*.toml", "templates/**/*.py"]
 
 [tool.setuptools.exclude-package-data]
 takobot = ["**/*.pyc", "**/__pycache__/*"]

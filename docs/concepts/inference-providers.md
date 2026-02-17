@@ -44,6 +44,11 @@ Takobot runs pi in non-interactive inference mode:
 
 Tooling remains available in pi runtime; Takobot does not pass `--no-tools/--no-skills/--no-extensions`.
 
+Standard web tools are available in workspace `tools/`:
+
+- `web_search` for live result discovery
+- `web_fetch` for deterministic page extraction (with optional Playwright rendering)
+
 Before invoking pi, Takobot now applies a prompt safety guard:
 
 - wraps oversized single lines to avoid downstream splitter chunk-limit failures

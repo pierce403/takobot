@@ -4,6 +4,11 @@ Tools are optional, operator-enabled capabilities that Tako can invoke.
 
 Core rule: **non-operator cannot change tool configuration**.
 
+Built-in standard web tools:
+
+- `web_search`: structured web discovery for live/current facts
+- `web_fetch`: deterministic URL fetch + readable text extraction
+
 ## Layout (v1)
 
 - `tools/<name>/tool.py` (implementation)

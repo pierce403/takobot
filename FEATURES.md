@@ -365,8 +365,9 @@
 - **Properties**:
   - Loader scans for `tools/<name>/tool.py` exporting `TOOL_MANIFEST`.
   - Tool manifests declare permissions.
+  - Standard web tools follow common naming: `web_search` and `web_fetch`.
 - **Test Criteria**:
-  - [x] Loader can discover at least one tool (`tools/memory_append/tool.py`).
+  - [x] Loader discovers `memory_append`, `web_search`, and `web_fetch`.
 
 ### Multi-instance lock
 - **Stability**: in-progress

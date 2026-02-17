@@ -24,6 +24,7 @@ Use tools for deterministic external actions (fetch, run, read/write, API access
 - Prefer the safest tool that can accomplish the goal.
 - Minimize side effects first; escalate only when needed.
 - Avoid unnecessary tool calls when context already contains sufficient evidence.
+- For live web questions, prefer standard tools first: `web_search` for discovery, `web_fetch` for source extraction.
 
 ## Safety Rules
 
@@ -35,3 +36,4 @@ Use tools for deterministic external actions (fetch, run, read/write, API access
 
 - Live installed tool inventory is provided separately in prompt context (`tools_inventory=`).
 - Do not claim a tool is available unless it appears in that inventory.
+- Do not claim web access is unavailable until a real `web_search`/`web_fetch` attempt fails.

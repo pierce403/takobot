@@ -1,0 +1,11 @@
+[tool]
+name = "web_search"
+version = "0.1.0"
+entry = "tool.py"
+description = "Search the web with DuckDuckGo and return structured results (optionally with page-text summaries)."
+
+[permissions]
+network = true
+shell = false
+xmtp = false
+filesystem = false

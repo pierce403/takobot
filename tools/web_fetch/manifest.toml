@@ -1,0 +1,11 @@
+[tool]
+name = "web_fetch"
+version = "0.1.0"
+entry = "tool.py"
+description = "Fetch and extract readable text from a web page (optional Playwright render for JS-heavy pages)."
+
+[permissions]
+network = true
+shell = false
+xmtp = false
+filesystem = false

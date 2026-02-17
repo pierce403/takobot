@@ -324,7 +324,8 @@ def _probe_daily_log() -> bool:
 
 def _probe_tool_discovery() -> bool:
     tools = discover_tools(ROOT / "tools")
-    return any(tool.name == "memory_append" for tool in tools)
+    names = {tool.name for tool in tools}
+    return {"memory_append", "web_search", "web_fetch"}.issubset(names)
 
 
 def _probe_lock_behavior() -> bool:

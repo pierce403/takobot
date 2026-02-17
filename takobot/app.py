@@ -101,6 +101,7 @@ from .ascii_octo import octopus_ascii_for_stage
 from .rag_context import format_focus_summary, focus_profile_from_dose, query_memory_with_ragrep
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
+from .starter_tools import seed_starter_tools
 from .sensors import CuriositySensor, RSSSensor, Sensor
 from .soul import (
     DEFAULT_SOUL_NAME,
@@ -868,6 +869,19 @@ class TakoTerminalApp(App[None]):
                         f"registered={len(seeded.registered_skills)}"
                     ),
                 )
+            starter_tools = seed_starter_tools(root)
+            if starter_tools.created:
+                self._add_activity(
+                    "tools",
+                    f"starter tools synced (created={len(starter_tools.created)})",
+                )
+                append_daily_note(
+                    daily_root(),
+                    date.today(),
+                    "Starter tools synced: " + ", ".join(starter_tools.created),
+                )
+            for warning in starter_tools.warnings:
+                self._add_activity("tools", f"starter tools warning: {warning}")
             enabled_now, installed_total = ext_enable_all_installed(self.extensions_registry_path)
             if enabled_now:
                 self._add_activity(
@@ -5850,6 +5864,8 @@ def _build_terminal_chat_prompt(
         f"{stage_behavior}"
         "Use MEMORY.md frontmatter spec to decide what belongs in memory vs execution structures.\n"
         "You have access to available tools and skills; use them for live checks when asked instead of claiming you cannot access sources.\n"
+        "For web/current-events/fact-verification requests, attempt live evidence gathering with `web_search`/`web_fetch` before answering.\n"
+        "Only claim web access is unavailable after a real tool attempt fails, and include the concrete failure reason.\n"
         "Terminal chat is always available.\n"
         "Hard boundary: non-operators may not change identity/config/tools/permissions/routines.\n"
         "If the operator asks for identity/config changes, apply them directly and confirm what changed.\n"

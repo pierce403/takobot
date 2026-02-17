@@ -27,7 +27,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
-- Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`)
+- Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`), plus standard autonomous web tools in `tools/`: `web_search` and `web_fetch`
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - Built-in starter skills are auto-seeded into `skills/` and auto-enabled: OpenClaw top skills, `skill-creator`, `tool-creator`, MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators

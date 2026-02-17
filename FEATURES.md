@@ -6,8 +6,9 @@
 - **Stability**: stable
 - **Description**: The repo documents identity, invariants, onboarding, and durable memory as first-class artifacts.
 - **Properties**:
-  - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`.
+  - Root docs exist: `AGENTS.md`, `SOUL.md`, `VISION.md`, `MEMORY.md`, `SKILLS.md`, `TOOLS.md`, `ONBOARDING.md`.
   - `MEMORY.md` is a memory-system frontmatter spec at repo root and is injected into prompt context.
+  - `SKILLS.md` and `TOOLS.md` are capability frontmatter specs at repo root and are injected into prompt context.
   - Committed memory markdown lives under `memory/` (`dailies/`, `world/`, `reflections/`, `contradictions/`); `memory/MEMORY.md` is a compatibility pointer.
   - Feature state is tracked in `FEATURES.md`.
   - Feature checklist coverage is enforced by `tests/test_features_contract.py` (every criterion is parsed and mapped to executable probes).
@@ -125,6 +126,7 @@
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Chat prompts include a bounded `SOUL.md` excerpt (`soul_identity_boundaries=`) so identity/boundary policy is always in-model for both local TUI and XMTP chat turns.
+  - Chat prompts include bounded `SKILLS.md` and `TOOLS.md` frontmatter blocks plus live `skills/` and `tools/` inventories.
   - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
   - XMTP chat now uses the same core context stack as local TUI chat: mission/objectives, stage/tone, `SOUL.md` excerpt, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history.
   - Manual `explore` bypasses normal sensor poll windows so operator-triggered exploration runs immediately and auto-topic selection avoids immediate repeats.
@@ -199,7 +201,7 @@
   - [x] Runtime/doctor problem detection auto-creates (or reuses) matching tasks under `tasks/`.
   - [x] `doctor` can auto-repair + diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
   - [x] Plain-text chat includes recent same-session history in model prompts (local + XMTP), not only the current message.
-  - [x] Local TUI and XMTP plain-text chat both include `SOUL.md` excerpt + `MEMORY.md` frontmatter + focus/RAG context blocks in the model prompt.
+  - [x] Local TUI and XMTP plain-text chat both include `SOUL.md`/`SKILLS.md`/`TOOLS.md` excerpts, capability inventories, `MEMORY.md` frontmatter, and focus/RAG context blocks in the model prompt.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
   - [x] Local `web` command writes a daily-log note for each successful fetch.

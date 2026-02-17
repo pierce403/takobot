@@ -9,6 +9,8 @@ Required files:
 - `AGENTS.md`
 - `SOUL.md`
 - `MEMORY.md` (memory-system frontmatter spec)
+- `SKILLS.md` (skills usage frontmatter)
+- `TOOLS.md` (tools usage frontmatter)
 - `ONBOARDING.md`
 - `tako.toml` (no secrets)
 

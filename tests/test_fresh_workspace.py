@@ -34,6 +34,8 @@ class TestFreshWorkspace(unittest.TestCase):
             "MEMORY.md",
             "ONBOARDING.md",
             "SOUL.md",
+            "SKILLS.md",
+            "TOOLS.md",
             "tako.toml",
             "resources/model-guide.md",
         )

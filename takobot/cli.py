@@ -17,6 +17,12 @@ from typing import Callable
 
 from . import __version__
 from . import dose
+from .capability_frontmatter import (
+    build_skills_inventory_excerpt,
+    build_tools_inventory_excerpt,
+    load_skills_frontmatter_excerpt,
+    load_tools_frontmatter_excerpt,
+)
 from .config import add_world_watch_sites, explain_tako_toml, load_tako_toml, set_workspace_name
 from .conversation import ConversationStore
 from .daily import append_daily_note, ensure_daily_log
@@ -1924,6 +1930,10 @@ async def _chat_reply(
     )
     memory_frontmatter = load_memory_frontmatter_excerpt(root=workspace_root, max_chars=1200)
     soul_excerpt = load_soul_excerpt(path=workspace_root / "SOUL.md", max_chars=1600)
+    skills_frontmatter = load_skills_frontmatter_excerpt(root=workspace_root, max_chars=1200)
+    tools_frontmatter = load_tools_frontmatter_excerpt(root=workspace_root, max_chars=1200)
+    skills_inventory = build_skills_inventory_excerpt(root=workspace_root, max_items=18, max_chars=1400)
+    tools_inventory = build_tools_inventory_excerpt(root=workspace_root, max_items=18, max_chars=1400)
     dose_state = dose.load(paths.state_dir / "dose.json")
     focus_profile = focus_profile_from_dose(dose_state)
     focus_summary = format_focus_summary(focus_profile)
@@ -1958,6 +1968,10 @@ async def _chat_reply(
         stage_tone=stage_tone,
         memory_frontmatter=memory_frontmatter,
         soul_excerpt=soul_excerpt,
+        skills_frontmatter=skills_frontmatter,
+        tools_frontmatter=tools_frontmatter,
+        skills_inventory=skills_inventory,
+        tools_inventory=tools_inventory,
         child_profile_context=child_profile_context,
         focus_summary=focus_summary,
         rag_context=rag_result.context,
@@ -2039,6 +2053,10 @@ def _chat_prompt(
     stage_tone: str = "",
     memory_frontmatter: str = "",
     soul_excerpt: str = "",
+    skills_frontmatter: str = "",
+    tools_frontmatter: str = "",
+    skills_inventory: str = "",
+    tools_inventory: str = "",
     child_profile_context: str = "",
     focus_summary: str = "",
     rag_context: str = "",
@@ -2054,6 +2072,10 @@ def _chat_prompt(
         objectives_line += f" | (+{len(objectives) - 4} more)"
     memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
     soul_block = (soul_excerpt or "").strip() or "SOUL.md unavailable."
+    skills_block = (skills_frontmatter or "").strip() or "SKILLS.md unavailable."
+    tools_block = (tools_frontmatter or "").strip() or "TOOLS.md unavailable."
+    skills_inventory_block = (skills_inventory or "").strip() or "No installed skills detected."
+    tools_inventory_block = (tools_inventory or "").strip() or "No installed tools detected."
     focus_line = " ".join((focus_summary or "").split()).strip() or "unknown"
     rag_block = (rag_context or "").strip() or "No semantic memory context."
     stage_line = life_stage.strip().lower() or "hatchling"
@@ -2104,6 +2126,14 @@ def _chat_prompt(
         f"operator_paired={paired}\n"
         "soul_identity_boundaries=\n"
         f"{soul_block}\n"
+        "skills_frontmatter=\n"
+        f"{skills_block}\n"
+        "tools_frontmatter=\n"
+        f"{tools_block}\n"
+        "skills_inventory=\n"
+        f"{skills_inventory_block}\n"
+        "tools_inventory=\n"
+        f"{tools_inventory_block}\n"
         "memory_frontmatter=\n"
         f"{memory_block}\n"
         f"focus_state={focus_line}\n"

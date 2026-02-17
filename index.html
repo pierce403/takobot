@@ -869,7 +869,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Outbound XMTP replies are mirrored into the local TUI transcript/activity feed for a unified conversation view.</li>
               <li>Mission objectives are formalized in <code>SOUL.md</code> (<code>## Mission Objectives</code>) and editable in-app via <code>mission show|set|add|clear</code>.</li>
               <li>Bubble stream now shows the active request focus and elapsed thinking/responding time for long responses.</li>
-              <li>Prompt context stack parity: local TUI and XMTP chat both include <code>SOUL.md</code> excerpt, <code>MEMORY.md</code> frontmatter, focus summary, semantic RAG context, and recent conversation history.</li>
+              <li>Prompt context stack parity: local TUI and XMTP chat both include <code>SOUL.md</code>/<code>SKILLS.md</code>/<code>TOOLS.md</code> excerpts, live capability inventories, <code>MEMORY.md</code> frontmatter, focus summary, semantic RAG context, and recent conversation history.</li>
               <li>Child-stage chat is less interrogative: it answers first, avoids asking which channel is in use, and applies profile-aware anti-repeat guidance for follow-up questions.</li>
               <li>Incremental <code>pi thinking</code> stream chunks are coalesced into one inline thinking line (instead of newline-per-token), while structural markers stay separate.</li>
               <li>During streamed inference, tool/research progress is surfaced as live "active work" in the Tasks panel (for example browsing/search/tool steps).</li>
@@ -936,6 +936,8 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 <a href="https://github.com/pierce403/takobot/blob/main/SOUL.md">SOUL</a>,
                 <a href="https://github.com/pierce403/takobot/blob/main/VISION.md">VISION</a>,
                 <a href="https://github.com/pierce403/takobot/blob/main/MEMORY.md">MEMORY</a>,
+                <a href="https://github.com/pierce403/takobot/blob/main/SKILLS.md">SKILLS</a>,
+                <a href="https://github.com/pierce403/takobot/blob/main/TOOLS.md">TOOLS</a>,
                 <a href="https://github.com/pierce403/takobot/blob/main/ONBOARDING.md">ONBOARDING</a>
               </li>
               <li>

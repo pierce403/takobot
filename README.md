@@ -40,7 +40,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
 - Runtime writes deterministic world notes under `memory/world/YYYY-MM-DD.md` and daily mission snapshots under `memory/world/mission-review/YYYY-MM-DD.md`
 - Focus-aware memory recall on every inference: DOSE emotional state drives how much semantic RAG context is pulled from `memory/` via `ragrep` (minimal context when focused, broader context when diffuse)
-- Prompt context stack parity across channels: local TUI chat and XMTP chat now both include `SOUL.md` excerpt, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history
+- Prompt context stack parity across channels: local TUI chat and XMTP chat now both include `SOUL.md`/`SKILLS.md`/`TOOLS.md` excerpts, live skills/tools inventories, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history
 - Effective thinking defaults are split by cognition lane: Type1 uses fast `minimal` thinking, Type2 uses deep `xhigh` thinking
 - Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
@@ -50,7 +50,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - XMTP daemon resilience: retries transient send failures and auto-rebuilds XMTP client sessions after repeated stream/poll failures
 - Local/XMTP chat prompts now enforce canonical identity naming from workspace/identity state, so self-introductions stay consistent after renames
 - Productivity engine v1: GTD + PARA folders (`tasks/`, `projects/`, `areas/`, `resources/`, `archives/`), daily outcomes, weekly review, progressive summaries
-- Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `ONBOARDING.md`)
+- Docs-first repo contract (`SOUL.md`, `VISION.md`, `MEMORY.md`, `SKILLS.md`, `TOOLS.md`, `ONBOARDING.md`)
 - OpenClaw-style docs tree in `docs/` (`start/`, `concepts/`, `reference/`)
 
 ## Docs
@@ -104,7 +104,7 @@ Productivity (GTD + PARA):
 
 Committed (git-tracked):
 
-- `SOUL.md`, `MEMORY.md`, `ONBOARDING.md`, `AGENTS.md`, `tako.toml`
+- `SOUL.md`, `MEMORY.md`, `SKILLS.md`, `TOOLS.md`, `ONBOARDING.md`, `AGENTS.md`, `tako.toml`
 - `FEATURES.md` (feature tracker)
 - `memory/dailies/YYYY-MM-DD.md` (daily logs)
 - `memory/world/` (`YYYY-MM-DD.md`, `model.md`, `entities.md`, `assumptions.md`)

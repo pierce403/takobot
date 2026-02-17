@@ -11,6 +11,8 @@ Required files (must exist):
 - `AGENTS.md` (this file)
 - `SOUL.md` (identity + boundaries; not memory)
 - `MEMORY.md` (canonical durable memory; long-lived facts only)
+- `SKILLS.md` (skill usage frontmatter + governance)
+- `TOOLS.md` (tool usage frontmatter + governance)
 - `DEPLOYMENT.md` (engine/workspace/runtime model)
 - `SECURITY_MODEL.md` (operator gates + extension security)
 - `VISION.md` (1-page invariants)
@@ -71,6 +73,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened:
 - Fix:
 - Prevention:
+
+### 2026-02-17 — Skills/tools frontmatter now participates in chat context stack
+
+- What happened: prompt context previously emphasized identity (`SOUL.md`) and memory (`MEMORY.md`) but lacked explicit capability-governance frontmatter, so skill/tool fallback behavior could drift.
+- Fix: added root `SKILLS.md` + `TOOLS.md`, added workspace templates for both, and wired local/XMTP chat prompts to include bounded excerpts plus live installed capability inventories from `skills/` and `tools/`.
+- Prevention: keep capability frontmatter files as required workspace contract docs and test prompt-context parity for both local and XMTP chat paths.
 
 ### 2026-02-17 — Child-stage chat now avoids repeated startup interrogation
 

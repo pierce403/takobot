@@ -28,6 +28,12 @@ from rich.markup import escape as escape_rich_markup
 from . import __version__
 from .cli import DEFAULT_ENV, RuntimeHooks, _doctor_report, _run_daemon
 from .conversation import ConversationStore
+from .capability_frontmatter import (
+    build_skills_inventory_excerpt,
+    build_tools_inventory_excerpt,
+    load_skills_frontmatter_excerpt,
+    load_tools_frontmatter_excerpt,
+)
 from .config import (
     TakoConfig,
     add_world_watch_sites,
@@ -4403,6 +4409,10 @@ class TakoTerminalApp(App[None]):
             )
         memory_frontmatter = load_memory_frontmatter_excerpt(root=repo_root(), max_chars=1200)
         soul_excerpt = load_soul_excerpt(path=repo_root() / "SOUL.md", max_chars=1600)
+        skills_frontmatter = load_skills_frontmatter_excerpt(root=repo_root(), max_chars=1200)
+        tools_frontmatter = load_tools_frontmatter_excerpt(root=repo_root(), max_chars=1200)
+        skills_inventory = build_skills_inventory_excerpt(root=repo_root(), max_items=18, max_chars=1400)
+        tools_inventory = build_tools_inventory_excerpt(root=repo_root(), max_items=18, max_chars=1400)
         focus_summary, rag_context = await self._collect_inference_rag_context(
             query=_build_memory_rag_query(text=text, mission_objectives=self.mission_objectives),
             scope="chat",
@@ -4425,6 +4435,10 @@ class TakoTerminalApp(App[None]):
             stage_tone=self.stage_policy.tone,
             memory_frontmatter=memory_frontmatter,
             soul_excerpt=soul_excerpt,
+            skills_frontmatter=skills_frontmatter,
+            tools_frontmatter=tools_frontmatter,
+            skills_inventory=skills_inventory,
+            tools_inventory=tools_inventory,
             child_profile_context=child_profile_context,
             focus_summary=focus_summary,
             rag_context=rag_context,
@@ -5779,6 +5793,10 @@ def _build_terminal_chat_prompt(
     stage_tone: str = "",
     memory_frontmatter: str = "",
     soul_excerpt: str = "",
+    skills_frontmatter: str = "",
+    tools_frontmatter: str = "",
+    skills_inventory: str = "",
+    tools_inventory: str = "",
     child_profile_context: str = "",
     focus_summary: str = "",
     rag_context: str = "",
@@ -5793,6 +5811,10 @@ def _build_terminal_chat_prompt(
         objectives_line += f" | (+{len(objectives) - 4} more)"
     memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
     soul_block = (soul_excerpt or "").strip() or "SOUL.md unavailable."
+    skills_block = (skills_frontmatter or "").strip() or "SKILLS.md unavailable."
+    tools_block = (tools_frontmatter or "").strip() or "TOOLS.md unavailable."
+    skills_inventory_block = (skills_inventory or "").strip() or "No installed skills detected."
+    tools_inventory_block = (tools_inventory or "").strip() or "No installed tools detected."
     focus_line = " ".join((focus_summary or "").split()).strip() or "unknown"
     rag_block = (rag_context or "").strip() or "No semantic memory context."
     stage_line = life_stage.strip().lower() or DEFAULT_LIFE_STAGE
@@ -5838,6 +5860,14 @@ def _build_terminal_chat_prompt(
         f"operator_paired={paired}\n"
         "soul_identity_boundaries=\n"
         f"{soul_block}\n"
+        "skills_frontmatter=\n"
+        f"{skills_block}\n"
+        "tools_frontmatter=\n"
+        f"{tools_block}\n"
+        "skills_inventory=\n"
+        f"{skills_inventory_block}\n"
+        "tools_inventory=\n"
+        f"{tools_inventory_block}\n"
         "memory_frontmatter=\n"
         f"{memory_block}\n"
         f"focus_state={focus_line}\n"

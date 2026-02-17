@@ -43,6 +43,8 @@ def _probe_docs_contract() -> bool:
         "SOUL.md",
         "VISION.md",
         "MEMORY.md",
+        "SKILLS.md",
+        "TOOLS.md",
         "ONBOARDING.md",
         "FEATURES.md",
         "index.html",

@@ -152,6 +152,10 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
         self.assertIn("soul_identity_boundaries=", prompt)
         self.assertIn("SOUL.md", prompt)
+        self.assertIn("skills_frontmatter=", prompt)
+        self.assertIn("tools_frontmatter=", prompt)
+        self.assertIn("skills_inventory=", prompt)
+        self.assertIn("tools_inventory=", prompt)
 
     def test_build_memory_rag_query_includes_mission_objective(self) -> None:
         query = _build_memory_rag_query(

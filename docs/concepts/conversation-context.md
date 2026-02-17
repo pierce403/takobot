@@ -38,18 +38,20 @@ For each model call:
 3. Apply a character budget tail trim (default: `8000` chars).
 4. Load a bounded excerpt of repo-root `MEMORY.md` (memory-system frontmatter spec).
 5. Load a bounded excerpt of repo-root `SOUL.md` (identity + boundaries).
-6. Compute a DOSE-derived focus profile (`focused`/`balanced`/`diffuse`) per inference call.
-7. Run semantic memory recall with `ragrep` over `memory/` and adapt recall breadth to focus:
+6. Load bounded excerpts of repo-root `SKILLS.md` and `TOOLS.md` (capability governance frontmatter).
+7. Build live capability snapshots from installed `skills/` and `tools/` directories.
+8. Compute a DOSE-derived focus profile (`focused`/`balanced`/`diffuse`) per inference call.
+9. Run semantic memory recall with `ragrep` over `memory/` and adapt recall breadth to focus:
    - focused: small recall set (minimal context)
    - diffuse: broad recall set (more context)
-8. Inject stage-aware behavior guidance (for example child-stage answer-first tone with anti-repeat follow-up constraints).
-9. Inject `SOUL.md` excerpt + memory frontmatter + focus summary + RAG memory context + formatted history block before `user_message=...`.
+10. Inject stage-aware behavior guidance (for example child-stage answer-first tone with anti-repeat follow-up constraints).
+11. Inject `SOUL.md` + `SKILLS.md` + `TOOLS.md` excerpts, capability inventories, memory frontmatter, focus summary, RAG memory context, and formatted history block before `user_message=...`.
 
 This mirrors OpenClaw’s “session transcript + bounded history window” pattern.
 
 ## Channel parity
 
-Local TUI and XMTP plain-text chat now share the same core context stack (SOUL, MEMORY frontmatter, focus, RAG, and bounded conversation history) to reduce behavior drift between channels.
+Local TUI and XMTP plain-text chat now share the same core context stack (`SOUL.md`, `SKILLS.md`, `TOOLS.md`, `MEMORY.md` frontmatter, capability inventories, focus, RAG, and bounded conversation history) to reduce behavior drift between channels.
 
 ## What is persisted
 

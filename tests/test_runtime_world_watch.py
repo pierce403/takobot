@@ -296,6 +296,51 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             daily_text = (daily_root / f"{today}.md").read_text(encoding="utf-8")
             self.assertIn(f"Manual explore requested: {selected_topic}.", daily_text)
 
+    def test_manual_explore_auto_topic_avoids_immediate_repeat(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_dir = root / ".tako" / "state"
+            memory_root = root / "memory"
+            daily_root = memory_root / "dailies"
+            world_dir = memory_root / "world"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            memory_root.mkdir(parents=True, exist_ok=True)
+            daily_root.mkdir(parents=True, exist_ok=True)
+            world_dir.mkdir(parents=True, exist_ok=True)
+
+            today = date.today().isoformat()
+            (world_dir / f"{today}.md").write_text(
+                "\n".join(
+                    [
+                        f"# World Notebook — {today}",
+                        "",
+                        f"## {today}",
+                        "- **[Oceanic chip policy update]** (Example News) — https://example.com/a",
+                        "- **[New autonomous robotics stack]** (Research Lab) — https://example.com/b",
+                        "- **[Use Protocols, Not Services]** (Essay) — https://example.com/c",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            runtime = Runtime(
+                event_bus=EventBus(state_dir / "events.jsonl"),
+                state_dir=state_dir,
+                memory_root=memory_root,
+                daily_log_root=daily_root,
+                sensors=[CountingSensor()],
+                heartbeat_interval_s=1.0,
+                heartbeat_jitter_ratio=0.0,
+                explore_interval_s=3600.0,
+                explore_jitter_ratio=0.0,
+                mission_objectives_getter=lambda: ["Maintain mission agility."],
+            )
+
+            first_topic, _ = asyncio.run(runtime.request_explore(""))
+            second_topic, _ = asyncio.run(runtime.request_explore(""))
+            self.assertNotEqual(first_topic, second_topic)
+
 
 if __name__ == "__main__":
     unittest.main()

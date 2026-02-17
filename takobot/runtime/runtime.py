@@ -91,6 +91,7 @@ class Runtime:
         self._last_idle_decay_at = 0.0
         self._last_boredom_explore_at = 0.0
         self._explore_lock = asyncio.Lock()
+        self._recent_auto_topics: list[str] = []
         self.last_explore_report: dict[str, Any] = {
             "trigger": "",
             "topic": "",
@@ -465,11 +466,24 @@ class Runtime:
         cleaned = _clean_value(topic)
         if cleaned:
             return cleaned
-        return _suggest_manual_explore_topic(
+        selected = _suggest_manual_explore_topic(
             world_dir=self._world_dir,
             day=date.today(),
             mission_objectives=self._mission_objectives(),
+            avoid_topics=self._recent_auto_topics[-3:],
         )
+        self._remember_auto_topic(selected)
+        return selected
+
+    def _remember_auto_topic(self, topic: str) -> None:
+        cleaned = _clean_value(topic)
+        if not cleaned:
+            return
+        lowered = cleaned.casefold()
+        self._recent_auto_topics = [item for item in self._recent_auto_topics if item.casefold() != lowered]
+        self._recent_auto_topics.append(cleaned)
+        if len(self._recent_auto_topics) > 12:
+            self._recent_auto_topics = self._recent_auto_topics[-12:]
 
     def _track_errors(self, event: dict[str, Any]) -> None:
         severity = str(event.get("severity", "info")).lower()
@@ -751,20 +765,53 @@ def _mission_status(*, new_world_count: int, repeated_errors: list[str], objecti
     return "unknown"
 
 
-def _suggest_manual_explore_topic(*, world_dir: Path, day: date, mission_objectives: list[str]) -> str:
-    titles = _world_titles_for_day(world_dir / f"{day.isoformat()}.md")
+def _suggest_manual_explore_topic(
+    *,
+    world_dir: Path,
+    day: date,
+    mission_objectives: list[str],
+    avoid_topics: list[str] | tuple[str, ...] | None = None,
+) -> str:
+    titles = _world_titles_for_day(world_dir / f"{day.isoformat()}.md", max_titles=6)
     objective = _clean_value(mission_objectives[0]) if mission_objectives else ""
+    candidates: list[str] = []
+
     if len(titles) >= 2:
+        for idx, left in enumerate(titles):
+            for right in titles[idx + 1 :]:
+                if objective:
+                    candidates.append(f"How `{left}` and `{right}` connect to `{objective}`")
+                else:
+                    candidates.append(f"How `{left}` and `{right}` connect")
+    for title in titles:
         if objective:
-            return f"How `{titles[0]}` and `{titles[1]}` connect to `{objective}`"
-        return f"How `{titles[0]}` and `{titles[1]}` connect"
-    if len(titles) == 1:
-        if objective:
-            return f"Deeper implications of `{titles[0]}` for `{objective}`"
-        return f"Deeper implications of `{titles[0]}`"
+            candidates.append(f"Deeper implications of `{title}` for `{objective}`")
+        else:
+            candidates.append(f"Deeper implications of `{title}`")
     if objective:
-        return f"Fresh external signals that could affect `{objective}`"
-    return "A novel external signal with possible mission impact"
+        candidates.append(f"Fresh external signals that could affect `{objective}`")
+    candidates.append("A novel external signal with possible mission impact")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        cleaned = _clean_value(candidate)
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cleaned)
+    if not deduped:
+        return "A novel external signal with possible mission impact"
+
+    avoid = {str(value).casefold() for value in (avoid_topics or ()) if _clean_value(value)}
+    for candidate in deduped:
+        if candidate.casefold() in avoid:
+            continue
+        return candidate
+    return deduped[0]
 
 
 def _world_titles_for_day(path: Path, *, max_titles: int = 3) -> list[str]:

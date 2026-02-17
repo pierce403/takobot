@@ -13,6 +13,7 @@ from takobot.inference import (
     InferenceRuntime,
     InferenceProviderStatus,
     InferenceSettings,
+    PI_PROMPT_MAX_LINE_CHARS,
     _stream_pi,
     _codex_oauth_credential_from_auth,
     _ensure_workspace_pi_auth,
@@ -29,6 +30,7 @@ from takobot.inference import (
     load_inference_settings,
     prepare_pi_login_plan,
     resolve_pi_model_profile,
+    run_inference_prompt_with_fallback,
     set_inference_api_key,
     set_inference_ollama_host,
     set_inference_ollama_model,
@@ -166,6 +168,31 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertIn("command:", logged)
         self.assertIn("--print", logged)
         self.assertIn("stderr_tail:", logged)
+
+    def test_run_pi_wraps_oversized_prompt_lines(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        long_line = "x" * (PI_PROMPT_MAX_LINE_CHARS + 250)
+        with (
+            patch("takobot.inference._safe_help_text", return_value=""),
+            patch(
+                "takobot.inference.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+            ) as run_mock,
+        ):
+            output = _run_pi(runtime, long_line, env={}, timeout_s=10.0)
+
+        self.assertEqual("ok", output)
+        called_cmd = run_mock.call_args.args[0]
+        prepared_prompt = called_cmd[-1]
+        self.assertIn("\n", prepared_prompt)
+        self.assertTrue(all(len(line) <= PI_PROMPT_MAX_LINE_CHARS for line in prepared_prompt.splitlines()))
 
     def test_detect_pi_requires_node_runtime_for_ready(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -490,3 +517,66 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertTrue(any(kind == "model" and "gpt-5.3-codex" in payload for kind, payload in events))
         self.assertTrue(any(kind == "status" and "pi thinking:" in payload for kind, payload in events))
         self.assertTrue(any(kind == "delta" and "Hello there" in payload for kind, payload in events))
+
+    def test_stream_pi_reports_prompt_guard_status_when_wrapping(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        events: list[tuple[str, str]] = []
+        long_line = "y" * (PI_PROMPT_MAX_LINE_CHARS + 180)
+
+        async def fake_run_streaming_process(cmd, *, provider, env, timeout_s, on_stdout_line, on_stderr_line):
+            prepared_prompt = cmd[-1]
+            self.assertIn("\n", prepared_prompt)
+            self.assertTrue(all(len(line) <= PI_PROMPT_MAX_LINE_CHARS for line in prepared_prompt.splitlines()))
+            on_stdout_line(
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "wrapped"}],
+                        },
+                    }
+                )
+            )
+
+        with patch("takobot.inference._run_streaming_process", side_effect=fake_run_streaming_process):
+            output = asyncio.run(
+                _stream_pi(
+                    runtime,
+                    long_line,
+                    env={},
+                    timeout_s=10.0,
+                    on_event=lambda kind, payload: events.append((kind, payload)),
+                )
+            )
+
+        self.assertEqual("wrapped", output)
+        self.assertTrue(any(kind == "status" and "pi prompt guard: wrapped" in payload for kind, payload in events))
+
+    def test_run_fallback_logs_unexpected_provider_exception(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        with (
+            patch("takobot.inference._run_with_provider", side_effect=RuntimeError("unexpected boom")),
+            patch("takobot.inference._append_inference_error_log", return_value=Path("/tmp/error.log")) as append_mock,
+        ):
+            with self.assertRaises(RuntimeError):
+                run_inference_prompt_with_fallback(runtime, "hello", timeout_s=5.0)
+
+        self.assertGreaterEqual(append_mock.call_count, 1)
+        kwargs = append_mock.call_args.kwargs
+        self.assertEqual("pi", kwargs.get("provider"))
+        self.assertEqual(["pi", "<internal-exception>"], kwargs.get("command"))

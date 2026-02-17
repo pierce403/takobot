@@ -44,6 +44,11 @@ Takobot runs pi in non-interactive inference mode:
 
 Tooling remains available in pi runtime; Takobot does not pass `--no-tools/--no-skills/--no-extensions`.
 
+Before invoking pi, Takobot now applies a prompt safety guard:
+
+- wraps oversized single lines to avoid downstream splitter chunk-limit failures
+- trims over-budget prompts from the middle (preserving beginning + latest tail context)
+
 ## Auth sources
 
 Readiness checks include:
@@ -69,3 +74,4 @@ For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.
 - `inference auth` reports persisted API keys (masked) plus detected pi OAuth providers.
 - `doctor` auto-repairs workspace-local pi runtime/auth first, then runs offline probes and recent inference error scan.
 - Command-level inference failures (including invoked command and stderr/stdout tails) are written to `.tako/logs/error.log`.
+- Unexpected provider exceptions are also appended to `.tako/logs/error.log` with traceback context, so diagnostics still exist even when failures occur before subprocess error handling.

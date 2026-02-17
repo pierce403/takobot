@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import traceback
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +60,11 @@ CONFIGURABLE_API_KEY_VARS = tuple(
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 PI_TYPE1_THINKING_DEFAULT = "minimal"
 PI_TYPE2_THINKING_DEFAULT = "xhigh"
+PI_PROMPT_MAX_LINE_CHARS = 320
+PI_PROMPT_MAX_CHARS = 80_000
+PI_PROMPT_TRUNCATION_MARKER = "\n[... prompt truncated for pi runtime safety ...]\n"
+INFERENCE_LOG_MAX_COMMAND_CHARS = 1000
+INFERENCE_LOG_MAX_ARG_CHARS = 180
 _PI_HELP_TEXT_CACHE: dict[str, str] = {}
 
 StreamEventHook = Callable[[str, str], None]
@@ -602,6 +608,7 @@ def run_inference_prompt_with_fallback(
             text = _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking)
             return provider, text
         except Exception as exc:  # noqa: BLE001
+            _log_unexpected_provider_exception(provider=provider, exc=exc, phase="run")
             failures.append(f"{provider}: {_summarize_error_text(str(exc))}")
 
     detail = "; ".join(failures) if failures else "all provider attempts failed"
@@ -647,6 +654,7 @@ async def stream_inference_prompt_with_fallback(
             )
             return provider, text
         except Exception as exc:  # noqa: BLE001
+            _log_unexpected_provider_exception(provider=provider, exc=exc, phase="stream")
             failures.append(f"{provider}: {_summarize_error_text(str(exc))}")
             if on_event:
                 on_event("status", f"{provider} failed: {_summarize_error_text(str(exc))}")
@@ -1460,7 +1468,7 @@ def _append_inference_error_log(
 ) -> Path:
     log_path = inference_error_log_path()
     stamp = datetime.now(tz=timezone.utc).isoformat()
-    cmd_text = shlex.join(command)
+    cmd_text = _summarize_command_for_log(command)
     stdout_clean = stdout_text.strip()
     stderr_clean = stderr_text.strip()
     lines = [
@@ -1501,7 +1509,7 @@ def _raise_inference_command_failure(
         timeout_s=timeout_s,
         phase=phase,
     )
-    cmd_text = shlex.join(command)
+    cmd_text = _summarize_command_for_log(command)
     summary = _summarize_error_text(detail)
     raise RuntimeError(f"{provider} inference failed: {summary} (cmd: {cmd_text}; log: {log_path})")
 
@@ -1637,13 +1645,14 @@ async def _stream_pi(
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
+    prepared_prompt, prompt_notes = _prepare_prompt_for_pi(prompt)
     cmd = [
         cli,
         "--mode",
         "json",
         "--no-session",
         *_pi_cli_thinking_args(cli, thinking),
-        prompt,
+        prepared_prompt,
     ]
 
     stderr_lines: list[str] = []
@@ -1669,6 +1678,9 @@ async def _stream_pi(
             return
         if on_event:
             on_event("task", cleaned)
+
+    for note in prompt_notes:
+        emit_status(note)
 
     def maybe_emit_model(payload: dict[str, Any]) -> None:
         nonlocal emitted_model
@@ -2365,6 +2377,120 @@ def _summarize_error_text(text: str) -> str:
     return f"{value[:217]}..."
 
 
+def _prepare_prompt_for_pi(prompt: str) -> tuple[str, list[str]]:
+    text = (prompt or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    if not lines:
+        return "", []
+
+    wrapped_lines: list[str] = []
+    wrapped_count = 0
+    for line in lines:
+        chunks = _wrap_prompt_line(line, max_chars=PI_PROMPT_MAX_LINE_CHARS)
+        if len(chunks) > 1:
+            wrapped_count += 1
+        wrapped_lines.extend(chunks)
+
+    normalized = "\n".join(wrapped_lines).strip()
+    notes: list[str] = []
+    if wrapped_count:
+        notes.append(f"pi prompt guard: wrapped {wrapped_count} oversized lines")
+
+    if len(normalized) > PI_PROMPT_MAX_CHARS:
+        original_chars = len(normalized)
+        normalized = _trim_prompt_middle(
+            normalized,
+            max_chars=PI_PROMPT_MAX_CHARS,
+            marker=PI_PROMPT_TRUNCATION_MARKER,
+        )
+        notes.append(
+            f"pi prompt guard: trimmed prompt from {original_chars} to {len(normalized)} chars"
+        )
+
+    return normalized, notes
+
+
+def _wrap_prompt_line(line: str, *, max_chars: int) -> list[str]:
+    if max_chars <= 0:
+        return [line]
+    if len(line) <= max_chars:
+        return [line]
+
+    chunks: list[str] = []
+    cursor = 0
+    while cursor < len(line):
+        end = min(len(line), cursor + max_chars)
+        if end >= len(line):
+            part = line[cursor:]
+            chunks.append(part)
+            break
+
+        split_at = line.rfind(" ", cursor + max(8, max_chars // 3), end + 1)
+        if split_at <= cursor:
+            split_at = end
+        part = line[cursor:split_at].rstrip()
+        if not part:
+            part = line[cursor:end]
+            split_at = end
+        chunks.append(part)
+        cursor = split_at
+        while cursor < len(line) and line[cursor] == " ":
+            cursor += 1
+
+    return chunks if chunks else [line]
+
+
+def _trim_prompt_middle(text: str, *, max_chars: int, marker: str) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    marker_text = marker if len(marker) < max_chars else marker[: max(0, max_chars - 1)]
+    if not marker_text:
+        return text[:max_chars]
+
+    remaining = max_chars - len(marker_text)
+    if remaining <= 0:
+        return marker_text[:max_chars]
+
+    head = int(remaining * 0.6)
+    tail = remaining - head
+    prefix = text[:head].rstrip()
+    suffix = text[-tail:].lstrip() if tail > 0 else ""
+    candidate = f"{prefix}{marker_text}{suffix}".strip()
+    if len(candidate) <= max_chars:
+        return candidate
+    return candidate[:max_chars]
+
+
+def _summarize_command_for_log(command: list[str]) -> str:
+    shortened: list[str] = []
+    for arg in command:
+        value = str(arg)
+        if len(value) > INFERENCE_LOG_MAX_ARG_CHARS:
+            value = f"{value[: INFERENCE_LOG_MAX_ARG_CHARS - 3]}..."
+        shortened.append(value)
+
+    cmd_text = shlex.join(shortened)
+    if len(cmd_text) <= INFERENCE_LOG_MAX_COMMAND_CHARS:
+        return cmd_text
+    return f"{cmd_text[: INFERENCE_LOG_MAX_COMMAND_CHARS - 3]}..."
+
+
+def _log_unexpected_provider_exception(*, provider: str, exc: Exception, phase: str) -> None:
+    summary = _summarize_error_text(str(exc) or exc.__class__.__name__)
+    if " log: " in summary and "cmd:" in summary:
+        return
+    with contextlib.suppress(Exception):
+        _append_inference_error_log(
+            provider=provider,
+            command=[provider, "<internal-exception>"],
+            detail=f"unexpected inference exception: {summary}",
+            stderr_text=traceback.format_exc(),
+            phase=phase,
+        )
+
+
 def _run_pi(
     runtime: InferenceRuntime,
     prompt: str,
@@ -2375,6 +2501,7 @@ def _run_pi(
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
+    prepared_prompt, _prompt_notes = _prepare_prompt_for_pi(prompt)
     cmd = [
         cli,
         "--print",
@@ -2382,7 +2509,7 @@ def _run_pi(
         "text",
         "--no-session",
         *_pi_cli_thinking_args(cli, thinking),
-        prompt,
+        prepared_prompt,
     ]
     try:
         proc = subprocess.run(

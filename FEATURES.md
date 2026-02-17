@@ -158,6 +158,8 @@
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
   - `models` command reports effective Type1/Type2 pi model/thinking plan (Type1 fast/minimal, Type2 deep/xhigh) plus the last streamed model seen in TUI.
   - Inference command failures write detailed diagnostics (invoked command + output tails) to `.tako/logs/error.log`.
+  - Pi prompt input is preflighted before invocation: oversized lines are wrapped and overly large prompts are trimmed to avoid splitter chunk-limit crashes.
+  - Unexpected provider exceptions (before subprocess failure handling) are appended to `.tako/logs/error.log` with traceback context.
   - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.
   - Shows a stage-specific top-right ASCII octopus panel in the sidebar, including Takobot version, life-stage tone, and compact DOSE indicators.

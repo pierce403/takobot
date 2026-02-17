@@ -22,7 +22,7 @@ Common commands:
 - `install`, `review pending`, `enable`, `draft`, `extensions`
 - `safe on`, `safe off`
 - `inference login` starts an assisted pi login workflow. When prompts appear, answer with `inference login answer <text>` or cancel with `inference login cancel`.
-- `models` now reports resolved Type1/Type2 pi model + thinking configuration (from pi settings) and the last streamed model observed in TUI.
+- `models` reports the effective Type1/Type2 pi model plan and the last streamed model observed in TUI. Defaults are tuned for split cognition: Type1 fast (`minimal`), Type2 deep (`xhigh`).
 - Type `/` in the input box to open the slash-command dropdown under the input field.
 - Press `Tab` in the input box to autocomplete command names (and cycle candidates).
 - Asking purpose info questions (for example, `what is your purpose?`) returns the current purpose text; purpose updates still require explicit replacement wording.

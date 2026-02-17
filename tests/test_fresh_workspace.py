@@ -29,7 +29,14 @@ class TestFreshWorkspace(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_materialize_workspace_contract_and_idempotency(self) -> None:
-        required_files = ("AGENTS.md", "MEMORY.md", "ONBOARDING.md", "SOUL.md", "tako.toml")
+        required_files = (
+            "AGENTS.md",
+            "MEMORY.md",
+            "ONBOARDING.md",
+            "SOUL.md",
+            "tako.toml",
+            "resources/model-guide.md",
+        )
         required_dirs = (
             "archives",
             "areas",

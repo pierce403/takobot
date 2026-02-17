@@ -8,19 +8,15 @@ title: "Inference Providers"
 
 # Inference Providers
 
-Takobot discovers provider runtimes at startup and keeps ordered fallback.
+Takobot discovers runtime/auth status for multiple providers, but executes inference through pi runtime only.
 
 ## Provider order
 
-Current priority:
+Execution priority:
 
-1. `pi`
-2. `ollama`
-3. `codex`
-4. `claude`
-5. `gemini`
+1. `pi` (required for inference calls)
 
-The first ready provider is selected; failures fall through to the next ready provider.
+Other providers (`ollama`, `codex`, `claude`, `gemini`) are discovery/auth diagnostics only.
 
 ## pi runtime path (OpenClaw-style)
 
@@ -42,11 +38,11 @@ Takobot runs pi in non-interactive inference mode:
 - `--print`
 - `--mode text`
 - `--no-session`
-- `--no-tools`
-- `--no-extensions`
-- `--no-skills`
+- thinking level is set per context when supported by the installed pi CLI:
+  - Type1 calls default to `minimal` thinking
+  - Type2 calls default to `xhigh` thinking
 
-This keeps responses deterministic and prevents unintended tool-side effects.
+Tooling remains available in pi runtime; Takobot does not pass `--no-tools/--no-skills/--no-extensions`.
 
 ## Auth sources
 
@@ -72,3 +68,4 @@ For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.
 - `inference` command in TUI reports selected provider and readiness.
 - `inference auth` reports persisted API keys (masked) plus detected pi OAuth providers.
 - `doctor` auto-repairs workspace-local pi runtime/auth first, then runs offline probes and recent inference error scan.
+- Command-level inference failures (including invoked command and stderr/stdout tails) are written to `.tako/logs/error.log`.

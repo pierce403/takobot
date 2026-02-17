@@ -39,6 +39,7 @@
   - If Node/npm are missing, bootstraps workspace-local `nvm` + Node under `.tako/nvm` and keeps npm cache under `.tako/npm-cache`.
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
+  - First-run templates include `resources/model-guide.md` so operators have a baseline model-family/thinking tuning reference.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
   - Launches `.venv/bin/takobot` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
   - Falls back to `.venv/bin/takobot run` (stdout CLI daemon mode) when no interactive TTY is available.
@@ -148,7 +149,8 @@
   - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid stalled pi-runtime turns.
   - When inference is unavailable, local chat returns a clear diagnostics-mode message with immediate repair guidance instead of ambiguous status text.
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
-  - `models` command reports Type1/Type2 pi model/thinking plan from resolved pi settings plus the last streamed model seen in TUI.
+  - `models` command reports effective Type1/Type2 pi model/thinking plan (Type1 fast/minimal, Type2 deep/xhigh) plus the last streamed model seen in TUI.
+  - Inference command failures write detailed diagnostics (invoked command + output tails) to `.tako/logs/error.log`.
   - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.
   - Shows a stage-specific top-right ASCII octopus panel in the sidebar, including Takobot version, life-stage tone, and compact DOSE indicators.
@@ -176,7 +178,7 @@
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
   - [x] Runtime can report pi/ollama/codex/claude/gemini discovery and readiness via `inference` command.
   - [x] Pi JSON stream events are surfaced to TUI stream status/task lines during local chat inference.
-  - [x] `models` command includes resolved type1/type2 model configuration details (not only provider readiness).
+  - [x] `models` command includes effective type1/type2 model configuration details (not only provider readiness), with fast-vs-deep split visible.
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.

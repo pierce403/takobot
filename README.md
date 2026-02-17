@@ -10,6 +10,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`) and auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
+- Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
@@ -38,6 +39,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
 - Runtime writes deterministic world notes under `memory/world/YYYY-MM-DD.md` and daily mission snapshots under `memory/world/mission-review/YYYY-MM-DD.md`
 - Focus-aware memory recall on every inference: DOSE emotional state drives how much semantic RAG context is pulled from `memory/` via `ragrep` (minimal context when focused, broader context when diffuse)
+- Effective thinking defaults are split by cognition lane: Type1 uses fast `minimal` thinking, Type2 uses deep `xhigh` thinking
 - Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
@@ -127,6 +129,7 @@ Runtime-only (ignored):
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
 - Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing, bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
+- Seeds a baseline model tuning guide at `resources/model-guide.md`.
 - Initializes git (if available) and commits the initial workspace.
 - If initial git commit is blocked by missing identity, bootstrap sets repo-local fallback identity from `workspace.name` (email format: `<name>.tako.eth@xmtp.mx`) and retries.
 - Ensures a git-ignored `code/` directory exists for temporary repo clones/code work.

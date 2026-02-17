@@ -22,6 +22,7 @@ from .daily import append_daily_note, ensure_daily_log
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import (
+    PI_TYPE2_THINKING_DEFAULT,
     CONFIGURABLE_API_KEY_VARS,
     SUPPORTED_PROVIDER_PREFERENCES,
     InferenceRuntime,
@@ -30,6 +31,7 @@ from .inference import (
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_runtime_lines,
+    inference_error_log_path,
     prepare_pi_login_plan,
     run_inference_prompt_with_fallback,
     set_inference_api_key,
@@ -1188,7 +1190,12 @@ async def _handle_incoming_message(
         infer = None
         if inference_runtime.ready:
             def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
-                return run_inference_prompt_with_fallback(inference_runtime, prompt, timeout_s=timeout_s)
+                return run_inference_prompt_with_fallback(
+                    inference_runtime,
+                    prompt,
+                    timeout_s=timeout_s,
+                    thinking=PI_TYPE2_THINKING_DEFAULT,
+                )
             infer = _infer
         result = await asyncio.to_thread(
             prod_summarize.compress_daily_log,
@@ -1212,7 +1219,12 @@ async def _handle_incoming_message(
         infer = None
         if inference_runtime.ready:
             def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
-                return run_inference_prompt_with_fallback(inference_runtime, prompt, timeout_s=timeout_s)
+                return run_inference_prompt_with_fallback(
+                    inference_runtime,
+                    prompt,
+                    timeout_s=timeout_s,
+                    thinking=PI_TYPE2_THINKING_DEFAULT,
+                )
             infer = _infer
         report, provider, _err = prod_weekly.weekly_review_with_inference(review, infer=infer)
         append_daily_note(daily_root(), today, "Weekly review run via XMTP.")
@@ -1872,7 +1884,11 @@ async def _chat_reply(
             explained = f"{explained}\n\nwarning: {warn}"
         return explained
 
-    fallback = _fallback_chat_reply(is_operator=is_operator, operator_paired=operator_paired)
+    fallback = _fallback_chat_reply(
+        is_operator=is_operator,
+        operator_paired=operator_paired,
+        error_log_path=str(inference_error_log_path()),
+    )
     if not inference_runtime.ready:
         return fallback
 
@@ -1897,16 +1913,41 @@ async def _chat_reply(
         life_stage=life_stage,
         stage_tone=stage_tone,
     )
-    try:
-        provider, reply = await asyncio.to_thread(
+    async def _infer_once() -> tuple[str, str]:
+        return await asyncio.to_thread(
             run_inference_prompt_with_fallback,
             inference_runtime,
             prompt,
             timeout_s=CHAT_INFERENCE_TIMEOUT_S,
         )
+
+    try:
+        provider, reply = await _infer_once()
     except Exception as exc:  # noqa: BLE001
-        _emit_runtime_log(f"inference chat fallback: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
-        return fallback
+        first_error = _summarize_stream_error(exc)
+        _emit_runtime_log(f"inference chat failed: {first_error}", level="warn", hooks=hooks)
+        repair_notes = await asyncio.to_thread(auto_repair_inference_runtime)
+        for note in repair_notes[:4]:
+            _emit_runtime_log(f"inference repair: {note}", level="info", hooks=hooks)
+        _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+        if not inference_runtime.ready:
+            return _fallback_chat_reply(
+                is_operator=is_operator,
+                operator_paired=operator_paired,
+                last_error=first_error,
+                error_log_path=str(inference_error_log_path()),
+            )
+        try:
+            provider, reply = await _infer_once()
+        except Exception as retry_exc:  # noqa: BLE001
+            retry_error = _summarize_stream_error(retry_exc)
+            _emit_runtime_log(f"inference chat fallback: {retry_error}", level="warn", hooks=hooks)
+            return _fallback_chat_reply(
+                is_operator=is_operator,
+                operator_paired=operator_paired,
+                last_error=retry_error,
+                error_log_path=str(inference_error_log_path()),
+            )
 
     cleaned = _clean_chat_reply(reply)
     if not cleaned:
@@ -1976,9 +2017,25 @@ def _chat_prompt(
     )
 
 
-def _fallback_chat_reply(*, is_operator: bool, operator_paired: bool) -> str:
+def _fallback_chat_reply(
+    *,
+    is_operator: bool,
+    operator_paired: bool,
+    last_error: str = "",
+    error_log_path: str = "",
+) -> str:
+    cleaned_error = " ".join((last_error or "").split()).strip()
+    cleaned_log = " ".join((error_log_path or "").split()).strip()
     if is_operator:
-        return "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. Inference is unavailable right now, so I'm replying in fallback mode."
+        message = (
+            "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. "
+            "Inference is unavailable right now, so I'm replying in fallback mode."
+        )
+        if cleaned_error:
+            message += f" Last inference error: {cleaned_error}."
+        if cleaned_log:
+            message += f" Detailed command logs: {cleaned_log}."
+        return message
     if operator_paired:
         return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
     return "Happy to chat. This instance is not paired yet; run `.venv/bin/takobot` locally to set the operator channel."

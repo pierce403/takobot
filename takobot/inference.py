@@ -57,6 +57,9 @@ CONFIGURABLE_API_KEY_VARS = tuple(
     )
 )
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+PI_TYPE1_THINKING_DEFAULT = "minimal"
+PI_TYPE2_THINKING_DEFAULT = "xhigh"
+_PI_HELP_TEXT_CACHE: dict[str, str] = {}
 
 StreamEventHook = Callable[[str, str], None]
 
@@ -553,7 +556,13 @@ def persist_inference_runtime(path: Path, runtime: InferenceRuntime) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def run_inference_prompt(runtime: InferenceRuntime, prompt: str, *, timeout_s: float = 70.0) -> str:
+def run_inference_prompt(
+    runtime: InferenceRuntime,
+    prompt: str,
+    *,
+    timeout_s: float = 70.0,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
+) -> str:
     provider = runtime.selected_provider
     if not provider:
         raise RuntimeError("no inference provider selected")
@@ -561,7 +570,7 @@ def run_inference_prompt(runtime: InferenceRuntime, prompt: str, *, timeout_s: f
     if not status or not status.ready:
         raise RuntimeError("selected inference provider is not ready")
 
-    return _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s)
+    return _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking)
 
 
 def run_inference_prompt_with_fallback(
@@ -569,6 +578,7 @@ def run_inference_prompt_with_fallback(
     prompt: str,
     *,
     timeout_s: float = 70.0,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
 ) -> tuple[str, str]:
     order: list[str] = []
     if runtime.selected_provider:
@@ -589,7 +599,7 @@ def run_inference_prompt_with_fallback(
     failures: list[str] = []
     for provider in order:
         try:
-            text = _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s)
+            text = _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking)
             return provider, text
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{provider}: {_summarize_error_text(str(exc))}")
@@ -604,6 +614,7 @@ async def stream_inference_prompt_with_fallback(
     *,
     timeout_s: float = 70.0,
     on_event: StreamEventHook | None = None,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
 ) -> tuple[str, str]:
     order: list[str] = []
     if runtime.selected_provider:
@@ -626,7 +637,14 @@ async def stream_inference_prompt_with_fallback(
         if on_event:
             on_event("provider", provider)
         try:
-            text = await _stream_with_provider(runtime, provider, prompt, timeout_s=timeout_s, on_event=on_event)
+            text = await _stream_with_provider(
+                runtime,
+                provider,
+                prompt,
+                timeout_s=timeout_s,
+                on_event=on_event,
+                thinking=thinking,
+            )
             return provider, text
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{provider}: {_summarize_error_text(str(exc))}")
@@ -698,11 +716,24 @@ def resolve_pi_model_profile() -> PiModelProfile:
     )
 
 
-def format_pi_model_plan_lines(*, type2_thinking_default: str = "") -> list[str]:
+def _effective_pi_type1_thinking(value: str = "") -> str:
+    return _clean_thinking_setting(value) or PI_TYPE1_THINKING_DEFAULT
+
+
+def _effective_pi_type2_thinking(value: str = "") -> str:
+    return _clean_thinking_setting(value) or PI_TYPE2_THINKING_DEFAULT
+
+
+def format_pi_model_plan_lines(
+    *,
+    type1_thinking_default: str = PI_TYPE1_THINKING_DEFAULT,
+    type2_thinking_default: str = PI_TYPE2_THINKING_DEFAULT,
+) -> list[str]:
     profile = resolve_pi_model_profile()
     model = profile.model or "(auto-select)"
-    type1_thinking = profile.thinking or "medium"
-    type2_thinking = _clean_thinking_setting(type2_thinking_default) or type1_thinking
+    type1_thinking = _effective_pi_type1_thinking(type1_thinking_default)
+    type2_thinking = _effective_pi_type2_thinking(type2_thinking_default)
+    configured_thinking = _clean_thinking_setting(profile.thinking) or "medium"
 
     lines = [
         "pi model plan:",
@@ -710,6 +741,7 @@ def format_pi_model_plan_lines(*, type2_thinking_default: str = "") -> list[str]
         f"- type1 thinking: {type1_thinking}",
         f"- type2 model: {model}",
         f"- type2 thinking: {type2_thinking}",
+        f"- configured base thinking: {configured_thinking}",
     ]
     if profile.model_source:
         lines.append(f"- model source: {profile.model_source}")
@@ -1393,6 +1425,9 @@ def _run_gemini(prompt: str, *, env: dict[str, str], timeout_s: float) -> str:
 
 
 def _safe_help_text(command: str) -> str:
+    cached = _PI_HELP_TEXT_CACHE.get(command)
+    if cached is not None:
+        return cached
     try:
         proc = subprocess.run(
             [command, "--help"],
@@ -1402,8 +1437,73 @@ def _safe_help_text(command: str) -> str:
             timeout=6.0,
         )
     except Exception:
+        _PI_HELP_TEXT_CACHE[command] = ""
         return ""
-    return f"{proc.stdout}\n{proc.stderr}".strip()
+    merged = f"{proc.stdout}\n{proc.stderr}".strip()
+    _PI_HELP_TEXT_CACHE[command] = merged
+    return merged
+
+
+def inference_error_log_path() -> Path:
+    return ensure_runtime_dirs(runtime_paths()).logs_dir / "error.log"
+
+
+def _append_inference_error_log(
+    *,
+    provider: str,
+    command: list[str],
+    detail: str,
+    stdout_text: str = "",
+    stderr_text: str = "",
+    timeout_s: float | None = None,
+    phase: str = "run",
+) -> Path:
+    log_path = inference_error_log_path()
+    stamp = datetime.now(tz=timezone.utc).isoformat()
+    cmd_text = shlex.join(command)
+    stdout_clean = stdout_text.strip()
+    stderr_clean = stderr_text.strip()
+    lines = [
+        f"{stamp} provider={provider} phase={phase}",
+        f"command: {cmd_text}",
+        f"detail: {_summarize_error_text(detail)}",
+    ]
+    if timeout_s is not None:
+        lines.append(f"timeout_s: {timeout_s:.1f}")
+    if stdout_clean:
+        lines.append("stdout_tail:")
+        lines.append(stdout_clean[-4000:])
+    if stderr_clean:
+        lines.append("stderr_tail:")
+        lines.append(stderr_clean[-4000:])
+    lines.append("")
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    return log_path
+
+
+def _raise_inference_command_failure(
+    *,
+    provider: str,
+    command: list[str],
+    detail: str,
+    stdout_text: str = "",
+    stderr_text: str = "",
+    timeout_s: float | None = None,
+    phase: str = "run",
+) -> None:
+    log_path = _append_inference_error_log(
+        provider=provider,
+        command=command,
+        detail=detail,
+        stdout_text=stdout_text,
+        stderr_text=stderr_text,
+        timeout_s=timeout_s,
+        phase=phase,
+    )
+    cmd_text = shlex.join(command)
+    summary = _summarize_error_text(detail)
+    raise RuntimeError(f"{provider} inference failed: {summary} (cmd: {cmd_text}; log: {log_path})")
 
 
 def _list_ollama_models(command: str, *, env: Mapping[str, str]) -> list[str]:
@@ -1475,10 +1575,17 @@ def _tilde_path(path: Path) -> str:
         return str(path)
 
 
-def _run_with_provider(runtime: InferenceRuntime, provider: str, prompt: str, *, timeout_s: float) -> str:
+def _run_with_provider(
+    runtime: InferenceRuntime,
+    provider: str,
+    prompt: str,
+    *,
+    timeout_s: float,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
+) -> str:
     env = _provider_env(runtime, provider)
     if provider == "pi":
-        return _run_pi(runtime, prompt, env=env, timeout_s=timeout_s)
+        return _run_pi(runtime, prompt, env=env, timeout_s=timeout_s, thinking=thinking)
     if provider == "ollama":
         return _run_ollama(runtime, prompt, env=env, timeout_s=timeout_s)
     if provider == "codex":
@@ -1497,11 +1604,12 @@ async def _stream_with_provider(
     *,
     timeout_s: float,
     on_event: StreamEventHook | None,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
 ) -> str:
     env = _provider_env(runtime, provider)
 
     if provider == "pi":
-        return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event)
+        return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event, thinking=thinking)
     if provider == "ollama":
         text = await asyncio.to_thread(_run_ollama, runtime, prompt, env=env, timeout_s=timeout_s)
         await _simulate_stream(text, on_event=on_event)
@@ -1525,6 +1633,7 @@ async def _stream_pi(
     env: dict[str, str],
     timeout_s: float,
     on_event: StreamEventHook | None,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
@@ -1533,6 +1642,7 @@ async def _stream_pi(
         "--mode",
         "json",
         "--no-session",
+        *_pi_cli_thinking_args(cli, thinking),
         prompt,
     ]
 
@@ -1699,6 +1809,7 @@ async def _stream_pi(
 
     await _run_streaming_process(
         cmd,
+        provider="pi",
         env=env,
         timeout_s=timeout_s,
         on_stdout_line=handle_stdout_line,
@@ -1708,7 +1819,14 @@ async def _stream_pi(
     text = (final_text or "".join(text_chunks)).strip()
     if not text:
         detail = "; ".join(stderr_lines[-5:]) if stderr_lines else "no assistant output received"
-        raise RuntimeError(f"pi inference returned no assistant output: {detail}")
+        _raise_inference_command_failure(
+            provider="pi",
+            command=cmd,
+            detail=f"pi inference returned no assistant output: {detail}",
+            stderr_text="\n".join(stderr_lines[-20:]),
+            timeout_s=timeout_s,
+            phase="stream",
+        )
     return text
 
 
@@ -1786,7 +1904,14 @@ async def _stream_gemini(
             if on_event:
                 on_event("status", stripped)
 
-    await _run_streaming_process(cmd, env=env, timeout_s=timeout_s, on_stdout_line=handle_stdout_line, on_stderr_line=handle_stderr_line)
+    await _run_streaming_process(
+        cmd,
+        provider="gemini",
+        env=env,
+        timeout_s=timeout_s,
+        on_stdout_line=handle_stdout_line,
+        on_stderr_line=handle_stderr_line,
+    )
 
     if not assistant_text:
         detail = "; ".join(stderr_lines[-5:]) if stderr_lines else "no assistant output received"
@@ -1888,7 +2013,14 @@ async def _stream_codex(
             if on_event:
                 on_event("status", stripped)
 
-    await _run_streaming_process(cmd, env=env, timeout_s=timeout_s, on_stdout_line=handle_stdout_line, on_stderr_line=handle_stderr_line)
+    await _run_streaming_process(
+        cmd,
+        provider="codex",
+        env=env,
+        timeout_s=timeout_s,
+        on_stdout_line=handle_stdout_line,
+        on_stderr_line=handle_stderr_line,
+    )
 
     combined = "\n\n".join(msg.strip() for msg in final_messages if msg.strip())
     if not combined:
@@ -2140,6 +2272,18 @@ def _clean_thinking_setting(value: Any) -> str:
     return ""
 
 
+def _pi_cli_thinking_args(cli: str, thinking: str) -> list[str]:
+    level = _clean_thinking_setting(thinking)
+    if not level:
+        return []
+    help_text = _safe_help_text(cli).lower()
+    if "--thinking-level" in help_text:
+        return ["--thinking-level", level]
+    if "--thinking" in help_text:
+        return ["--thinking", level]
+    return []
+
+
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
 
@@ -2147,6 +2291,7 @@ def _yes_no(value: bool) -> str:
 async def _run_streaming_process(
     cmd: list[str],
     *,
+    provider: str,
     env: dict[str, str],
     timeout_s: float,
     on_stdout_line: Callable[[str], None],
@@ -2162,22 +2307,38 @@ async def _run_streaming_process(
     assert proc.stdout is not None
     assert proc.stderr is not None
 
-    async def pump(stream: asyncio.StreamReader, handler: Callable[[str], None]) -> None:
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    async def pump(stream: asyncio.StreamReader, handler: Callable[[str], None], sink: list[str]) -> None:
         while True:
             raw = await stream.readline()
             if not raw:
                 return
-            handler(raw.decode("utf-8", errors="replace").rstrip("\n"))
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if line:
+                sink.append(line)
+                if len(sink) > 80:
+                    sink.pop(0)
+            handler(line)
 
-    stdout_task = asyncio.create_task(pump(proc.stdout, on_stdout_line))
-    stderr_task = asyncio.create_task(pump(proc.stderr, on_stderr_line))
+    stdout_task = asyncio.create_task(pump(proc.stdout, on_stdout_line, stdout_lines))
+    stderr_task = asyncio.create_task(pump(proc.stderr, on_stderr_line, stderr_lines))
 
     try:
         await asyncio.wait_for(asyncio.gather(stdout_task, stderr_task, proc.wait()), timeout=timeout_s)
-    except asyncio.TimeoutError as exc:
+    except asyncio.TimeoutError:
         with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        raise RuntimeError(f"inference subprocess timed out after {timeout_s:.0f}s") from exc
+        _raise_inference_command_failure(
+            provider=provider,
+            command=cmd,
+            detail=f"inference subprocess timed out after {timeout_s:.0f}s",
+            stdout_text="\n".join(stdout_lines[-20:]),
+            stderr_text="\n".join(stderr_lines[-20:]),
+            timeout_s=timeout_s,
+            phase="stream",
+        )
     finally:
         if proc.returncode is None:
             with contextlib.suppress(ProcessLookupError):
@@ -2186,7 +2347,15 @@ async def _run_streaming_process(
             await proc.wait()
 
     if proc.returncode != 0:
-        raise RuntimeError(f"inference subprocess failed: exit={proc.returncode}")
+        _raise_inference_command_failure(
+            provider=provider,
+            command=cmd,
+            detail=f"inference subprocess failed: exit={proc.returncode}",
+            stdout_text="\n".join(stdout_lines[-20:]),
+            stderr_text="\n".join(stderr_lines[-20:]),
+            timeout_s=timeout_s,
+            phase="stream",
+        )
 
 
 def _summarize_error_text(text: str) -> str:
@@ -2196,7 +2365,14 @@ def _summarize_error_text(text: str) -> str:
     return f"{value[:217]}..."
 
 
-def _run_pi(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], timeout_s: float) -> str:
+def _run_pi(
+    runtime: InferenceRuntime,
+    prompt: str,
+    *,
+    env: dict[str, str],
+    timeout_s: float,
+    thinking: str = PI_TYPE1_THINKING_DEFAULT,
+) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
     cmd = [
@@ -2205,20 +2381,50 @@ def _run_pi(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], time
         "--mode",
         "text",
         "--no-session",
+        *_pi_cli_thinking_args(cli, thinking),
         prompt,
     ]
-    proc = subprocess.run(
-        cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=timeout_s,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout_text = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr_text = exc.stderr if isinstance(exc.stderr, str) else ""
+        _raise_inference_command_failure(
+            provider="pi",
+            command=cmd,
+            detail=f"pi inference timed out after {timeout_s:.0f}s",
+            stdout_text=stdout_text,
+            stderr_text=stderr_text,
+            timeout_s=timeout_s,
+            phase="sync",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _raise_inference_command_failure(
+            provider="pi",
+            command=cmd,
+            detail=f"pi subprocess spawn failed: {exc}",
+            timeout_s=timeout_s,
+            phase="sync",
+        )
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
     detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
-    raise RuntimeError(f"pi inference failed: {detail}")
+    _raise_inference_command_failure(
+        provider="pi",
+        command=cmd,
+        detail=detail,
+        stdout_text=proc.stdout,
+        stderr_text=proc.stderr,
+        timeout_s=timeout_s,
+        phase="sync",
+    )
 
 
 def _run_ollama(runtime: InferenceRuntime, prompt: str, *, env: dict[str, str], timeout_s: float) -> str:

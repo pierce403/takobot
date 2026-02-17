@@ -37,6 +37,7 @@ What bootstrap does:
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
 - Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.
+- First-run templates include `resources/model-guide.md` for model family and thinking-level tuning.
 
 ## Core checks
 
@@ -44,5 +45,6 @@ What bootstrap does:
 - `tako.sh` is installed with the package as a shell wrapper; in deployed environments it dispatches to the installed `takobot`.
 - Memory notes are written under `memory/` (world-watch notebook under `memory/world/`).
 - Pi chat turn summaries are visible in logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`).
+- Inference command failures are logged to `.tako/logs/error.log` with invoked command + stderr/stdout tails.
 - `takobot doctor` reports local/offline diagnostics.
 - `takobot run` starts daemon mode directly.

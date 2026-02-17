@@ -247,11 +247,13 @@ class TestAppCommands(unittest.TestCase):
             operator_paired=True,
             runtime=None,
             last_error="inference timed out",
+            error_log_path=".tako/logs/error.log",
         )
         self.assertIn("Inference is unavailable right now", message)
         self.assertIn("Chat remains available here and over XMTP.", message)
         self.assertIn("Run `doctor` to auto-repair runtime/auth.", message)
         self.assertIn("Last inference error: inference timed out.", message)
+        self.assertIn("Detailed command errors are logged at: .tako/logs/error.log.", message)
 
 
 if __name__ == "__main__":

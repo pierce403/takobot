@@ -116,10 +116,13 @@ class TestInferencePiRuntime(unittest.TestCase):
             selected_key_source="oauth",
             _api_keys={},
         )
-        with patch(
-            "takobot.inference.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout="ok", stderr=""),
-        ) as run_mock:
+        with (
+            patch("takobot.inference._safe_help_text", return_value="usage: pi --thinking-level <level>"),
+            patch(
+                "takobot.inference.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+            ) as run_mock,
+        ):
             output = _run_pi(runtime, "hello world", env={}, timeout_s=10.0)
 
         self.assertEqual("ok", output)
@@ -127,9 +130,42 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertIn("--print", called_cmd)
         self.assertIn("--mode", called_cmd)
         self.assertIn("--no-session", called_cmd)
+        self.assertIn("--thinking-level", called_cmd)
+        self.assertIn("minimal", called_cmd)
         self.assertNotIn("--no-tools", called_cmd)
         self.assertNotIn("--no-extensions", called_cmd)
         self.assertNotIn("--no-skills", called_cmd)
+
+    def test_run_pi_failure_writes_error_log_with_command_details(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        with TemporaryDirectory() as tmp:
+            error_log = Path(tmp) / "error.log"
+            with (
+                patch("takobot.inference._safe_help_text", return_value=""),
+                patch(
+                    "takobot.inference.subprocess.run",
+                    return_value=SimpleNamespace(returncode=1, stdout="", stderr="pi exploded"),
+                ),
+                patch("takobot.inference.inference_error_log_path", return_value=error_log),
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    _run_pi(runtime, "hello world", env={}, timeout_s=10.0)
+            self.assertTrue(error_log.exists())
+            logged = error_log.read_text(encoding="utf-8")
+
+        self.assertIn("cmd:", str(ctx.exception))
+        self.assertIn("log:", str(ctx.exception))
+        self.assertIn("provider=pi", logged)
+        self.assertIn("command:", logged)
+        self.assertIn("--print", logged)
+        self.assertIn("stderr_tail:", logged)
 
     def test_detect_pi_requires_node_runtime_for_ready(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -388,8 +424,9 @@ class TestInferencePiRuntime(unittest.TestCase):
         rendered = "\n".join(lines)
         self.assertIn("type1 model: openai/gpt-5.3-codex", rendered)
         self.assertIn("type2 model: openai/gpt-5.3-codex", rendered)
-        self.assertIn("type1 thinking: medium", rendered)
+        self.assertIn("type1 thinking: minimal", rendered)
         self.assertIn("type2 thinking: high", rendered)
+        self.assertIn("configured base thinking: medium", rendered)
 
     def test_stream_pi_emits_model_thinking_and_delta_events(self) -> None:
         runtime = InferenceRuntime(
@@ -402,9 +439,10 @@ class TestInferencePiRuntime(unittest.TestCase):
         )
         events: list[tuple[str, str]] = []
 
-        async def fake_run_streaming_process(cmd, *, env, timeout_s, on_stdout_line, on_stderr_line):
+        async def fake_run_streaming_process(cmd, *, provider, env, timeout_s, on_stdout_line, on_stderr_line):
             self.assertIn("--mode", cmd)
             self.assertIn("json", cmd)
+            self.assertEqual("pi", provider)
             on_stdout_line(
                 json.dumps(
                     {

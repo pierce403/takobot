@@ -42,16 +42,20 @@ from . import dose
 from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import (
+    PI_TYPE1_THINKING_DEFAULT,
+    PI_TYPE2_THINKING_DEFAULT,
     PROVIDER_PRIORITY,
     CONFIGURABLE_API_KEY_VARS,
     SUPPORTED_PROVIDER_PREFERENCES,
     InferenceRuntime,
+    auto_repair_inference_runtime,
     build_pi_login_env,
     clear_inference_api_key,
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_pi_model_plan_lines,
     format_runtime_lines,
+    inference_error_log_path,
     prepare_pi_login_plan,
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
@@ -1524,6 +1528,7 @@ class TakoTerminalApp(App[None]):
                     self.inference_runtime,
                     prompt,
                     timeout_s=_type2_inference_timeout(depth),
+                    thinking=PI_TYPE2_THINKING_DEFAULT,
                 )
                 cleaned = _sanitize_for_display(model_output).strip()
                 if cleaned:
@@ -2979,7 +2984,12 @@ class TakoTerminalApp(App[None]):
                 if pi_status.note:
                     lines.append(f"pi note: {pi_status.note}")
             lines.append("")
-            lines.extend(format_pi_model_plan_lines())
+            lines.extend(
+                format_pi_model_plan_lines(
+                    type1_thinking_default=PI_TYPE1_THINKING_DEFAULT,
+                    type2_thinking_default=PI_TYPE2_THINKING_DEFAULT,
+                )
+            )
             if self.stream_model and self.stream_model != "auto":
                 lines.append(f"- last streamed model (type1): {self.stream_model}")
             lines.append("")
@@ -3338,7 +3348,12 @@ class TakoTerminalApp(App[None]):
             infer = None
             if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
                 def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
-                    return run_inference_prompt_with_fallback(self.inference_runtime, prompt, timeout_s=timeout_s)
+                    return run_inference_prompt_with_fallback(
+                        self.inference_runtime,
+                        prompt,
+                        timeout_s=timeout_s,
+                        thinking=PI_TYPE2_THINKING_DEFAULT,
+                    )
                 infer = _infer
 
             self._add_activity("inference", "compress daily log (Type2)")
@@ -3398,7 +3413,12 @@ class TakoTerminalApp(App[None]):
             infer = None
             if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
                 def _infer(prompt: str, timeout_s: float) -> tuple[str, str]:
-                    return run_inference_prompt_with_fallback(self.inference_runtime, prompt, timeout_s=timeout_s)
+                    return run_inference_prompt_with_fallback(
+                        self.inference_runtime,
+                        prompt,
+                        timeout_s=timeout_s,
+                        thinking=PI_TYPE2_THINKING_DEFAULT,
+                    )
                 infer = _infer
             report, provider, err = prod_weekly.weekly_review_with_inference(review, infer=infer)
 
@@ -4342,6 +4362,7 @@ class TakoTerminalApp(App[None]):
             operator_paired=self.operator_paired,
             runtime=self.inference_runtime,
             last_error=self.inference_last_error,
+            error_log_path=str(inference_error_log_path()),
         )
 
         if self.inference_runtime is None or not self.inference_runtime.ready:
@@ -4349,11 +4370,15 @@ class TakoTerminalApp(App[None]):
             if (now - self.inference_recovery_last_attempt_at) >= INFERENCE_RECOVERY_COOLDOWN_S:
                 self.inference_recovery_last_attempt_at = now
                 self._add_activity("inference", "runtime unavailable; attempting auto-repair")
+                repair_notes = await asyncio.to_thread(auto_repair_inference_runtime)
+                for note in repair_notes[:3]:
+                    self._add_activity("inference", f"repair: {note}")
                 self._initialize_inference_runtime()
                 fallback = _local_chat_unavailable_message(
                     operator_paired=self.operator_paired,
                     runtime=self.inference_runtime,
                     last_error=self.inference_last_error,
+                    error_log_path=str(inference_error_log_path()),
                 )
             if self.inference_runtime is None or not self.inference_runtime.ready:
                 return fallback
@@ -4409,50 +4434,77 @@ class TakoTerminalApp(App[None]):
         started_at = time.monotonic()
         watchdog_stop = asyncio.Event()
         watchdog_task = asyncio.create_task(self._inference_watchdog_loop(watchdog_stop), name="tako-inference-watchdog")
+        repair_attempted = False
+        provider = ""
+        reply = ""
 
         try:
-            provider, reply = await asyncio.wait_for(
-                stream_inference_prompt_with_fallback(
-                    self.inference_runtime,
-                    prompt,
-                    timeout_s=LOCAL_CHAT_TIMEOUT_S,
-                    on_event=self._on_inference_stream_event,
-                ),
-                timeout=LOCAL_CHAT_TOTAL_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            self.inference_last_error = f"inference timed out after {int(LOCAL_CHAT_TOTAL_TIMEOUT_S)}s"
-            self._append_app_log("inference", f"chat-timeout {self.inference_last_error}")
-            self._on_inference_stream_event("status", f"debug: {self.inference_last_error}")
-            self._record_event(
-                "inference.chat.timeout",
-                f"Terminal chat inference timed out after {int(LOCAL_CHAT_TOTAL_TIMEOUT_S)}s.",
-                severity="warn",
-                source="inference",
-            )
-            self._add_activity("inference", f"chat timeout: {self.inference_last_error}")
-            self._stream_clear()
-            return _local_chat_unavailable_message(
-                operator_paired=self.operator_paired,
-                runtime=self.inference_runtime,
-                last_error=self.inference_last_error,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.inference_last_error = _summarize_error(exc)
-            self._append_app_log("inference", f"chat-error {self.inference_last_error}")
-            self._record_event(
-                "inference.chat.error",
-                f"Terminal chat inference failed: {exc}",
-                severity="warn",
-                source="inference",
-            )
-            self._add_activity("inference", f"chat inference fallback: {self.inference_last_error}")
-            self._stream_clear()
-            return _local_chat_unavailable_message(
-                operator_paired=self.operator_paired,
-                runtime=self.inference_runtime,
-                last_error=self.inference_last_error,
-            )
+            while True:
+                try:
+                    provider, reply = await asyncio.wait_for(
+                        stream_inference_prompt_with_fallback(
+                            self.inference_runtime,
+                            prompt,
+                            timeout_s=LOCAL_CHAT_TIMEOUT_S,
+                            on_event=self._on_inference_stream_event,
+                            thinking=PI_TYPE1_THINKING_DEFAULT,
+                        ),
+                        timeout=LOCAL_CHAT_TOTAL_TIMEOUT_S,
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    self.inference_last_error = f"inference timed out after {int(LOCAL_CHAT_TOTAL_TIMEOUT_S)}s"
+                    self._append_app_log("inference", f"chat-timeout {self.inference_last_error}")
+                    self._on_inference_stream_event("status", f"debug: {self.inference_last_error}")
+                    self._record_event(
+                        "inference.chat.timeout",
+                        f"Terminal chat inference timed out after {int(LOCAL_CHAT_TOTAL_TIMEOUT_S)}s.",
+                        severity="warn",
+                        source="inference",
+                    )
+                    self._add_activity("inference", f"chat timeout: {self.inference_last_error}")
+                    self._stream_clear()
+                    return _local_chat_unavailable_message(
+                        operator_paired=self.operator_paired,
+                        runtime=self.inference_runtime,
+                        last_error=self.inference_last_error,
+                        error_log_path=str(inference_error_log_path()),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.inference_last_error = _summarize_error(exc)
+                    self._append_app_log("inference", f"chat-error {self.inference_last_error}")
+                    self._record_event(
+                        "inference.chat.error",
+                        f"Terminal chat inference failed: {exc}",
+                        severity="warn",
+                        source="inference",
+                    )
+                    self._add_activity("inference", f"chat inference failure: {self.inference_last_error}")
+
+                    now = time.monotonic()
+                    can_attempt_repair = (
+                        not repair_attempted
+                        and (now - self.inference_recovery_last_attempt_at) >= INFERENCE_RECOVERY_COOLDOWN_S
+                    )
+                    if can_attempt_repair:
+                        repair_attempted = True
+                        self.inference_recovery_last_attempt_at = now
+                        self._add_activity("inference", "chat failed; running auto-repair before fallback")
+                        repair_notes = await asyncio.to_thread(auto_repair_inference_runtime)
+                        for note in repair_notes[:4]:
+                            self._on_inference_stream_event("status", f"repair: {note}")
+                        self._initialize_inference_runtime()
+                        if self.inference_runtime is not None and self.inference_runtime.ready:
+                            self._on_inference_stream_event("status", "repair complete; retrying inference")
+                            continue
+
+                    self._stream_clear()
+                    return _local_chat_unavailable_message(
+                        operator_paired=self.operator_paired,
+                        runtime=self.inference_runtime,
+                        last_error=self.inference_last_error,
+                        error_log_path=str(inference_error_log_path()),
+                    )
         finally:
             watchdog_stop.set()
             watchdog_task.cancel()
@@ -5801,6 +5853,7 @@ def _local_chat_unavailable_message(
     operator_paired: bool,
     runtime: InferenceRuntime | None,
     last_error: str = "",
+    error_log_path: str = "",
 ) -> str:
     if operator_paired:
         control_surfaces = (
@@ -5821,6 +5874,9 @@ def _local_chat_unavailable_message(
     cleaned_error = " ".join((last_error or "").split()).strip()
     if cleaned_error:
         message += f" Last inference error: {cleaned_error}."
+    cleaned_log_path = " ".join((error_log_path or "").split()).strip()
+    if cleaned_log_path:
+        message += f" Detailed command errors are logged at: {cleaned_log_path}."
     return message
 
 

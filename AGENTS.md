@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-17 — Inference now splits fast Type1 vs deep Type2, logs pi command failures, and seeds model guide
+
+- What happened: model plan/defaults could show medium thinking for both Type1 and Type2, pi invocation failures often collapsed into generic fallback messaging, and fresh workspaces lacked a baseline model tuning reference.
+- Fix: inference defaults now enforce Type1=`minimal` and Type2=`xhigh`; local/XMTP chat attempts auto-repair and retry before fallback; command-level inference failures now append provider/command/stdout/stderr diagnostics to `.tako/logs/error.log`; workspace templates now ship `resources/model-guide.md`.
+- Prevention: keep thinking-profile defaults explicit per cognition lane, persist full subprocess diagnostics for every inference command failure, and ship operator-facing tuning guidance with first-run templates.
+
 ### 2026-02-17 — Explore completion copy now follows stage/mood persona
 
 - What happened: `/explore` completion messages always used the fixed prefix "I just learned something exciting," which felt canned regardless of stage or mood.

@@ -9,3 +9,4 @@ Conventions:
 - Prefer small Markdown files over large docs.
 - Link resources back to related projects/tasks when useful.
 - Deterministic world-watch notes now live under `memory/world/`.
+- `model-guide.md` is a baseline reference for tuning model family/thinking speed once Takobot is running.

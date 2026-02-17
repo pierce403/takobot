@@ -825,6 +825,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
               <li>Uses XMTP typing indicators for outbound replies when supported by the installed XMTP SDK/runtime.</li>
               <li>Persists chat sessions in <code>.tako/state/conversations/</code> (<code>sessions.json</code> + per-session JSONL transcripts) and injects recent history into inference prompts.</li>
+              <li>Checks DOSE-derived focus on every inference and runs <code>ragrep</code> semantic recall over <code>memory/</code> with adaptive breadth (focused: minimal context, diffuse: broader context) using runtime-local index state in <code>.tako/state/ragrep-memory.db</code>.</li>
               <li>
                 Maintains an open-loops index at <code>.tako/state/open_loops.json</code> (unfinished tasks + onboarding prompts) and shows it in the sidebar.
               </li>

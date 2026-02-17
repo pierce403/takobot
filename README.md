@@ -37,6 +37,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - XMTP outbound replies are mirrored into the local TUI transcript/activity feed so remote conversations stay visible in one place
 - Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
 - Runtime writes deterministic world notes under `memory/world/YYYY-MM-DD.md` and daily mission snapshots under `memory/world/mission-review/YYYY-MM-DD.md`
+- Focus-aware memory recall on every inference: DOSE emotional state drives how much semantic RAG context is pulled from `memory/` via `ragrep` (minimal context when focused, broader context when diffuse)
 - Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
@@ -196,4 +197,5 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Transcript view is now selectable (read-only text area), so mouse highlight/copy works directly in compatible terminals.
 - Input box supports shell-style history recall (`↑` / `↓`) for previously submitted local messages.
 - Web reads are fetched with the built-in `web` tool and logged into the daily notes stream for traceability.
+- Semantic memory recall uses `ragrep` when installed (`ragrep` CLI); index state is runtime-only at `.tako/state/ragrep-memory.db`.
 - XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).

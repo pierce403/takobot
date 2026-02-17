@@ -7,6 +7,7 @@ from takobot.app import (
     _active_work_summary,
     _activity_text,
     _build_terminal_chat_prompt,
+    _build_memory_rag_query,
     _canonical_identity_name,
     _command_completion_context,
     _command_completion_matches,
@@ -52,6 +53,8 @@ class TestAppCommands(unittest.TestCase):
         self.assertTrue(_looks_like_local_command("mission set keep things safe; stay curious"))
         self.assertTrue(_looks_like_local_command("upgrade check"))
         self.assertTrue(_looks_like_local_command("dose o 0.4"))
+        self.assertTrue(_looks_like_local_command("explore"))
+        self.assertTrue(_looks_like_local_command("explore ocean biodiversity"))
         self.assertTrue(_looks_like_local_command("/"))
 
     def test_slash_command_matches_lists_new_commands(self) -> None:
@@ -61,6 +64,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("/models", commands)
         self.assertIn("/upgrade", commands)
         self.assertIn("/stats", commands)
+        self.assertIn("/explore", commands)
 
         dose_items = _slash_command_matches("dose")
         self.assertTrue(any(command == "/dose" for command, _summary in dose_items))
@@ -82,6 +86,8 @@ class TestAppCommands(unittest.TestCase):
         plain = _command_completion_matches("sta", slash=False)
         self.assertIn("status", plain)
         self.assertIn("stats", plain)
+        plain_explore = _command_completion_matches("ex", slash=False)
+        self.assertIn("explore", plain_explore)
 
         slash = _command_completion_matches("up", slash=True)
         self.assertIn("update", slash)
@@ -141,6 +147,14 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("Mission objectives: Keep outcomes clear | Stay curious", prompt)
         self.assertIn("Operator control surfaces: terminal app and paired XMTP channel.", prompt)
         self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
+
+    def test_build_memory_rag_query_includes_mission_objective(self) -> None:
+        query = _build_memory_rag_query(
+            text="what changed with policy today?",
+            mission_objectives=["Keep mission alignment strong.", "Maintain operator trust."],
+        )
+        self.assertIn("what changed with policy today?", query)
+        self.assertIn("Keep mission alignment strong.", query)
 
     def test_local_input_queue_count_includes_active_processing(self) -> None:
         app = TakoTerminalApp(interval=5.0)

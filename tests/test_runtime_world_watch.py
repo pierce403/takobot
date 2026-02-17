@@ -52,6 +52,17 @@ class CountingSensor:
         return []
 
 
+class MissionObjectiveCaptureSensor:
+    name = "capture"
+
+    def __init__(self) -> None:
+        self.last_mission_objectives: tuple[str, ...] = ()
+
+    async def tick(self, ctx) -> list[dict[str, object]]:
+        self.last_mission_objectives = tuple(ctx.mission_objectives)
+        return []
+
+
 class TestRuntimeWorldWatch(unittest.TestCase):
     def test_runtime_writes_world_notebook_mission_review_and_briefing(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -169,6 +180,114 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             self.assertIn("dose.bored.idle", event_types)
             self.assertIn("dose.bored.explore", event_types)
             self.assertGreaterEqual(sensor.ticks, 2)
+
+    def test_manual_explore_command_uses_topic_and_emits_events(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_dir = root / ".tako" / "state"
+            memory_root = root / "memory"
+            daily_root = memory_root / "dailies"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            memory_root.mkdir(parents=True, exist_ok=True)
+            daily_root.mkdir(parents=True, exist_ok=True)
+
+            event_bus = EventBus(state_dir / "events.jsonl")
+            sensor = MissionObjectiveCaptureSensor()
+            runtime = Runtime(
+                event_bus=event_bus,
+                state_dir=state_dir,
+                memory_root=memory_root,
+                daily_log_root=daily_root,
+                sensors=[sensor],
+                heartbeat_interval_s=1.0,
+                heartbeat_jitter_ratio=0.0,
+                explore_interval_s=3600.0,
+                explore_jitter_ratio=0.0,
+                mission_objectives_getter=lambda: ["Track mission-relevant shifts."],
+            )
+
+            selected_topic, new_world_count = asyncio.run(runtime.request_explore("  decentralized identity trends  "))
+            self.assertEqual("decentralized identity trends", selected_topic)
+            self.assertEqual(0, new_world_count)
+            self.assertEqual("Exploration focus: decentralized identity trends", sensor.last_mission_objectives[0])
+            self.assertIn("Track mission-relevant shifts.", sensor.last_mission_objectives)
+
+            today = date.today().isoformat()
+            daily_path = daily_root / f"{today}.md"
+            self.assertTrue(daily_path.exists())
+            daily_text = daily_path.read_text(encoding="utf-8")
+            self.assertIn("Manual explore requested: decentralized identity trends.", daily_text)
+
+            events = [
+                json.loads(line)
+                for line in (state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            event_types = [str(event.get("type", "")) for event in events]
+            self.assertIn("runtime.explore.manual.requested", event_types)
+            self.assertIn("runtime.explore.manual.completed", event_types)
+            requested = next(event for event in events if event.get("type") == "runtime.explore.manual.requested")
+            completed = next(event for event in events if event.get("type") == "runtime.explore.manual.completed")
+            self.assertEqual("decentralized identity trends", requested.get("metadata", {}).get("topic"))
+            self.assertEqual(0, completed.get("metadata", {}).get("new_world_items"))
+
+    def test_manual_explore_without_topic_suggests_from_today_world_notes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_dir = root / ".tako" / "state"
+            memory_root = root / "memory"
+            daily_root = memory_root / "dailies"
+            world_dir = memory_root / "world"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            memory_root.mkdir(parents=True, exist_ok=True)
+            daily_root.mkdir(parents=True, exist_ok=True)
+            world_dir.mkdir(parents=True, exist_ok=True)
+
+            today = date.today().isoformat()
+            (world_dir / f"{today}.md").write_text(
+                "\n".join(
+                    [
+                        f"# World Notebook — {today}",
+                        "",
+                        f"## {today}",
+                        "- **[Oceanic chip policy update]** (Example News) — https://example.com/a",
+                        "  - Why it matters: supply dynamics",
+                        "  - Possible mission relevance: planning",
+                        "  - Questions:",
+                        "    - how does this change priorities?",
+                        "- **[New autonomous robotics stack]** (Research Lab) — https://example.com/b",
+                        "  - Why it matters: capability shift",
+                        "  - Possible mission relevance: execution speed",
+                        "  - Questions:",
+                        "    - what is production readiness?",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            event_bus = EventBus(state_dir / "events.jsonl")
+            runtime = Runtime(
+                event_bus=event_bus,
+                state_dir=state_dir,
+                memory_root=memory_root,
+                daily_log_root=daily_root,
+                sensors=[CountingSensor()],
+                heartbeat_interval_s=1.0,
+                heartbeat_jitter_ratio=0.0,
+                explore_interval_s=3600.0,
+                explore_jitter_ratio=0.0,
+                mission_objectives_getter=lambda: ["Maintain mission agility."],
+            )
+
+            selected_topic, new_world_count = asyncio.run(runtime.request_explore(""))
+            self.assertEqual(0, new_world_count)
+            self.assertIn("Oceanic chip policy update", selected_topic)
+            self.assertIn("New autonomous robotics stack", selected_topic)
+            self.assertIn("Maintain mission agility.", selected_topic)
+
+            daily_text = (daily_root / f"{today}.md").read_text(encoding="utf-8")
+            self.assertIn(f"Manual explore requested: {selected_topic}.", daily_text)
 
 
 if __name__ == "__main__":

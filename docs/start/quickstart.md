@@ -33,6 +33,7 @@ What bootstrap does:
 - In `child` stage chat, Tako asks lightweight context questions first (who/where/what you do), records notes in `memory/people/operator.md`, and can add your favorite websites to `[world_watch].sites`.
 - In `child` stage, world learning includes random curiosity crawls across Reddit, Hacker News, and Wikipedia with mission-linked questions.
 - If runtime stays idle, boredom cues lower emotional indicators and trigger autonomous exploration to seek novelty.
+- Inference uses focus-aware memory recall: emotional focus level controls `ragrep` retrieval breadth from `memory/` (narrow when focused, broad when diffuse).
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
 - Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.

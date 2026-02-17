@@ -150,6 +150,26 @@ class Runtime:
             metadata={"chars": len(cleaned), "preview": cleaned[:120]},
         )
 
+    async def request_explore(self, topic: str = "") -> tuple[str, int]:
+        selected_topic = self._resolve_manual_explore_topic(topic)
+        today = date.today()
+        append_daily_note(self.daily_log_root, today, f"Manual explore requested: {selected_topic}.")
+        self.event_bus.publish_event(
+            "runtime.explore.manual.requested",
+            "Manual exploration requested.",
+            source="runtime",
+            metadata={"topic": selected_topic},
+        )
+        self._emit_activity("explore", f"manual request: {selected_topic}")
+        new_world_count = await self._run_exploration_tick(trigger="manual", topic=selected_topic)
+        self.event_bus.publish_event(
+            "runtime.explore.manual.completed",
+            "Manual exploration completed.",
+            source="runtime",
+            metadata={"topic": selected_topic, "new_world_items": int(new_world_count)},
+        )
+        return selected_topic, int(new_world_count)
+
     async def _heartbeat_loop(self) -> None:
         while True:
             self.heartbeat_ticks += 1
@@ -169,17 +189,20 @@ class Runtime:
     async def _explore_loop(self) -> None:
         while True:
             with contextlib.suppress(Exception):
-                await self._run_exploration_tick(trigger="cadence")
+                await self._run_exploration_tick(trigger="cadence", topic="")
             await asyncio.sleep(_with_jitter(self.explore_interval_s, self.explore_jitter_ratio))
 
-    async def _run_exploration_tick(self, *, trigger: str) -> None:
+    async def _run_exploration_tick(self, *, trigger: str, topic: str) -> int:
         async with self._explore_lock:
             self.explore_ticks += 1
             self.last_explore_at = time.monotonic()
             today = date.today()
             ensure_daily_log(self.daily_log_root, today)
             _ensure_world_memory_scaffold(self._world_dir)
+            topic_focus = _clean_value(topic)
             mission_objectives = self._mission_objectives()
+            if topic_focus:
+                mission_objectives = [f"Exploration focus: {topic_focus}", *mission_objectives]
             ctx = SensorContext.create(
                 state_dir=self.state_dir,
                 user_agent=self.sensor_user_agent,
@@ -219,13 +242,18 @@ class Runtime:
                         "world.watch.batch",
                         f"World Watch captured {new_world_count} new items.",
                         source="runtime",
-                        metadata={"count": new_world_count, "path": str(notebook_path), "trigger": trigger},
+                        metadata={
+                            "count": new_world_count,
+                            "path": str(notebook_path),
+                            "trigger": trigger,
+                            "topic": topic_focus,
+                        },
                     )
                     self.event_bus.publish_event(
                         "world.novelty.detected",
                         f"Novel world signals detected: {new_world_count} new item(s).",
                         source="runtime",
-                        metadata={"count": new_world_count, "trigger": trigger},
+                        metadata={"count": new_world_count, "trigger": trigger, "topic": topic_focus},
                     )
                     self._emit_activity("world-watch", f"{new_world_count} new items")
 
@@ -247,6 +275,7 @@ class Runtime:
                 tasks_unblocked=tasks_unblocked,
                 repeated_errors=repeated_errors,
             )
+            return int(new_world_count)
 
     def _detect_unblocked_tasks(self) -> int:
         if self.open_tasks_count_getter is None:
@@ -393,6 +422,16 @@ class Runtime:
                 out.append(cleaned)
         return out
 
+    def _resolve_manual_explore_topic(self, topic: str) -> str:
+        cleaned = _clean_value(topic)
+        if cleaned:
+            return cleaned
+        return _suggest_manual_explore_topic(
+            world_dir=self._world_dir,
+            day=date.today(),
+            mission_objectives=self._mission_objectives(),
+        )
+
     def _track_errors(self, event: dict[str, Any]) -> None:
         severity = str(event.get("severity", "info")).lower()
         if severity not in {"warn", "error", "critical"}:
@@ -449,7 +488,7 @@ class Runtime:
             metadata={"idle_seconds": int(idle_s)},
         )
         self._emit_activity("explore", "boredom-triggered exploration")
-        await self._run_exploration_tick(trigger="boredom")
+        await self._run_exploration_tick(trigger="boredom", topic="")
 
     def _rollover_day(self, today_iso: str) -> None:
         current_day = str(self._briefing_state.get("day", "")).strip()
@@ -671,6 +710,40 @@ def _mission_status(*, new_world_count: int, repeated_errors: list[str], objecti
     if new_world_count > 0 and objectives:
         return "on track"
     return "unknown"
+
+
+def _suggest_manual_explore_topic(*, world_dir: Path, day: date, mission_objectives: list[str]) -> str:
+    titles = _world_titles_for_day(world_dir / f"{day.isoformat()}.md")
+    objective = _clean_value(mission_objectives[0]) if mission_objectives else ""
+    if len(titles) >= 2:
+        if objective:
+            return f"How `{titles[0]}` and `{titles[1]}` connect to `{objective}`"
+        return f"How `{titles[0]}` and `{titles[1]}` connect"
+    if len(titles) == 1:
+        if objective:
+            return f"Deeper implications of `{titles[0]}` for `{objective}`"
+        return f"Deeper implications of `{titles[0]}`"
+    if objective:
+        return f"Fresh external signals that could affect `{objective}`"
+    return "A novel external signal with possible mission impact"
+
+
+def _world_titles_for_day(path: Path, *, max_titles: int = 3) -> list[str]:
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    out: list[str] = []
+    for match in re.finditer(r"- \*\*\[(.+?)\]\*\* \(", text):
+        title = _clean_value(match.group(1))
+        if not title or title in out:
+            continue
+        out.append(title)
+        if len(out) >= max(1, int(max_titles)):
+            break
+    return out
 
 
 def _world_change_summary(*, new_world_count: int, repeated_errors: list[str], tasks_unblocked: int) -> str:

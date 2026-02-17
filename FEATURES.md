@@ -121,6 +121,7 @@
   - If local Codex OAuth tokens exist (`~/.codex/auth.json`), startup/refresh syncs them into `.tako/pi/agent/auth.json` as `openai-codex` for pi inference readiness.
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
+  - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.

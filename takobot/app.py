@@ -85,6 +85,7 @@ from .pairing import clear_pending
 from .paths import code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
 from .ascii_octo import octopus_ascii_for_stage
+from .rag_context import format_focus_summary, focus_profile_from_dose, query_memory_with_ragrep
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
 from .sensors import CuriositySensor, RSSSensor, Sensor
@@ -145,6 +146,7 @@ UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 THINKING_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 INFERENCE_WATCHDOG_INTERVAL_S = 10.0
 INFERENCE_RECOVERY_COOLDOWN_S = 20.0
+OCTO_RENDER_FPS = 12.0
 SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/help", "Show command reference"),
     ("/status", "Show runtime status"),
@@ -155,6 +157,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/mission", "Show or set mission objectives"),
     ("/models", "Show pi and inference auth config"),
     ("/dose", "Show or tune DOSE levels"),
+    ("/explore", "Trigger manual exploration (optional topic)"),
     ("/task", "Create a task"),
     ("/tasks", "List tasks"),
     ("/done", "Mark a task done"),
@@ -191,6 +194,7 @@ LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
     "doctor",
     "done",
     "dose",
+    "explore",
     "draft",
     "enable",
     "exit",
@@ -535,6 +539,7 @@ class TakoTerminalApp(App[None]):
         self._ensure_input_focus()
         self.input_worker_task = asyncio.create_task(self._input_worker_loop(), name="tako-input-worker")
         self.set_interval(0.5, self._refresh_status)
+        self.set_interval(1.0 / OCTO_RENDER_FPS, self._refresh_octo_panel)
         self._refresh_panels()
         self.boot_task = asyncio.create_task(self._boot())
 
@@ -1484,12 +1489,21 @@ class TakoTerminalApp(App[None]):
         model_used = "heuristic"
         if self.inference_runtime is not None and self.inference_runtime.ready and self.inference_gate_open:
             self._add_activity("inference", f"Type2[{depth}] -> requesting model reasoning")
+            focus_summary, rag_context = await self._collect_inference_rag_context(
+                query=_build_memory_rag_query(
+                    text=f"{event_type} {message} {reason}",
+                    mission_objectives=self.mission_objectives,
+                ),
+                scope=f"type2:{depth}",
+            )
             prompt = _build_type2_prompt(
                 event=event,
                 depth=depth,
                 reason=reason,
                 fallback=recommendation,
                 memory_frontmatter=load_memory_frontmatter_excerpt(root=repo_root(), max_chars=700),
+                focus_summary=focus_summary,
+                rag_context=rag_context,
             )
             try:
                 self._record_event(
@@ -2703,11 +2717,12 @@ class TakoTerminalApp(App[None]):
             return
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, explore, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
                 "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
                 "stage controls: `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
-                "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/upgrade`, `/stats`, `/dose ...`)\n"
+                "explore controls: `explore` or `explore <topic>`\n"
+                "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/explore`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
@@ -3022,6 +3037,41 @@ class TakoTerminalApp(App[None]):
                 f"D={self.dose.d:.2f} O={self.dose.o:.2f} S={self.dose.s:.2f} E={self.dose.e:.2f}\n"
                 f"label={self.dose_label}\n"
                 f"bias: verbosity={bias['verbosity']:.2f} confirm={bias['confirm_level']:.2f} explore={bias['explore_bias']:.2f} patience={bias['patience']:.2f}"
+            )
+            return
+
+        if cmd == "explore":
+            if self.runtime_service is None:
+                self._write_tako("explore unavailable: runtime service is not running.")
+                return
+            requested_topic = " ".join(rest.split()).strip()
+            self._add_activity("explore", f"manual request: {requested_topic or 'auto topic'}")
+            previous_indicator = self.indicator
+            self._set_indicator("acting")
+            try:
+                selected_topic, new_world_count = await self.runtime_service.request_explore(requested_topic)
+            except Exception as exc:  # noqa: BLE001
+                summary = _summarize_error(exc)
+                self._add_activity("explore", f"failed: {summary}")
+                self._record_event(
+                    "runtime.explore.manual.error",
+                    f"Manual explore command failed: {summary}",
+                    severity="warn",
+                    source="terminal",
+                    metadata={"requested_topic": requested_topic},
+                )
+                self._write_tako(f"explore failed: {summary}")
+                return
+            finally:
+                if self.indicator == "acting":
+                    self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
+            self.explore_ticks = self.runtime_service.explore_ticks
+            self.last_explore_at = self.runtime_service.last_explore_at
+            topic_note = "auto-selected topic" if not requested_topic else "topic"
+            self._write_tako(
+                f"explore complete.\n"
+                f"{topic_note}: {selected_topic}\n"
+                f"new world items: {int(new_world_count)}"
             )
             return
 
@@ -4217,6 +4267,38 @@ class TakoTerminalApp(App[None]):
                 f"debug: waiting on provider={provider} elapsed={elapsed_s}s",
             )
 
+    async def _collect_inference_rag_context(self, *, query: str, scope: str) -> tuple[str, str]:
+        focus_profile = focus_profile_from_dose(self.dose)
+        focus_summary = format_focus_summary(focus_profile)
+        workspace = repo_root()
+        state_dir = self.paths.state_dir if self.paths is not None else (workspace / ".tako" / "state")
+        rag_result = await asyncio.to_thread(
+            query_memory_with_ragrep,
+            query=query,
+            workspace_root=workspace,
+            memory_root=workspace / "memory",
+            state_dir=state_dir,
+            focus_profile=focus_profile,
+        )
+        self._add_activity(
+            "focus",
+            f"{scope}: {focus_summary}, rag={rag_result.status}, hits={rag_result.hits}, limit={rag_result.limit}",
+        )
+        self._record_event(
+            "inference.focus.checked",
+            f"Inference focus checked ({scope}): {focus_summary}; rag={rag_result.status}.",
+            source="inference",
+            metadata={
+                "scope": scope,
+                "focus": focus_profile.level,
+                "focus_score": round(focus_profile.score, 3),
+                "rag_status": rag_result.status,
+                "rag_hits": int(rag_result.hits),
+                "rag_limit": int(rag_result.limit),
+            },
+        )
+        return focus_summary, rag_result.context
+
     async def _local_chat_reply(self, text: str) -> str:
         fallback = _local_chat_unavailable_message(
             operator_paired=self.operator_paired,
@@ -4248,6 +4330,10 @@ class TakoTerminalApp(App[None]):
                 assistant_label=self.identity_name or "Takobot",
             )
         memory_frontmatter = load_memory_frontmatter_excerpt(root=repo_root(), max_chars=1200)
+        focus_summary, rag_context = await self._collect_inference_rag_context(
+            query=_build_memory_rag_query(text=text, mission_objectives=self.mission_objectives),
+            scope="chat",
+        )
 
         prompt = _build_terminal_chat_prompt(
             text=text,
@@ -4261,6 +4347,8 @@ class TakoTerminalApp(App[None]):
             life_stage=self.life_stage,
             stage_tone=self.stage_policy.tone,
             memory_frontmatter=memory_frontmatter,
+            focus_summary=focus_summary,
+            rag_context=rag_context,
         )
         self._add_activity("inference", "terminal chat inference requested")
         self._stream_begin(focus=text)
@@ -4742,6 +4830,26 @@ class TakoTerminalApp(App[None]):
         )
         self._refresh_panels()
 
+    def _refresh_octo_panel(self, *, thinking: str | None = None) -> None:
+        if not hasattr(self, "octo_panel"):
+            return
+        panel_width = 0
+        with contextlib.suppress(Exception):
+            panel_width = int(getattr(self.octo_panel, "size").width)
+        self.octo_panel.update(
+            _octopus_panel_text(
+                self.life_stage,
+                int((time.monotonic() - self.started_at) * OCTO_RENDER_FPS),
+                panel_width=panel_width,
+                version=__version__,
+                stage_title=self.stage_policy.title,
+                stage_tone=self.stage_policy.tone,
+                dose_state=self.dose,
+                dose_label=self.dose_label,
+                thinking=thinking or self._thinking_visual(),
+            )
+        )
+
     def _refresh_open_loops(self, *, save: bool) -> None:
         if self.paths is None:
             return
@@ -4827,19 +4935,7 @@ class TakoTerminalApp(App[None]):
             f"- last update check: {update_check_age}"
         )
         self.tasks_panel.update(tasks)
-        frame = int((time.monotonic() - self.started_at) * 2.0)
-        self.octo_panel.update(
-            _octopus_panel_text(
-                self.life_stage,
-                frame,
-                version=__version__,
-                stage_title=self.stage_policy.title,
-                stage_tone=self.stage_policy.tone,
-                dose_state=self.dose,
-                dose_label=self.dose_label,
-                thinking=thinking,
-            )
-        )
+        self._refresh_octo_panel(thinking=thinking)
 
         event_log_value = str(self.event_log_path) if self.event_log_path is not None else "not ready"
         mission_objectives = self.mission_objectives or [self.identity_role]
@@ -5229,6 +5325,8 @@ def _looks_like_local_command(text: str) -> bool:
         return True
     if cmd == "dose":
         return tail in {"", "show", "status", "calm", "explore", "help", "?"} or _parse_dose_set_request(tail) is not None
+    if cmd == "explore":
+        return True
     if cmd == "morning":
         return tail == ""
     if cmd == "task":
@@ -5306,6 +5404,8 @@ def _build_terminal_chat_prompt(
     life_stage: str = DEFAULT_LIFE_STAGE,
     stage_tone: str = "",
     memory_frontmatter: str = "",
+    focus_summary: str = "",
+    rag_context: str = "",
 ) -> str:
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
@@ -5316,6 +5416,8 @@ def _build_terminal_chat_prompt(
     if len(objectives) > 4:
         objectives_line += f" | (+{len(objectives) - 4} more)"
     memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
+    focus_line = " ".join((focus_summary or "").split()).strip() or "unknown"
+    rag_block = (rag_context or "").strip() or "No semantic memory context."
     stage_line = life_stage.strip().lower() or DEFAULT_LIFE_STAGE
     tone_line = " ".join((stage_tone or "").split()).strip() or "steady"
     if stage_line == "child":
@@ -5353,6 +5455,9 @@ def _build_terminal_chat_prompt(
         f"operator_paired={paired}\n"
         "memory_frontmatter=\n"
         f"{memory_block}\n"
+        f"focus_state={focus_line}\n"
+        "memory_rag_context=\n"
+        f"{rag_block}\n"
         "recent_conversation=\n"
         f"{history_block}"
         f"user_message={text}\n"
@@ -5420,6 +5525,8 @@ def _build_type2_prompt(
     reason: str,
     fallback: str,
     memory_frontmatter: str = "",
+    focus_summary: str = "",
+    rag_context: str = "",
 ) -> str:
     event_type = str(event.get("type", "unknown"))
     severity = str(event.get("severity", "info"))
@@ -5428,6 +5535,8 @@ def _build_type2_prompt(
     metadata = event.get("metadata")
     metadata_json = json.dumps(metadata, ensure_ascii=True, sort_keys=True) if isinstance(metadata, dict) else "{}"
     memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
+    focus_line = " ".join((focus_summary or "").split()).strip() or "unknown"
+    rag_block = (rag_context or "").strip() or "No semantic memory context."
 
     return (
         "You are Tako Type2 reasoning.\n"
@@ -5444,6 +5553,9 @@ def _build_type2_prompt(
         f"event.metadata={metadata_json}\n"
         "memory_frontmatter=\n"
         f"{memory_block}\n"
+        f"focus_state={focus_line}\n"
+        "memory_rag_context=\n"
+        f"{rag_block}\n"
         f"fallback={fallback}\n"
     )
 
@@ -5474,6 +5586,19 @@ def _stream_focus_summary(text: str) -> str:
     if len(value) <= 120:
         return value
     return f"{value[:117]}..."
+
+
+def _build_memory_rag_query(*, text: str, mission_objectives: list[str]) -> str:
+    message = " ".join(_sanitize_for_display(text).split()).strip()
+    objective = ""
+    for item in mission_objectives:
+        candidate = " ".join(_sanitize_for_display(str(item)).split()).strip()
+        if candidate:
+            objective = candidate
+            break
+    if message and objective:
+        return f"{message} mission objective {objective}"
+    return message or objective
 
 
 def _yes_no(value: bool) -> str:
@@ -5611,6 +5736,7 @@ def _octopus_panel_text(
     stage_name: str,
     frame: int,
     *,
+    panel_width: int,
     version: str,
     stage_title: str,
     stage_tone: str,
@@ -5618,7 +5744,8 @@ def _octopus_panel_text(
     dose_label: str,
     thinking: str,
 ) -> str:
-    art = octopus_ascii_for_stage(stage_name, frame=frame)
+    art_cols = max(7, int(panel_width) - 2)
+    art = octopus_ascii_for_stage(stage_name, frame=frame, canvas_cols=art_cols)
     mood = "zzz" if frame % 12 == 0 else "~"
     if dose_state is None:
         dose_line = "D○○○○ O○○○○ S○○○○ E○○○○ pending"

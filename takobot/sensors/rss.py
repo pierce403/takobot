@@ -45,9 +45,11 @@ class RSSSensor:
             return []
 
         now = time.monotonic()
-        if self._next_poll_at and now < self._next_poll_at:
+        manual_trigger = ctx.trigger == "manual"
+        if not manual_trigger and self._next_poll_at and now < self._next_poll_at:
             return []
-        self._next_poll_at = now + float(self.poll_interval_s)
+        if not manual_trigger:
+            self._next_poll_at = now + float(self.poll_interval_s)
 
         self._ensure_seen_loaded(ctx.state_dir)
 
@@ -56,7 +58,7 @@ class RSSSensor:
         for feed_url in self.feeds:
             host = urlparse(feed_url).netloc.lower()
             last_fetch = self._last_fetch_by_host.get(host, 0.0)
-            if host and now - last_fetch < self._per_host_min_interval_s:
+            if (not manual_trigger) and host and now - last_fetch < self._per_host_min_interval_s:
                 continue
             self._last_fetch_by_host[host] = now
 

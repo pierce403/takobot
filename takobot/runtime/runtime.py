@@ -91,6 +91,15 @@ class Runtime:
         self._last_idle_decay_at = 0.0
         self._last_boredom_explore_at = 0.0
         self._explore_lock = asyncio.Lock()
+        self.last_explore_report: dict[str, Any] = {
+            "trigger": "",
+            "topic": "",
+            "sensor_count": 0,
+            "sensor_events": 0,
+            "sensor_failures": 0,
+            "world_items": 0,
+            "new_world_items": 0,
+        }
 
         self._world_dir = self.memory_root / "world"
         self._briefing_state_path = self.state_dir / "briefing_state.json"
@@ -208,13 +217,18 @@ class Runtime:
                 user_agent=self.sensor_user_agent,
                 timeout_s=self.sensor_timeout_s,
                 mission_objectives=mission_objectives,
+                trigger=trigger,
+                topic_focus=topic_focus,
             )
 
             world_items: list[WorldItem] = []
+            sensor_events_total = 0
+            sensor_failures = 0
             for sensor in self.sensors:
                 try:
                     sensor_events = await sensor.tick(ctx)
                 except Exception as exc:  # noqa: BLE001
+                    sensor_failures += 1
                     self.event_bus.publish_event(
                         "sensor.tick.error",
                         f"{sensor.name} sensor tick failed: {exc}",
@@ -222,6 +236,7 @@ class Runtime:
                         source=f"sensor:{sensor.name}",
                     )
                     continue
+                sensor_events_total += len(sensor_events)
                 for event in sensor_events:
                     published = self.event_bus.publish(event)
                     if str(published.get("type", "")) == "world.news.item":
@@ -256,6 +271,30 @@ class Runtime:
                         metadata={"count": new_world_count, "trigger": trigger, "topic": topic_focus},
                     )
                     self._emit_activity("world-watch", f"{new_world_count} new items")
+
+            self.last_explore_report = {
+                "trigger": trigger,
+                "topic": topic_focus,
+                "sensor_count": len(self.sensors),
+                "sensor_events": int(sensor_events_total),
+                "sensor_failures": int(sensor_failures),
+                "world_items": len(world_items),
+                "new_world_items": int(new_world_count),
+            }
+            if trigger == "manual" and new_world_count == 0:
+                append_daily_note(
+                    self.daily_log_root,
+                    today,
+                    "Manual explore found no new world items "
+                    f"({sensor_events_total} sensor events, {sensor_failures} failures).",
+                )
+                self.event_bus.publish_event(
+                    "runtime.explore.manual.no_signal",
+                    "Manual explore found no new world items.",
+                    source="runtime",
+                    metadata=dict(self.last_explore_report),
+                )
+                self._emit_activity("explore", "manual no new signals")
 
             tasks_unblocked = self._detect_unblocked_tasks()
             repeated_errors = sorted(self._repeating_errors)

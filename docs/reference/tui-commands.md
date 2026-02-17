@@ -16,7 +16,7 @@ Common commands:
 - `pair`, `setup`, `reimprint`
 - `update`, `upgrade`, `update check`, `update auto status|on|off`
 - `dose`, `dose calm`, `dose explore`, `dose <d|o|s|e|dopamine|oxytocin|serotonin|endorphins> <0..1>`
-- `explore`, `explore <topic>` (manual exploration tick; auto-selects a mission-aligned topic when omitted)
+- `explore`, `explore <topic>` (manual exploration tick; auto-selects a mission-aligned topic when omitted and bypasses normal poll windows)
 - `web <url>`, `run <command>`
 - `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`
 - `install`, `review pending`, `enable`, `draft`, `extensions`

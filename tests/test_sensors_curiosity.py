@@ -121,6 +121,50 @@ class TestCuriositySensor(unittest.TestCase):
             self.assertEqual("operator_sites", metadata.get("origin_source"))
             self.assertIn("Example Domain", metadata.get("title", ""))
 
+    def test_manual_trigger_bypasses_poll_interval(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            seen_path = state_dir / "curiosity_seen.json"
+            calls = 0
+
+            def reddit_fetcher(_ctx: SensorContext, _rng: random.Random) -> dict[str, str]:
+                nonlocal calls
+                calls += 1
+                return {
+                    "item_id": f"reddit:test:{calls}",
+                    "title": f"Signal {calls}",
+                    "link": f"https://example.com/signal-{calls}",
+                    "source": "Reddit r/technology",
+                }
+
+            auto_ctx = SensorContext.create(
+                state_dir=state_dir,
+                user_agent="takobot-test",
+                timeout_s=2.0,
+            )
+            manual_ctx = SensorContext.create(
+                state_dir=state_dir,
+                user_agent="takobot-test",
+                timeout_s=2.0,
+                trigger="manual",
+            )
+            sensor = CuriositySensor(
+                sources=["reddit"],
+                poll_minutes=60,
+                seen_path=seen_path,
+                rng=random.Random(4),
+                source_fetchers={"reddit": reddit_fetcher},
+            )
+
+            first = asyncio.run(sensor.tick(auto_ctx))
+            self.assertEqual(1, len(first))
+            blocked = asyncio.run(sensor.tick(auto_ctx))
+            self.assertEqual([], blocked)
+            manual = asyncio.run(sensor.tick(manual_ctx))
+            self.assertEqual(1, len(manual))
+            self.assertEqual("reddit:test:2", manual[0]["metadata"].get("item_id"))
+            self.assertEqual(2, calls)
+
 
 if __name__ == "__main__":
     unittest.main()

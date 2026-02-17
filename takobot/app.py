@@ -3068,11 +3068,20 @@ class TakoTerminalApp(App[None]):
             self.explore_ticks = self.runtime_service.explore_ticks
             self.last_explore_at = self.runtime_service.last_explore_at
             topic_note = "auto-selected topic" if not requested_topic else "topic"
-            self._write_tako(
-                f"explore complete.\n"
-                f"{topic_note}: {selected_topic}\n"
-                f"new world items: {int(new_world_count)}"
-            )
+            report = dict(getattr(self.runtime_service, "last_explore_report", {}) or {})
+            lines = [
+                "explore complete.",
+                f"{topic_note}: {selected_topic}",
+                f"new world items: {int(new_world_count)}",
+            ]
+            if int(new_world_count) == 0:
+                lines.append(
+                    "sensor scan: "
+                    f"{int(report.get('sensor_count', len(self.runtime_service.sensors)))} sensor(s), "
+                    f"{int(report.get('sensor_events', 0))} event(s), "
+                    f"{int(report.get('sensor_failures', 0))} failure(s)"
+                )
+            self._write_tako("\n".join(lines))
             return
 
         if cmd == "task":

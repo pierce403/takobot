@@ -57,9 +57,13 @@ class MissionObjectiveCaptureSensor:
 
     def __init__(self) -> None:
         self.last_mission_objectives: tuple[str, ...] = ()
+        self.last_trigger = ""
+        self.last_topic_focus = ""
 
     async def tick(self, ctx) -> list[dict[str, object]]:
         self.last_mission_objectives = tuple(ctx.mission_objectives)
+        self.last_trigger = str(ctx.trigger)
+        self.last_topic_focus = str(ctx.topic_focus)
         return []
 
 
@@ -211,6 +215,8 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             self.assertEqual(0, new_world_count)
             self.assertEqual("Exploration focus: decentralized identity trends", sensor.last_mission_objectives[0])
             self.assertIn("Track mission-relevant shifts.", sensor.last_mission_objectives)
+            self.assertEqual("manual", sensor.last_trigger)
+            self.assertEqual("decentralized identity trends", sensor.last_topic_focus)
 
             today = date.today().isoformat()
             daily_path = daily_root / f"{today}.md"
@@ -225,6 +231,7 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             ]
             event_types = [str(event.get("type", "")) for event in events]
             self.assertIn("runtime.explore.manual.requested", event_types)
+            self.assertIn("runtime.explore.manual.no_signal", event_types)
             self.assertIn("runtime.explore.manual.completed", event_types)
             requested = next(event for event in events if event.get("type") == "runtime.explore.manual.requested")
             completed = next(event for event in events if event.get("type") == "runtime.explore.manual.completed")

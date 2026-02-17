@@ -122,6 +122,8 @@
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
+  - Manual `explore` bypasses normal sensor poll windows so operator-triggered exploration runs immediately.
+  - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.
@@ -156,6 +158,7 @@
   - [x] Startup logs include a health-check summary (brand-new vs established + resource checks).
   - [x] Hatchling onboarding order is `name -> purpose -> XMTP handle`.
   - [x] Child stage randomly explores Reddit/Hacker News/Wikipedia and emits mission-linked world questions.
+  - [x] Manual `explore` bypasses sensor poll windows and reports scan stats when no new world items are found.
   - [x] Child-stage chat can capture operator context and write/update `memory/people/operator.md`.
   - [x] Child-stage chat can capture website URLs and add them to `[world_watch].sites`.
   - [x] Onboarding completion transitions stage to `child` and persists it to `tako.toml`.

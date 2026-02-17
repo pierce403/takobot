@@ -76,15 +76,20 @@ class CuriositySensor:
             return []
 
         now = time.monotonic()
-        if self._next_poll_at and now < self._next_poll_at:
+        manual_trigger = ctx.trigger == "manual"
+        if not manual_trigger and self._next_poll_at and now < self._next_poll_at:
             return []
-        self._next_poll_at = now + float(self.poll_interval_s)
+        if not manual_trigger:
+            self._next_poll_at = now + float(self.poll_interval_s)
         self._ensure_seen_loaded(ctx.state_dir)
 
         sources = list(self.sources)
         if self._site_urls:
             sources.append("operator_sites")
         self._rng.shuffle(sources)
+        max_events = self._max_events_per_tick
+        if manual_trigger:
+            max_events = max(self._max_events_per_tick, min(3, len(sources)))
 
         changed = False
         events: list[dict[str, Any]] = []
@@ -108,7 +113,7 @@ class CuriositySensor:
             self._remember_item_id(item_id)
             changed = True
             events.append(_item_event(prepared))
-            if len(events) >= self._max_events_per_tick:
+            if len(events) >= max_events:
                 break
 
         if changed:

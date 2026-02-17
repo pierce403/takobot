@@ -6,6 +6,7 @@ from unittest.mock import patch
 from takobot.app import (
     _active_work_summary,
     _activity_text,
+    _octopus_panel_text,
     _build_terminal_chat_prompt,
     _build_memory_rag_query,
     _canonical_identity_name,
@@ -155,6 +156,25 @@ class TestAppCommands(unittest.TestCase):
         )
         self.assertIn("what changed with policy today?", query)
         self.assertIn("Keep mission alignment strong.", query)
+
+    def test_octopus_panel_places_stacked_dose_meters_top_right(self) -> None:
+        panel = _octopus_panel_text(
+            "adult",
+            frame=2,
+            panel_width=42,
+            version="0.1.44",
+            stage_title="Adult",
+            stage_tone="steady",
+            dose_state=None,
+            dose_label="pending",
+            thinking="idle",
+        )
+        lines = panel.splitlines()
+        self.assertGreaterEqual(len(lines), 10)
+        self.assertTrue(lines[0].rstrip().endswith("D ○○○○"))
+        self.assertTrue(lines[1].rstrip().endswith("O ○○○○"))
+        self.assertTrue(lines[2].rstrip().endswith("S ○○○○"))
+        self.assertTrue(lines[3].rstrip().endswith("E ○○○○"))
 
     def test_local_input_queue_count_includes_active_processing(self) -> None:
         app = TakoTerminalApp(interval=5.0)

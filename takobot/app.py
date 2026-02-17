@@ -5746,24 +5746,43 @@ def _octopus_panel_text(
 ) -> str:
     art_cols = max(7, int(panel_width) - 2)
     art = octopus_ascii_for_stage(stage_name, frame=frame, canvas_cols=art_cols)
+    art_lines = art.splitlines() or [""]
     mood = "zzz" if frame % 12 == 0 else "~"
     if dose_state is None:
-        dose_line = "D○○○○ O○○○○ S○○○○ E○○○○ pending"
+        dose_stack = ("D ○○○○", "O ○○○○", "S ○○○○", "E ○○○○")
     else:
-        dose_line = (
-            f"D{_dose_meter(dose_state.d)} "
-            f"O{_dose_meter(dose_state.o)} "
-            f"S{_dose_meter(dose_state.s)} "
-            f"E{_dose_meter(dose_state.e)} "
-            f"{dose_label}"
+        dose_stack = (
+            f"D {_dose_meter(dose_state.d)}",
+            f"O {_dose_meter(dose_state.o)}",
+            f"S {_dose_meter(dose_state.s)}",
+            f"E {_dose_meter(dose_state.e)}",
         )
-    return (
-        f"Takobot v{version} | {stage_title} {mood}\n"
-        f"Mind {thinking}\n"
-        f"Tone {stage_tone}\n"
-        f"{dose_line}\n"
-        f"{art}"
+    left_lines = (
+        f"Takobot v{version} | {stage_title} {mood}",
+        f"Mind {thinking}",
+        f"Tone {stage_tone}",
+        f"Mood {dose_label}",
     )
+    top_lines = [
+        _panel_join_left_right(art_cols, left=left_lines[index], right=dose_stack[index])
+        for index in range(len(dose_stack))
+    ]
+    return "\n".join([*top_lines, *art_lines])
+
+
+def _panel_join_left_right(width: int, *, left: str, right: str, gap: int = 2) -> str:
+    total_width = max(7, int(width))
+    left_text = " ".join(str(left).split())
+    right_text = " ".join(str(right).split())
+    if not right_text:
+        return left_text[:total_width].ljust(total_width)
+    if len(right_text) >= total_width:
+        return right_text[-total_width:]
+    max_left = max(0, total_width - len(right_text) - max(1, int(gap)))
+    if len(left_text) > max_left:
+        left_text = left_text[:max_left]
+    padding = max(1, total_width - len(left_text) - len(right_text))
+    return f"{left_text}{' ' * padding}{right_text}"
 
 
 def _dose_meter(value: float, *, width: int = 4) -> str:

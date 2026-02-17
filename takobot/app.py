@@ -66,6 +66,7 @@ from .identity import (
     extract_role_from_text,
     looks_like_name_change_request,
     looks_like_role_change_request,
+    looks_like_role_info_query,
 )
 from .input_history import InputHistory
 from .keys import derive_eth_address, load_or_create_keys
@@ -2696,6 +2697,8 @@ class TakoTerminalApp(App[None]):
             if _looks_like_tako_toml_question(text):
                 self._write_tako(explain_tako_toml(self.config, path=repo_root() / "tako.toml"))
                 return
+            if self._maybe_handle_inline_role_info_query(text):
+                return
             if await self._maybe_handle_inline_name_change(text):
                 return
             if await self._maybe_handle_inline_role_change(text):
@@ -4589,10 +4592,18 @@ class TakoTerminalApp(App[None]):
         if not parsed_role:
             parsed_role = await self._infer_identity_role(text)
         if not parsed_role:
-            self._write_tako(
-                "absolutely. share the corrected purpose sentence and I'll patch `SOUL.md` right away "
-                "(for example: `your purpose is ...`)."
-            )
+            current_role = " ".join(self.identity_role.split()).strip()
+            if current_role:
+                self._write_tako(
+                    "current purpose:\n"
+                    f"{current_role}\n"
+                    "send the corrected sentence (for example: `your purpose is ...`) and I'll patch `SOUL.md`."
+                )
+            else:
+                self._write_tako(
+                    "share the corrected purpose sentence and I'll patch `SOUL.md` right away "
+                    "(for example: `your purpose is ...`)."
+                )
             return True
         if parsed_role == previous:
             self._write_tako("purpose already matches that wording.")
@@ -4624,6 +4635,22 @@ class TakoTerminalApp(App[None]):
         )
         self._add_activity("identity", "purpose updated")
         self._write_tako("ink dried. purpose updated in `SOUL.md`.")
+        return True
+
+    def _maybe_handle_inline_role_info_query(self, text: str) -> bool:
+        if not looks_like_role_info_query(text):
+            return False
+        role = " ".join(self.identity_role.split()).strip()
+        if role:
+            self._write_tako(
+                "my current purpose:\n"
+                f"{role}\n"
+                "if you want to tweak wording, send the exact replacement sentence and I'll update `SOUL.md`."
+            )
+        else:
+            self._write_tako(
+                "I don't have a clear purpose line yet. share one like `your purpose is ...` and I'll write it to `SOUL.md`."
+            )
         return True
 
     def _on_runtime_log(self, level: str, message: str) -> None:

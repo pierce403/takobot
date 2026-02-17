@@ -24,6 +24,7 @@ Common commands:
 - `inference login` starts an assisted pi login workflow. When prompts appear, answer with `inference login answer <text>` or cancel with `inference login cancel`.
 - Type `/` in the input box to open the slash-command dropdown under the input field.
 - Press `Tab` in the input box to autocomplete command names (and cycle candidates).
+- Asking purpose info questions (for example, `what is your purpose?`) returns the current purpose text; purpose updates still require explicit replacement wording.
 
 Clipboard helpers:
 

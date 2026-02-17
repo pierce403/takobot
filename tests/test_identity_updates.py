@@ -5,6 +5,7 @@ import unittest
 from takobot.identity import (
     extract_role_from_model_output,
     extract_role_from_text,
+    looks_like_role_info_query,
     looks_like_role_change_request,
 )
 
@@ -12,6 +13,14 @@ from takobot.identity import (
 class TestIdentityUpdates(unittest.TestCase):
     def test_role_change_detection_ignores_information_only_questions(self) -> None:
         self.assertFalse(looks_like_role_change_request("what is your purpose?"))
+        self.assertFalse(looks_like_role_change_request("can you tell me what your purpose is?"))
+        self.assertFalse(looks_like_role_change_request("tell me what your mission is"))
+
+    def test_role_info_query_detection_handles_natural_phrasing(self) -> None:
+        self.assertTrue(looks_like_role_info_query("can you tell me what your purpose is?"))
+        self.assertTrue(looks_like_role_info_query("what is your mission"))
+        self.assertTrue(looks_like_role_info_query("share your role"))
+        self.assertFalse(looks_like_role_info_query("please update your purpose"))
 
     def test_role_change_detection_handles_fix_requests(self) -> None:
         self.assertTrue(

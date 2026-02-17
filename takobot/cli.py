@@ -64,6 +64,7 @@ from .identity import (
     extract_role_from_text,
     looks_like_name_change_request,
     looks_like_role_change_request,
+    looks_like_role_info_query,
 )
 from .extensions.registry import enable_all_installed as ext_enable_all_installed
 from .productivity import open_loops as prod_open_loops
@@ -1392,6 +1393,19 @@ async def _maybe_handle_operator_identity_update(
     *,
     hooks: RuntimeHooks | None,
 ) -> bool:
+    if looks_like_role_info_query(text):
+        current_name, current_role = read_identity()
+        role = " ".join(current_role.split()).strip()
+        if role:
+            await convo.send(
+                "my current purpose:\n"
+                f"{role}\n"
+                "if you want to revise it, send the exact replacement sentence and I'll update `SOUL.md`."
+            )
+        else:
+            await convo.send("I don't have a clear purpose line yet. send `your purpose is ...` and I'll write it to `SOUL.md`.")
+        return True
+
     requested_name_change = looks_like_name_change_request(text)
     requested_role_change = looks_like_role_change_request(text)
     if not requested_name_change and not requested_role_change:
@@ -1446,10 +1460,18 @@ async def _maybe_handle_operator_identity_update(
         except Exception as exc:  # noqa: BLE001
             _emit_runtime_log(f"identity purpose extraction failed: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
     if not parsed_role:
-        await convo.send(
-            "absolutely. share the corrected purpose sentence and I'll patch `SOUL.md` right away "
-            "(for example: `your purpose is ...`)."
-        )
+        role = " ".join(current_role.split()).strip()
+        if role:
+            await convo.send(
+                "current purpose:\n"
+                f"{role}\n"
+                "send the corrected sentence (for example: `your purpose is ...`) and I'll patch `SOUL.md`."
+            )
+        else:
+            await convo.send(
+                "share the corrected purpose sentence and I'll patch `SOUL.md` right away "
+                "(for example: `your purpose is ...`)."
+            )
         return True
     if parsed_role == current_role:
         await convo.send("purpose already matches that wording.")

@@ -42,15 +42,7 @@ def looks_like_role_change_request(text: str) -> bool:
         return False
 
     # Informational questions should not trigger a write path.
-    question_only_patterns = (
-        "what is your purpose",
-        "what's your purpose",
-        "what is your mission",
-        "what's your mission",
-        "what is your role",
-        "what's your role",
-    )
-    if any(pattern in lowered for pattern in question_only_patterns):
+    if looks_like_role_info_query(lowered):
         return False
 
     direct_phrases = (
@@ -80,6 +72,30 @@ def looks_like_role_change_request(text: str) -> bool:
     action_words = ("set", "change", "update", "fix", "correct", "rewrite", "adjust")
     mentions_agent = ("your" in lowered) or (" you " in f" {lowered} ")
     return mentions_agent and any(word in lowered for word in action_words)
+
+
+def looks_like_role_info_query(text: str) -> bool:
+    lowered = _normalize_text(text).lower()
+    if not lowered:
+        return False
+    if not any(token in lowered for token in ("purpose", "mission", "role")):
+        return False
+
+    question_only_patterns = (
+        r"\bwhat(?:'s| is)\s+your\s+(?:purpose|mission|role)\b",
+        r"\bwhat\s+your\s+(?:purpose|mission|role)\s+is\b",
+        r"\btell\s+me\s+what\s+your\s+(?:purpose|mission|role)\s+is\b",
+        r"\bcan\s+you\s+tell\s+me\s+what\s+your\s+(?:purpose|mission|role)\s+is\b",
+        r"\bremind\s+me\s+what\s+your\s+(?:purpose|mission|role)\s+is\b",
+        r"\bshare\s+your\s+(?:purpose|mission|role)\b",
+    )
+    if any(re.search(pattern, lowered) for pattern in question_only_patterns):
+        return True
+
+    question_starters = ("what", "who", "why", "how", "can you tell", "could you tell", "tell me", "remind me")
+    if lowered.endswith("?") and any(lowered.startswith(prefix) for prefix in question_starters):
+        return True
+    return False
 
 
 def extract_role_from_text(text: str) -> str:

@@ -37,14 +37,19 @@ For each model call:
 2. Keep the last **N user turns** and associated assistant replies (default: `12` turns).
 3. Apply a character budget tail trim (default: `8000` chars).
 4. Load a bounded excerpt of repo-root `MEMORY.md` (memory-system frontmatter spec).
-5. Compute a DOSE-derived focus profile (`focused`/`balanced`/`diffuse`) per inference call.
-6. Run semantic memory recall with `ragrep` over `memory/` and adapt recall breadth to focus:
+5. Load a bounded excerpt of repo-root `SOUL.md` (identity + boundaries).
+6. Compute a DOSE-derived focus profile (`focused`/`balanced`/`diffuse`) per inference call.
+7. Run semantic memory recall with `ragrep` over `memory/` and adapt recall breadth to focus:
    - focused: small recall set (minimal context)
    - diffuse: broad recall set (more context)
-7. Inject stage-aware behavior guidance (for example child-stage context-first conversational tone).
-8. Inject memory frontmatter + RAG memory context + formatted history block into the inference prompt before `user_message=...`.
+8. Inject stage-aware behavior guidance (for example child-stage answer-first tone with anti-repeat follow-up constraints).
+9. Inject `SOUL.md` excerpt + memory frontmatter + focus summary + RAG memory context + formatted history block before `user_message=...`.
 
 This mirrors OpenClaw’s “session transcript + bounded history window” pattern.
+
+## Channel parity
+
+Local TUI and XMTP plain-text chat now share the same core context stack (SOUL, MEMORY frontmatter, focus, RAG, and bounded conversation history) to reduce behavior drift between channels.
 
 ## What is persisted
 

@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-17 — Child-stage chat now avoids repeated startup interrogation
+
+- What happened: child-stage conversation openings could feel repetitive and unnatural (for example repeatedly asking channel clarification and similar profile questions on startup).
+- Fix: child-stage prompt policy now enforces answer-first behavior, explicitly avoids channel/surface clarification questions, and injects profile-context hints so already-asked/already-known topics are not repeated; profile followups now use a bounded cooldown and staged sequence (`intro -> focus -> websites`).
+- Prevention: keep child persona constraints explicit in prompt templates and maintain deterministic followup throttling in `operator_profile` state/tests.
+
 ### 2026-02-17 — Chat context stack now includes SOUL and matches across TUI/XMTP
 
 - What happened: local TUI chat prompts carried richer context (focus/RAG/mission metadata), while XMTP chat prompts were lighter and did not include `SOUL.md`, which created behavior drift across channels.

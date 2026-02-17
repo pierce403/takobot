@@ -51,7 +51,8 @@ class TestAppStagePolicy(unittest.TestCase):
             soul_excerpt="# SOUL.md\n- Name: Tako",
         )
         self.assertIn("Child-stage behavior", prompt)
-        self.assertIn("Ask one gentle question", prompt)
+        self.assertIn("Answer first, then ask at most one gentle follow-up", prompt)
+        self.assertIn("Do not ask which channel the operator is using", prompt)
         self.assertIn("Do not push structured plans", prompt)
 
     def test_child_stage_includes_curiosity_sensor(self) -> None:

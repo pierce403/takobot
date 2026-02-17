@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from takobot.operator_profile import (
     OperatorProfileState,
     apply_operator_profile_update,
+    child_profile_prompt_context,
     extract_operator_profile_update,
     load_operator_profile,
     next_child_followup_question,
@@ -56,12 +58,25 @@ class TestOperatorProfile(unittest.TestCase):
 
     def test_child_followup_questions_are_bounded(self) -> None:
         profile = OperatorProfileState()
-        first = next_child_followup_question(profile)
-        self.assertIn("where are you right now", first)
-        second = next_child_followup_question(profile)
-        self.assertIn("what websites do you like checking", second)
-        third = next_child_followup_question(profile)
-        self.assertEqual("", third)
+        with patch("takobot.operator_profile.time.time", side_effect=[1000.0, 1005.0, 2405.0, 3806.0, 5207.0]):
+            first = next_child_followup_question(profile)
+            self.assertIn("where are you working from lately", first)
+            second = next_child_followup_question(profile)
+            self.assertEqual("", second)
+            third = next_child_followup_question(profile)
+            self.assertIn("most interested in right now", third)
+            fourth = next_child_followup_question(profile)
+            self.assertIn("where do you like browsing online", fourth)
+            fifth = next_child_followup_question(profile)
+            self.assertEqual("", fifth)
+
+    def test_child_profile_prompt_context_summarizes_known_and_missing(self) -> None:
+        profile = OperatorProfileState(name="Pierce", what_they_do="engineering", asked_intro=True)
+        context = child_profile_prompt_context(profile)
+        self.assertIn("known:", context)
+        self.assertIn("missing:", context)
+        self.assertIn("asked_intro=yes", context)
+        self.assertIn("what_they_do=engineering", context)
 
 
 if __name__ == "__main__":

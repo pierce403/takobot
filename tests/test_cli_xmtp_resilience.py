@@ -87,6 +87,8 @@ class TestCliXmtpResilience(unittest.TestCase):
             identity_name="ProTako",
             identity_role="Your highly autonomous octopus friend",
             mission_objectives=["Keep outcomes clear", "Stay curious"],
+            life_stage="child",
+            stage_tone="curious",
             memory_frontmatter="# MEMORY frontmatter",
             soul_excerpt="# SOUL.md\n- Name: ProTako",
             focus_summary="balanced (0.50)",
@@ -99,6 +101,7 @@ class TestCliXmtpResilience(unittest.TestCase):
         self.assertIn("soul_identity_boundaries=", prompt)
         self.assertIn("focus_state=balanced (0.50)", prompt)
         self.assertIn("memory_rag_context=", prompt)
+        self.assertIn("Do not ask which channel the operator is using", prompt)
         self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
 
     def test_retryable_xmtp_error_detection(self) -> None:

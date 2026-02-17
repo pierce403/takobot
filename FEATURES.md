@@ -94,6 +94,8 @@
   - Runtime tracks idle periods and emits boredom signals that trigger autonomous exploration when idle too long (roughly hourly by default).
   - Novel world discoveries emit explicit novelty events so DOSE can reward fresh external signal capture.
   - Child-stage chat behavior is context-first (one gentle question at a time) and avoids pushing structured plans/tasks unless operator asks.
+  - Child-stage prompt guidance is now less interrogative: answer-first, no channel/surface clarification questions, and explicit anti-repeat constraints for profile questions.
+  - Child-stage profile followups are bounded with cooldown + progression (`intro -> current_focus -> websites`) so startup chat does not spam the same prompts.
   - Child-stage chat captures operator profile notes under `memory/people/operator.md` and persists structured state at `.tako/state/operator_profile.json`.
   - Child-stage website preferences from operator chat are added to `tako.toml` (`[world_watch].sites`) and sampled by curiosity exploration.
   - Writes deterministic world notebook entries to `memory/world/YYYY-MM-DD.md` and daily Mission Review Lite snapshots to `memory/world/mission-review/YYYY-MM-DD.md`.
@@ -173,6 +175,7 @@
   - [x] Topic explore highlights are derived from evidence and filtered for low-signal snippets (for example raw URL dumps/source noise).
   - [x] Natural purpose queries are classified as read-only (show current purpose), while update requests still route to `SOUL.md` edits.
   - [x] Child-stage chat can capture operator context and write/update `memory/people/operator.md`.
+  - [x] Child-stage prompt includes anti-repeat/no-channel-question guidance and uses profile-context hints when available.
   - [x] Child-stage chat can capture website URLs and add them to `[world_watch].sites`.
   - [x] Onboarding completion transitions stage to `child` and persists it to `tako.toml`.
   - [x] Freeform naming inputs (e.g. “your name can be SILLYTAKO”) persist only the parsed name in `SOUL.md`.

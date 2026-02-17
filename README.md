@@ -19,6 +19,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - World Watch sensor loop: RSS/Atom polling plus child-stage curiosity crawling (Reddit/Hacker News/Wikipedia), deterministic world notebook writes, and bounded briefings
 - Boredom/autonomy loop: when runtime stays idle, DOSE indicators drift down and Tako triggers boredom-driven exploration (about hourly by default) to find novel signals
 - Child-stage chat tone is relationship-first: it asks one small context question at a time (who/where/what the operator does) and avoids forcing task frameworks unless asked
+- Child-stage chat avoids interrogation loops: answers first, avoids asking which channel is in use, and uses profile-aware anti-repeat guidance so follow-up questions feel natural
 - Child-stage operator context is captured into `memory/people/operator.md`; shared websites are added to `[world_watch].sites` in `tako.toml` for monitoring
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
 - Missing-setup prompts: when required config/deps are missing and auto-remediation fails, Tako asks the operator with concrete fix steps

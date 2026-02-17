@@ -45,6 +45,7 @@ from .memory_frontmatter import load_memory_frontmatter_excerpt
 from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .operator_profile import (
     apply_operator_profile_update,
+    child_profile_prompt_context,
     extract_operator_profile_update,
     load_operator_profile,
     next_child_followup_question,
@@ -1934,6 +1935,10 @@ async def _chat_reply(
         state_dir=paths.state_dir,
         focus_profile=focus_profile,
     )
+    child_profile_context = ""
+    if life_stage == "child":
+        profile = load_operator_profile(paths.state_dir)
+        child_profile_context = child_profile_prompt_context(profile)
     _emit_runtime_log(
         (
             "inference focus checked (xmtp-chat): "
@@ -1953,6 +1958,7 @@ async def _chat_reply(
         stage_tone=stage_tone,
         memory_frontmatter=memory_frontmatter,
         soul_excerpt=soul_excerpt,
+        child_profile_context=child_profile_context,
         focus_summary=focus_summary,
         rag_context=rag_result.context,
     )
@@ -2033,6 +2039,7 @@ def _chat_prompt(
     stage_tone: str = "",
     memory_frontmatter: str = "",
     soul_excerpt: str = "",
+    child_profile_context: str = "",
     focus_summary: str = "",
     rag_context: str = "",
 ) -> str:
@@ -2053,8 +2060,10 @@ def _chat_prompt(
     tone_line = " ".join((stage_tone or "").split()).strip() or "steady"
     if stage_line == "child":
         stage_behavior = (
-            "Child-stage behavior: ask one gentle context question at a time "
-            "(where the operator is, what they do, what websites they read). "
+            "Child-stage behavior: be warm, playful, and observant. Answer first, then ask at most one gentle follow-up only when it naturally fits.\n"
+            "Do not ask a follow-up in every reply.\n"
+            "Do not ask which channel the operator is using (runtime already provides that).\n"
+            "Do not repeat profile questions that were already asked or already answered.\n"
             "Do not push structured planning/tasks unless asked.\n"
         )
     else:
@@ -2069,6 +2078,9 @@ def _chat_prompt(
         if operator_paired
         else "Operator control surface: terminal app (XMTP unpaired).\n"
     )
+    child_context_line = ""
+    if stage_line == "child" and child_profile_context:
+        child_context_line = f"child_profile_context={child_profile_context}\n"
     return (
         f"You are {name}, a super cute octopus assistant with pragmatic engineering judgment.\n"
         f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
@@ -2085,6 +2097,7 @@ def _chat_prompt(
         "If the operator asks for identity/config changes, apply them directly and confirm what changed.\n"
         "If user asks for restricted changes and they are non-operator, say operator-only clearly.\n"
         f"{control_surface_line}"
+        f"{child_context_line}"
         "session_mode=xmtp\n"
         "session_state=RUNNING\n"
         f"sender_role={role}\n"

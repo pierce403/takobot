@@ -14,6 +14,7 @@ DOMAIN_RE = re.compile(
     r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s<>()\[\],;]*)?\b",
     re.IGNORECASE,
 )
+FOLLOWUP_COOLDOWN_S = 20 * 60
 
 
 @dataclass
@@ -24,7 +25,10 @@ class OperatorProfileState:
     current_focus: str = ""
     preferred_sites: list[str] = field(default_factory=list)
     asked_intro: bool = False
+    asked_focus: bool = False
     asked_websites: bool = False
+    last_followup_topic: str = ""
+    last_followup_at: float = 0.0
     updated_at: float = 0.0
 
     def to_json(self) -> dict[str, object]:
@@ -35,7 +39,10 @@ class OperatorProfileState:
             "current_focus": self.current_focus,
             "preferred_sites": list(self.preferred_sites),
             "asked_intro": bool(self.asked_intro),
+            "asked_focus": bool(self.asked_focus),
             "asked_websites": bool(self.asked_websites),
+            "last_followup_topic": self.last_followup_topic,
+            "last_followup_at": float(self.last_followup_at),
             "updated_at": float(self.updated_at),
         }
 
@@ -66,7 +73,10 @@ def load_operator_profile(state_dir: Path) -> OperatorProfileState:
         current_focus=_clean_text(str(payload.get("current_focus") or "")),
         preferred_sites=_normalize_sites(payload.get("preferred_sites") if isinstance(payload.get("preferred_sites"), list) else []),
         asked_intro=bool(payload.get("asked_intro")),
+        asked_focus=bool(payload.get("asked_focus")),
         asked_websites=bool(payload.get("asked_websites")),
+        last_followup_topic=_clean_text(str(payload.get("last_followup_topic") or "")),
+        last_followup_at=_as_float(payload.get("last_followup_at")),
         updated_at=_as_float(payload.get("updated_at")),
     )
 
@@ -144,15 +154,71 @@ def write_operator_profile_note(memory_root: Path, profile: OperatorProfileState
 
 
 def next_child_followup_question(profile: OperatorProfileState) -> str:
+    now = time.time()
+    if profile.last_followup_at > 0 and (now - profile.last_followup_at) < FOLLOWUP_COOLDOWN_S:
+        return ""
     if not profile.asked_intro and not (profile.location and profile.what_they_do):
         profile.asked_intro = True
-        profile.updated_at = time.time()
-        return "tiny check-in: where are you right now, and what sort of things do you usually work on?"
+        profile.last_followup_topic = "intro"
+        profile.last_followup_at = now
+        profile.updated_at = now
+        return "tiny curiosity bubble: where are you working from lately, and what do your days usually involve?"
+    if not profile.asked_focus and not profile.current_focus:
+        profile.asked_focus = True
+        profile.last_followup_topic = "focus"
+        profile.last_followup_at = now
+        profile.updated_at = now
+        return "what are you most interested in right now? I can tie my exploring to that."
     if not profile.asked_websites and not profile.preferred_sites:
         profile.asked_websites = True
-        profile.updated_at = time.time()
-        return "what websites do you like checking? share links and I can add them to my watch list."
+        profile.last_followup_topic = "websites"
+        profile.last_followup_at = now
+        profile.updated_at = now
+        return "where do you like browsing online? share links and I will add them to my watch list."
     return ""
+
+
+def child_profile_prompt_context(profile: OperatorProfileState) -> str:
+    known: list[str] = []
+    missing: list[str] = []
+
+    if profile.name:
+        known.append(f"name={profile.name}")
+    else:
+        missing.append("name")
+    if profile.location:
+        known.append(f"location={profile.location}")
+    else:
+        missing.append("location")
+    if profile.what_they_do:
+        known.append(f"what_they_do={profile.what_they_do}")
+    else:
+        missing.append("what_they_do")
+    if profile.current_focus:
+        known.append(f"current_focus={profile.current_focus}")
+    else:
+        missing.append("current_focus")
+
+    if profile.preferred_sites:
+        known.append(f"preferred_sites={len(profile.preferred_sites)}")
+    else:
+        missing.append("preferred_sites")
+
+    asked = (
+        f"asked_intro={_yes_no(profile.asked_intro)} "
+        f"asked_focus={_yes_no(profile.asked_focus)} "
+        f"asked_websites={_yes_no(profile.asked_websites)}"
+    )
+    cooldown = "followup_cooldown=active" if (time.time() - profile.last_followup_at) < FOLLOWUP_COOLDOWN_S else "followup_cooldown=clear"
+    parts = [
+        "known: " + (", ".join(known) if known else "(none)"),
+        "missing: " + (", ".join(missing) if missing else "(none)"),
+        asked,
+        cooldown,
+    ]
+    if profile.last_followup_topic:
+        parts.append(f"last_followup_topic={profile.last_followup_topic}")
+    return " | ".join(parts)
 
 
 def _render_operator_profile(profile: OperatorProfileState) -> str:
@@ -286,3 +352,7 @@ def _as_float(value: object) -> float:
         return float(value)
     except Exception:
         return 0.0
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"

@@ -22,6 +22,7 @@ Common commands:
 - `install`, `review pending`, `enable`, `draft`, `extensions`
 - `safe on`, `safe off`
 - `inference login` starts an assisted pi login workflow. When prompts appear, answer with `inference login answer <text>` or cancel with `inference login cancel`.
+- `models` now reports resolved Type1/Type2 pi model + thinking configuration (from pi settings) and the last streamed model observed in TUI.
 - Type `/` in the input box to open the slash-command dropdown under the input field.
 - Press `Tab` in the input box to autocomplete command names (and cycle candidates).
 - Asking purpose info questions (for example, `what is your purpose?`) returns the current purpose text; purpose updates still require explicit replacement wording.
@@ -40,6 +41,7 @@ Input history:
 Thinking visibility:
 
 - Bubble stream shows current request focus and elapsed time while the model is thinking/responding.
+- For pi inference, bubble stream now surfaces live thinking/tool-progress/status events from pi JSON mode while a turn is running.
 - During longer inference turns, bubble stream emits periodic debug wait updates and local chat has a bounded total timeout budget.
 
 ## XMTP operator command surface

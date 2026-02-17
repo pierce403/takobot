@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from takobot.inference import (
     InferenceRuntime,
     InferenceProviderStatus,
     InferenceSettings,
+    _stream_pi,
     _codex_oauth_credential_from_auth,
     _ensure_workspace_pi_auth,
     _detect_ollama,
@@ -23,8 +25,10 @@ from takobot.inference import (
     discover_inference_runtime,
     clear_inference_api_key,
     format_inference_auth_inventory,
+    format_pi_model_plan_lines,
     load_inference_settings,
     prepare_pi_login_plan,
+    resolve_pi_model_profile,
     set_inference_api_key,
     set_inference_ollama_host,
     set_inference_ollama_model,
@@ -334,3 +338,117 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertTrue(any("repair note" in note for note in plan.notes))
         self.assertGreaterEqual(len(plan.commands), 1)
         self.assertIn("pi auth is already available", plan.reason)
+
+    def test_resolve_pi_model_profile_prefers_project_override(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            workspace = root / "workspace"
+            runtime_root = workspace / ".tako"
+            (home / ".pi" / "agent").mkdir(parents=True, exist_ok=True)
+            (runtime_root / "pi" / "agent").mkdir(parents=True, exist_ok=True)
+            (workspace / ".pi").mkdir(parents=True, exist_ok=True)
+
+            (home / ".pi" / "agent" / "settings.json").write_text(
+                json.dumps({"defaultModel": "anthropic/claude-sonnet", "defaultThinkingLevel": "low"}),
+                encoding="utf-8",
+            )
+            (runtime_root / "pi" / "agent" / "settings.json").write_text(
+                json.dumps({"defaultModel": "openai/gpt-4.1-codex", "defaultThinkingLevel": "medium"}),
+                encoding="utf-8",
+            )
+            (workspace / ".pi" / "settings.json").write_text(
+                json.dumps({"defaultModel": "openai/gpt-5.3-codex", "defaultThinkingLevel": "high"}),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("takobot.inference.Path.home", return_value=home),
+                patch("takobot.inference.repo_root", return_value=workspace),
+                patch("takobot.inference.runtime_paths", return_value=SimpleNamespace(root=runtime_root)),
+            ):
+                profile = resolve_pi_model_profile()
+
+        self.assertEqual("openai/gpt-5.3-codex", profile.model)
+        self.assertEqual("high", profile.thinking)
+        self.assertTrue(profile.model_source.endswith(".pi/settings.json"))
+        self.assertTrue(profile.thinking_source.endswith(".pi/settings.json"))
+
+    def test_format_pi_model_plan_lines_includes_type1_and_type2(self) -> None:
+        with patch(
+            "takobot.inference.resolve_pi_model_profile",
+            return_value=SimpleNamespace(
+                model="openai/gpt-5.3-codex",
+                thinking="medium",
+                model_source="~/.pi/agent/settings.json",
+                thinking_source="~/.pi/agent/settings.json",
+            ),
+        ):
+            lines = format_pi_model_plan_lines(type2_thinking_default="high")
+        rendered = "\n".join(lines)
+        self.assertIn("type1 model: openai/gpt-5.3-codex", rendered)
+        self.assertIn("type2 model: openai/gpt-5.3-codex", rendered)
+        self.assertIn("type1 thinking: medium", rendered)
+        self.assertIn("type2 thinking: high", rendered)
+
+    def test_stream_pi_emits_model_thinking_and_delta_events(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        events: list[tuple[str, str]] = []
+
+        async def fake_run_streaming_process(cmd, *, env, timeout_s, on_stdout_line, on_stderr_line):
+            self.assertIn("--mode", cmd)
+            self.assertIn("json", cmd)
+            on_stdout_line(
+                json.dumps(
+                    {
+                        "type": "message_update",
+                        "assistantMessageEvent": {
+                            "type": "thinking_delta",
+                            "delta": "Checking likely root causes before responding.",
+                            "partial": {"model": {"provider": "openai", "id": "gpt-5.3-codex"}},
+                        },
+                    }
+                )
+            )
+            on_stdout_line(
+                json.dumps(
+                    {
+                        "type": "message_update",
+                        "assistantMessageEvent": {"type": "text_delta", "delta": "Hello there"},
+                    }
+                )
+            )
+            on_stdout_line(
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Hello there"}],
+                        },
+                    }
+                )
+            )
+
+        with patch("takobot.inference._run_streaming_process", side_effect=fake_run_streaming_process):
+            output = asyncio.run(
+                _stream_pi(
+                    runtime,
+                    "hi",
+                    env={},
+                    timeout_s=10.0,
+                    on_event=lambda kind, payload: events.append((kind, payload)),
+                )
+            )
+
+        self.assertEqual("Hello there", output)
+        self.assertTrue(any(kind == "model" and "gpt-5.3-codex" in payload for kind, payload in events))
+        self.assertTrue(any(kind == "status" and "pi thinking:" in payload for kind, payload in events))
+        self.assertTrue(any(kind == "delta" and "Hello there" in payload for kind, payload in events))

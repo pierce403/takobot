@@ -225,6 +225,17 @@ class TestAppCommands(unittest.TestCase):
         app.input_processing = True
         self.assertEqual(2, app._queued_input_total())
 
+    def test_inference_stream_model_event_updates_state(self) -> None:
+        app = TakoTerminalApp(interval=5.0)
+        with (
+            patch.object(app, "_stream_render", return_value=None),
+            patch.object(app, "_add_activity", return_value=None),
+            patch.object(app, "_append_app_log", return_value=None),
+        ):
+            app._on_inference_stream_event("model", "openai/gpt-5.3-codex")
+        self.assertEqual("openai/gpt-5.3-codex", app.stream_model)
+        self.assertTrue(any("model: openai/gpt-5.3-codex" in line for line in app.stream_status_lines))
+
     def test_local_chat_unavailable_message_is_clear(self) -> None:
         message = _local_chat_unavailable_message(
             operator_paired=True,

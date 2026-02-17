@@ -50,6 +50,7 @@ from .inference import (
     clear_inference_api_key,
     discover_inference_runtime,
     format_inference_auth_inventory,
+    format_pi_model_plan_lines,
     format_runtime_lines,
     prepare_pi_login_plan,
     persist_inference_runtime,
@@ -156,7 +157,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/config", "Explain tako.toml settings"),
     ("/stage", "Show or set life stage"),
     ("/mission", "Show or set mission objectives"),
-    ("/models", "Show pi and inference auth config"),
+    ("/models", "Show type1/type2 model plan + inference auth"),
     ("/dose", "Show or tune DOSE levels"),
     ("/explore", "Trigger manual exploration (optional topic)"),
     ("/task", "Create a task"),
@@ -471,6 +472,7 @@ class TakoTerminalApp(App[None]):
         self.activity_entries: deque[str] = deque(maxlen=ACTIVITY_LOG_MAX)
         self.transcript_lines: deque[str] = deque(maxlen=TRANSCRIPT_LOG_MAX)
         self.stream_provider = "none"
+        self.stream_model = "auto"
         self.stream_status_lines: list[str] = []
         self.live_work_items: deque[str] = deque(maxlen=LIVE_WORK_ITEMS_MAX)
         self.stream_reply = ""
@@ -2977,6 +2979,10 @@ class TakoTerminalApp(App[None]):
                 if pi_status.note:
                     lines.append(f"pi note: {pi_status.note}")
             lines.append("")
+            lines.extend(format_pi_model_plan_lines())
+            if self.stream_model and self.stream_model != "auto":
+                lines.append(f"- last streamed model (type1): {self.stream_model}")
+            lines.append("")
             lines.extend(format_inference_auth_inventory())
             self._write_tako("\n".join(lines))
             return
@@ -4158,6 +4164,7 @@ class TakoTerminalApp(App[None]):
     def _stream_clear(self) -> None:
         self.stream_active = False
         self.stream_provider = "none"
+        self.stream_model = "auto"
         self.stream_status_lines = []
         self.stream_reply = ""
         self.stream_focus = ""
@@ -4169,6 +4176,7 @@ class TakoTerminalApp(App[None]):
     def _stream_begin(self, *, focus: str = "") -> None:
         self.stream_active = True
         self.stream_provider = "starting"
+        self.stream_model = "auto"
         self.stream_status_lines = []
         self.live_work_items.clear()
         self.stream_reply = ""
@@ -4182,6 +4190,16 @@ class TakoTerminalApp(App[None]):
             self.stream_provider = payload.strip() or self.stream_provider
             self._add_activity("inference", f"provider attempt: {self.stream_provider}")
             self._append_app_log("inference", f"provider={self.stream_provider}")
+            self._stream_render(force=True)
+            return
+
+        if kind == "model":
+            self.stream_model = payload.strip() or self.stream_model
+            self.stream_status_lines.append(f"model: {self.stream_model}")
+            if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
+                self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
+            self._append_app_log("inference", f"model={self.stream_model}")
+            self._add_activity("inference", f"model selected: {self.stream_model}")
             self._stream_render(force=True)
             return
 
@@ -4241,7 +4259,8 @@ class TakoTerminalApp(App[None]):
         if self.stream_started_at is not None:
             elapsed_s = int(max(0.0, time.monotonic() - self.stream_started_at))
         header = (
-            f"bubble stream: provider={self.stream_provider} | mind={self._thinking_visual()} | elapsed={elapsed_s}s\n"
+            f"bubble stream: provider={self.stream_provider} model={self.stream_model} | "
+            f"mind={self._thinking_visual()} | elapsed={elapsed_s}s\n"
         )
         focus = f"focus: {self.stream_focus}\n" if self.stream_focus else ""
         status = ""

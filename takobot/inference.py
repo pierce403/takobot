@@ -324,6 +324,14 @@ class InferenceRuntime:
 
 
 @dataclass(frozen=True)
+class PiModelProfile:
+    model: str
+    thinking: str
+    model_source: str
+    thinking_source: str
+
+
+@dataclass(frozen=True)
 class PiLoginPlan:
     auth_ready: bool
     notes: tuple[str, ...] = ()
@@ -651,6 +659,66 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
             f"auth={status.auth_kind} ready={'yes' if status.ready else 'no'} "
             f"source={status.key_source or 'none'}"
         )
+    return lines
+
+
+def resolve_pi_model_profile() -> PiModelProfile:
+    model = ""
+    thinking = ""
+    model_source = ""
+    thinking_source = ""
+
+    candidates = (
+        Path.home() / ".pi" / "agent" / "settings.json",
+        runtime_paths().root / "pi" / "agent" / "settings.json",
+        repo_root() / ".pi" / "settings.json",
+    )
+    for candidate in candidates:
+        payload = _read_json(candidate)
+        if not isinstance(payload, dict):
+            continue
+        model_value = _clean_model_setting(payload.get("defaultModel") or payload.get("model"))
+        if model_value:
+            model = model_value
+            model_source = _tilde_path(candidate)
+        thinking_value = _clean_thinking_setting(
+            payload.get("defaultThinkingLevel") or payload.get("thinkingLevel") or payload.get("thinking")
+        )
+        if thinking_value:
+            thinking = thinking_value
+            thinking_source = _tilde_path(candidate)
+
+    if not thinking:
+        thinking = "medium"
+    return PiModelProfile(
+        model=model,
+        thinking=thinking,
+        model_source=model_source,
+        thinking_source=thinking_source,
+    )
+
+
+def format_pi_model_plan_lines(*, type2_thinking_default: str = "") -> list[str]:
+    profile = resolve_pi_model_profile()
+    model = profile.model or "(auto-select)"
+    type1_thinking = profile.thinking or "medium"
+    type2_thinking = _clean_thinking_setting(type2_thinking_default) or type1_thinking
+
+    lines = [
+        "pi model plan:",
+        f"- type1 model: {model}",
+        f"- type1 thinking: {type1_thinking}",
+        f"- type2 model: {model}",
+        f"- type2 thinking: {type2_thinking}",
+    ]
+    if profile.model_source:
+        lines.append(f"- model source: {profile.model_source}")
+    else:
+        lines.append("- model source: (not set; pi selects first available model)")
+    if profile.thinking_source:
+        lines.append(f"- thinking source: {profile.thinking_source}")
+    else:
+        lines.append("- thinking source: default medium")
     return lines
 
 
@@ -1433,9 +1501,7 @@ async def _stream_with_provider(
     env = _provider_env(runtime, provider)
 
     if provider == "pi":
-        text = await asyncio.to_thread(_run_pi, runtime, prompt, env=env, timeout_s=timeout_s)
-        await _simulate_stream(text, on_event=on_event)
-        return text
+        return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event)
     if provider == "ollama":
         text = await asyncio.to_thread(_run_ollama, runtime, prompt, env=env, timeout_s=timeout_s)
         await _simulate_stream(text, on_event=on_event)
@@ -1450,6 +1516,200 @@ async def _stream_with_provider(
         return text
 
     raise RuntimeError(f"unsupported inference provider: {provider}")
+
+
+async def _stream_pi(
+    runtime: InferenceRuntime,
+    prompt: str,
+    *,
+    env: dict[str, str],
+    timeout_s: float,
+    on_event: StreamEventHook | None,
+) -> str:
+    status = runtime.statuses.get("pi")
+    cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
+    cmd = [
+        cli,
+        "--mode",
+        "json",
+        "--no-session",
+        prompt,
+    ]
+
+    stderr_lines: list[str] = []
+    text_chunks: list[str] = []
+    final_text = ""
+    last_status = ""
+    last_thinking = ""
+    last_tool_update = ""
+    emitted_model = ""
+
+    def emit_status(message: str) -> None:
+        nonlocal last_status
+        cleaned = _short_status_text(message, max_chars=220)
+        if not cleaned or cleaned == last_status:
+            return
+        last_status = cleaned
+        if on_event:
+            on_event("status", cleaned)
+
+    def emit_task(message: str) -> None:
+        cleaned = _short_status_text(message, max_chars=180)
+        if not cleaned:
+            return
+        if on_event:
+            on_event("task", cleaned)
+
+    def maybe_emit_model(payload: dict[str, Any]) -> None:
+        nonlocal emitted_model
+        model = _pi_model_from_event(payload)
+        if not model or model == emitted_model:
+            return
+        emitted_model = model
+        if on_event:
+            on_event("model", model)
+        emit_status(f"pi model: {model}")
+
+    def handle_stdout_line(line: str) -> None:
+        nonlocal final_text, last_thinking, last_tool_update
+        stripped = line.strip()
+        if not stripped:
+            return
+        if not stripped.startswith("{"):
+            emit_status(f"pi: {stripped}")
+            return
+        try:
+            payload = json.loads(stripped)
+        except Exception:
+            emit_status(f"pi: {stripped}")
+            return
+        if not isinstance(payload, dict):
+            return
+
+        maybe_emit_model(payload)
+        event_type = str(payload.get("type") or "").strip().lower()
+        if not event_type:
+            return
+
+        if event_type == "message_update":
+            assistant_event = payload.get("assistantMessageEvent")
+            if not isinstance(assistant_event, dict):
+                return
+            delta_type = str(assistant_event.get("type") or "").strip().lower()
+            if delta_type == "text_delta":
+                delta = assistant_event.get("delta")
+                if isinstance(delta, str) and delta:
+                    text_chunks.append(delta)
+                    if on_event:
+                        on_event("delta", delta)
+                return
+            if delta_type == "thinking_start":
+                emit_status("pi thinking...")
+                return
+            if delta_type == "thinking_delta":
+                delta = _short_status_text(str(assistant_event.get("delta") or ""), max_chars=140)
+                if delta and delta != last_thinking:
+                    last_thinking = delta
+                    emit_status(f"pi thinking: {delta}")
+                return
+            if delta_type == "thinking_end":
+                emit_status("pi thinking block complete")
+                return
+            if delta_type == "toolcall_start":
+                tool_name = _short_status_text(str(assistant_event.get("toolName") or "tool"), max_chars=80)
+                emit_task(f"pi preparing tool call: {tool_name}")
+                return
+            if delta_type == "toolcall_end":
+                tool_name = _short_status_text(str(assistant_event.get("toolName") or "tool"), max_chars=80)
+                emit_task(f"pi tool call ready: {tool_name}")
+                return
+            if delta_type == "done":
+                emit_status("pi response stream complete")
+                return
+            if delta_type == "error":
+                reason = _short_status_text(str(assistant_event.get("reason") or "unknown"), max_chars=80)
+                emit_status(f"pi stream error: {reason}")
+                return
+            return
+
+        if event_type == "tool_execution_start":
+            tool_name = _short_status_text(str(payload.get("toolName") or "tool"), max_chars=80)
+            args = _pi_tool_args_summary(payload.get("args"))
+            emit_task(f"pi tool start: {tool_name}{args}")
+            return
+        if event_type == "tool_execution_update":
+            tool_name = _short_status_text(str(payload.get("toolName") or "tool"), max_chars=80)
+            partial = _short_status_text(_pi_tool_result_text(payload.get("partialResult")), max_chars=160)
+            if partial and partial != last_tool_update:
+                last_tool_update = partial
+                emit_status(f"{tool_name}: {partial}")
+            return
+        if event_type == "tool_execution_end":
+            tool_name = _short_status_text(str(payload.get("toolName") or "tool"), max_chars=80)
+            if bool(payload.get("isError")):
+                detail = _short_status_text(_pi_tool_result_text(payload.get("result")), max_chars=140)
+                emit_status(f"pi tool error: {tool_name} ({detail or 'no details'})")
+            else:
+                emit_task(f"pi tool complete: {tool_name}")
+            return
+
+        if event_type in {"message_end", "turn_end"}:
+            maybe = _pi_message_text(payload.get("message"))
+            if maybe:
+                final_text = maybe
+            return
+        if event_type == "agent_end":
+            messages = payload.get("messages")
+            if isinstance(messages, list):
+                for item in reversed(messages):
+                    maybe = _pi_message_text(item)
+                    if maybe:
+                        final_text = maybe
+                        break
+            return
+
+        if event_type == "auto_retry_start":
+            attempt = payload.get("attempt")
+            max_attempts = payload.get("maxAttempts")
+            emit_status(f"pi auto-retry start: attempt {attempt}/{max_attempts}")
+            return
+        if event_type == "auto_retry_end":
+            success = _yes_no(bool(payload.get("success")))
+            emit_status(f"pi auto-retry end: success={success}")
+            return
+        if event_type == "auto_compaction_start":
+            reason = _short_status_text(str(payload.get("reason") or "unknown"), max_chars=60)
+            emit_status(f"pi compaction start: {reason}")
+            return
+        if event_type == "auto_compaction_end":
+            aborted = _yes_no(bool(payload.get("aborted")))
+            will_retry = _yes_no(bool(payload.get("willRetry")))
+            emit_status(f"pi compaction end: aborted={aborted} retry={will_retry}")
+            return
+        if event_type in {"agent_start", "turn_start", "turn_end", "message_start"}:
+            emit_status(f"pi event: {event_type}")
+            return
+
+    def handle_stderr_line(line: str) -> None:
+        stripped = line.strip()
+        if not stripped:
+            return
+        stderr_lines.append(stripped)
+        emit_status(f"pi stderr: {stripped}")
+
+    await _run_streaming_process(
+        cmd,
+        env=env,
+        timeout_s=timeout_s,
+        on_stdout_line=handle_stdout_line,
+        on_stderr_line=handle_stderr_line,
+    )
+
+    text = (final_text or "".join(text_chunks)).strip()
+    if not text:
+        detail = "; ".join(stderr_lines[-5:]) if stderr_lines else "no assistant output received"
+        raise RuntimeError(f"pi inference returned no assistant output: {detail}")
+    return text
 
 
 async def _simulate_stream(text: str, *, on_event: StreamEventHook | None) -> None:
@@ -1750,6 +2010,138 @@ def _short_status_text(value: str, *, max_chars: int) -> str:
     if len(cleaned) <= max_chars:
         return cleaned
     return f"{cleaned[: max_chars - 3]}..."
+
+
+def _pi_model_from_event(payload: dict[str, Any]) -> str:
+    candidates: list[Any] = [
+        payload.get("model"),
+        payload.get("modelId"),
+    ]
+    assistant_event = payload.get("assistantMessageEvent")
+    if isinstance(assistant_event, dict):
+        candidates.extend(
+            [
+                assistant_event.get("model"),
+                assistant_event.get("modelId"),
+                assistant_event.get("partial"),
+            ]
+        )
+    message = payload.get("message")
+    if isinstance(message, dict):
+        candidates.extend([message.get("model"), message.get("modelId")])
+
+    for candidate in candidates:
+        resolved = _coerce_model_label(candidate)
+        if resolved:
+            return resolved
+    return ""
+
+
+def _coerce_model_label(value: Any) -> str:
+    if isinstance(value, str):
+        return _clean_model_setting(value)
+    if isinstance(value, dict):
+        provider = _clean_model_setting(value.get("provider"))
+        model_id = _clean_model_setting(value.get("id") or value.get("model") or value.get("modelId"))
+        if provider and model_id:
+            return f"{provider}/{model_id}"
+        if model_id:
+            return model_id
+    return ""
+
+
+def _pi_message_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    role = str(message.get("role") or "").strip().lower()
+    if role and role != "assistant":
+        return ""
+
+    content = message.get("content")
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "").strip().lower()
+            if item_type in {"thinking", "tool_call", "toolcall"}:
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                chunks.append(text.strip())
+                continue
+            value = item.get("value")
+            if isinstance(value, str) and value.strip():
+                chunks.append(value.strip())
+        combined = "\n".join(chunks).strip()
+        if combined:
+            return combined
+
+    text = message.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    return ""
+
+
+def _pi_tool_args_summary(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    command = value.get("command")
+    if isinstance(command, str):
+        cleaned = _short_status_text(command, max_chars=80)
+        if cleaned:
+            return f" ({cleaned})"
+    query = value.get("query")
+    if isinstance(query, str):
+        cleaned = _short_status_text(query, max_chars=80)
+        if cleaned:
+            return f" ({cleaned})"
+    return ""
+
+
+def _pi_tool_result_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, Mapping):
+        return ""
+    content = value.get("content")
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for item in content:
+            if not isinstance(item, Mapping):
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                chunks.append(text.strip())
+        if chunks:
+            return " ".join(chunks)
+    details = value.get("details")
+    if isinstance(details, Mapping):
+        output = details.get("output") or details.get("message")
+        if isinstance(output, str) and output.strip():
+            return output.strip()
+    return ""
+
+
+def _clean_model_setting(value: Any) -> str:
+    cleaned = " ".join(str(value or "").split()).strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) > 180:
+        cleaned = cleaned[:180].rstrip()
+    return cleaned
+
+
+def _clean_thinking_setting(value: Any) -> str:
+    cleaned = " ".join(str(value or "").split()).strip().lower()
+    allowed = {"off", "minimal", "low", "medium", "high", "xhigh"}
+    if cleaned in allowed:
+        return cleaned
+    return ""
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
 
 
 async def _run_streaming_process(

@@ -137,15 +137,18 @@
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.
   - Terminal update controls expose setting state and toggles: `update auto status|on|off`.
   - Streams in-progress inference output into a scrollable "bubble stream" panel above the input box (Cursor/Claude style).
+  - Pi inference streaming uses `pi --mode json` so TUI can surface live thinking deltas, tool execution progress, and pi lifecycle status while turns are running.
   - Persists chat sessions as JSONL transcripts under `.tako/state/conversations/` and injects recent history windows into inference prompts.
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
   - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
   - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
+  - Bubble stream header includes streamed model identity when provided by inference events.
   - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid stalled pi-runtime turns.
   - When inference is unavailable, local chat returns a clear diagnostics-mode message with immediate repair guidance instead of ambiguous status text.
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
+  - `models` command reports Type1/Type2 pi model/thinking plan from resolved pi settings plus the last streamed model seen in TUI.
   - Local and XMTP chat prompts enforce canonical identity naming from workspace/identity state after renames.
   - XMTP runtime self-heals by retrying transient send errors and rebuilding the XMTP client after repeated poll/stream failures.
   - Shows a stage-specific top-right ASCII octopus panel in the sidebar, including Takobot version, life-stage tone, and compact DOSE indicators.
@@ -172,6 +175,8 @@
   - [x] Outbound XMTP pairing can auto-complete without code copyback confirmation.
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
   - [x] Runtime can report pi/ollama/codex/claude/gemini discovery and readiness via `inference` command.
+  - [x] Pi JSON stream events are surfaced to TUI stream status/task lines during local chat inference.
+  - [x] `models` command includes resolved type1/type2 model configuration details (not only provider readiness).
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.

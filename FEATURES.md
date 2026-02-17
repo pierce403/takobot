@@ -90,6 +90,8 @@
   - Uses an in-memory EventBus that writes `.tako/state/events.jsonl` for audit while dispatching events directly to Type 1 queues (no JSONL polling loop).
   - Includes world-watch sensors for RSS/Atom monitoring (`RSSSensor`) plus child-stage random curiosity exploration (`CuriositySensor`) across Reddit/Hacker News/Wikipedia.
   - Curiosity exploration persists dedupe state in `.tako/state/curiosity_seen.json` and writes mission-linked questions into world notebook entries/briefings.
+  - Runtime tracks idle periods and emits boredom signals that trigger autonomous exploration when idle too long (roughly hourly by default).
+  - Novel world discoveries emit explicit novelty events so DOSE can reward fresh external signal capture.
   - Child-stage chat behavior is context-first (one gentle question at a time) and avoids pushing structured plans/tasks unless operator asks.
   - Child-stage chat captures operator profile notes under `memory/people/operator.md` and persists structured state at `.tako/state/operator_profile.json`.
   - Child-stage website preferences from operator chat are added to `tako.toml` (`[world_watch].sites`) and sampled by curiosity exploration.
@@ -108,6 +110,7 @@
   - During streamed inference, tool/research progress is surfaced as live "active work" in the Tasks panel (for example web browsing/search/tool-call steps).
   - Includes an activity panel with inference/tool/runtime trace lines.
   - App transcript/system lines are appended to `.tako/logs/app.log`.
+  - Pi chat adds explicit turn summaries to logs (`pi chat user` / `pi chat assistant`) in app and daemon runtime logs.
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.
   - App heartbeat performs git auto-commit for pending workspace changes (`git add -A` + `git commit`).
   - If git identity is missing, startup/heartbeat auto-configure repo-local identity from the bot name (email pattern: `<name>.tako.eth@xmtp.mx`) and retry commit.
@@ -191,7 +194,8 @@
 - **Properties**:
   - Stored in `.tako/state/dose.json` (runtime-only; ignored by git).
   - Deterministic: decays toward baselines on heartbeat ticks and clamps each channel to `[0,1]`.
-  - Updated from all recorded events via a single hook in the app event recorder.
+  - Updated from recorded app events plus runtime/sensor EventBus events (single-application guard prevents double-application).
+  - Idle boredom signals reduce D/S/E and can trigger an autonomous exploration tick; novelty signals increase reward channels.
   - Displayed in the TUI status bar and sidebar sensor panel.
   - Biases Type 1 → Type 2 escalation sensitivity (more cautious when low S/E; more tolerant when high S/E).
 - **Test Criteria**:

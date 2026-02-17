@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-17 — Idle boredom now drives exploration and pi turns are log-visible
+
+- What happened: long idle stretches could feel like Tako was "doing nothing," and pi-backed chat turns were hard to audit from logs during extended runs.
+- Fix: runtime now emits boredom signals during idle periods, triggers boredom-driven exploration on a bounded cadence, and emits novelty events that reinforce DOSE; pi chat now writes concise user/assistant turn summaries to both app and daemon logs.
+- Prevention: keep autonomy loops tied to explicit event signals (boredom/novelty) and preserve operator observability by logging provider-specific turn summaries for long-running inference sessions.
+
 ### 2026-02-16 — TUI shutdown no longer crashes on activity markup parsing
 
 - What happened: during app shutdown, activity-panel rendering could raise `textual.markup.MarkupError` when activity strings contained markup-like tokens (for example bracketed provider names), which crashed the session.

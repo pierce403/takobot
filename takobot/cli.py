@@ -1889,6 +1889,9 @@ async def _chat_reply(
     cleaned = _clean_chat_reply(reply)
     if not cleaned:
         return fallback
+    if provider == "pi":
+        _emit_runtime_log(f"pi chat user: {_summarize_chat_log_text(text)}", hooks=hooks)
+        _emit_runtime_log(f"pi chat assistant: {_summarize_chat_log_text(cleaned)}", hooks=hooks)
     _emit_runtime_log(f"inference chat provider: {provider}", hooks=hooks)
     return cleaned
 
@@ -2072,6 +2075,13 @@ def _summarize_stream_error(error: Exception) -> str:
     if len(text) > 220:
         return f"{text[:217]}..."
     return text
+
+
+def _summarize_chat_log_text(text: str) -> str:
+    value = " ".join(str(text or "").split())
+    if len(value) <= 320:
+        return value
+    return f"{value[:317]}..."
 
 
 def _stream_reconnect_delay(attempt: int) -> float:

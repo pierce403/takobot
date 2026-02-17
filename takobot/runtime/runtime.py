@@ -19,6 +19,9 @@ from .events import EventBus
 BRIEFING_MAX_PER_DAY = 3
 BRIEFING_COOLDOWN_S = 90 * 60
 BRIEFING_MAX_TRACKED_ITEM_IDS = 5_000
+BOREDOM_IDLE_DECAY_START_S = 20 * 60
+BOREDOM_IDLE_DECAY_INTERVAL_S = 15 * 60
+BOREDOM_EXPLORE_INTERVAL_S = 60 * 60
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,9 @@ class Runtime:
         on_heartbeat_tick: Callable[[RuntimeHeartbeatTick], Any] | None = None,
         on_activity: Callable[[str, str], Any] | None = None,
         on_briefing: Callable[[str], Any] | None = None,
+        boredom_idle_decay_start_s: float = BOREDOM_IDLE_DECAY_START_S,
+        boredom_idle_decay_interval_s: float = BOREDOM_IDLE_DECAY_INTERVAL_S,
+        boredom_explore_interval_s: float = BOREDOM_EXPLORE_INTERVAL_S,
     ) -> None:
         self.event_bus = event_bus
         self.state_dir = state_dir
@@ -65,6 +71,9 @@ class Runtime:
         self.on_heartbeat_tick = on_heartbeat_tick
         self.on_activity = on_activity
         self.on_briefing = on_briefing
+        self.boredom_idle_decay_start_s = max(0.05, float(boredom_idle_decay_start_s))
+        self.boredom_idle_decay_interval_s = max(0.05, float(boredom_idle_decay_interval_s))
+        self.boredom_explore_interval_s = max(0.05, float(boredom_explore_interval_s))
 
         self.heartbeat_ticks = 0
         self.last_heartbeat_at: float | None = None
@@ -78,11 +87,16 @@ class Runtime:
         self._error_counts: dict[str, int] = {}
         self._repeating_errors: set[str] = set()
         self._last_open_tasks_count: int | None = None
+        self._last_meaningful_activity_at = time.monotonic()
+        self._last_idle_decay_at = 0.0
+        self._last_boredom_explore_at = 0.0
+        self._explore_lock = asyncio.Lock()
 
         self._world_dir = self.memory_root / "world"
         self._briefing_state_path = self.state_dir / "briefing_state.json"
         self._briefing_state = self._load_briefing_state()
         self._unsubscribe_error_listener = self.event_bus.subscribe(self._track_errors)
+        self._unsubscribe_activity_listener = self.event_bus.subscribe(self._track_activity)
 
     @property
     def running(self) -> bool:
@@ -102,6 +116,9 @@ class Runtime:
                 "heartbeat_interval_s": self.heartbeat_interval_s,
                 "explore_interval_s": self.explore_interval_s,
                 "sensors": [sensor.name for sensor in self.sensors],
+                "boredom_idle_decay_start_s": self.boredom_idle_decay_start_s,
+                "boredom_idle_decay_interval_s": self.boredom_idle_decay_interval_s,
+                "boredom_explore_interval_s": self.boredom_explore_interval_s,
             },
         )
         self._emit_activity("runtime", "service started")
@@ -145,82 +162,91 @@ class Runtime:
             if self.on_heartbeat_tick is not None:
                 with contextlib.suppress(Exception):
                     await _maybe_await(self.on_heartbeat_tick(tick))
+            with contextlib.suppress(Exception):
+                await self._maybe_handle_boredom(tick.at_monotonic)
             await asyncio.sleep(_with_jitter(self.heartbeat_interval_s, self.heartbeat_jitter_ratio))
 
     async def _explore_loop(self) -> None:
         while True:
-            self.explore_ticks += 1
-            self.last_explore_at = time.monotonic()
             with contextlib.suppress(Exception):
-                await self._run_exploration_tick()
+                await self._run_exploration_tick(trigger="cadence")
             await asyncio.sleep(_with_jitter(self.explore_interval_s, self.explore_jitter_ratio))
 
-    async def _run_exploration_tick(self) -> None:
-        today = date.today()
-        ensure_daily_log(self.daily_log_root, today)
-        _ensure_world_memory_scaffold(self._world_dir)
-        mission_objectives = self._mission_objectives()
-        ctx = SensorContext.create(
-            state_dir=self.state_dir,
-            user_agent=self.sensor_user_agent,
-            timeout_s=self.sensor_timeout_s,
-            mission_objectives=mission_objectives,
-        )
+    async def _run_exploration_tick(self, *, trigger: str) -> None:
+        async with self._explore_lock:
+            self.explore_ticks += 1
+            self.last_explore_at = time.monotonic()
+            today = date.today()
+            ensure_daily_log(self.daily_log_root, today)
+            _ensure_world_memory_scaffold(self._world_dir)
+            mission_objectives = self._mission_objectives()
+            ctx = SensorContext.create(
+                state_dir=self.state_dir,
+                user_agent=self.sensor_user_agent,
+                timeout_s=self.sensor_timeout_s,
+                mission_objectives=mission_objectives,
+            )
 
-        world_items: list[WorldItem] = []
-        for sensor in self.sensors:
-            try:
-                sensor_events = await sensor.tick(ctx)
-            except Exception as exc:  # noqa: BLE001
-                self.event_bus.publish_event(
-                    "sensor.tick.error",
-                    f"{sensor.name} sensor tick failed: {exc}",
-                    severity="warn",
-                    source=f"sensor:{sensor.name}",
-                )
-                continue
-            for event in sensor_events:
-                published = self.event_bus.publish(event)
-                if str(published.get("type", "")) == "world.news.item":
-                    item = _world_item_from_event(published)
-                    if item is not None:
-                        world_items.append(item)
+            world_items: list[WorldItem] = []
+            for sensor in self.sensors:
+                try:
+                    sensor_events = await sensor.tick(ctx)
+                except Exception as exc:  # noqa: BLE001
+                    self.event_bus.publish_event(
+                        "sensor.tick.error",
+                        f"{sensor.name} sensor tick failed: {exc}",
+                        severity="warn",
+                        source=f"sensor:{sensor.name}",
+                    )
+                    continue
+                for event in sensor_events:
+                    published = self.event_bus.publish(event)
+                    if str(published.get("type", "")) == "world.news.item":
+                        item = _world_item_from_event(published)
+                        if item is not None:
+                            world_items.append(item)
 
-        new_world_count = 0
-        if world_items:
-            notebook_path, new_world_count = _append_world_notebook_entries(self._world_dir, today, world_items)
-            if new_world_count > 0:
-                append_daily_note(
-                    self.daily_log_root,
-                    today,
-                    f"World Watch picked up {new_world_count} new items.",
-                )
-                self.event_bus.publish_event(
-                    "world.watch.batch",
-                    f"World Watch captured {new_world_count} new items.",
-                    source="runtime",
-                    metadata={"count": new_world_count, "path": str(notebook_path)},
-                )
-                self._emit_activity("world-watch", f"{new_world_count} new items")
+            new_world_count = 0
+            if world_items:
+                notebook_path, new_world_count = _append_world_notebook_entries(self._world_dir, today, world_items)
+                if new_world_count > 0:
+                    append_daily_note(
+                        self.daily_log_root,
+                        today,
+                        f"World Watch picked up {new_world_count} new items.",
+                    )
+                    self.event_bus.publish_event(
+                        "world.watch.batch",
+                        f"World Watch captured {new_world_count} new items.",
+                        source="runtime",
+                        metadata={"count": new_world_count, "path": str(notebook_path), "trigger": trigger},
+                    )
+                    self.event_bus.publish_event(
+                        "world.novelty.detected",
+                        f"Novel world signals detected: {new_world_count} new item(s).",
+                        source="runtime",
+                        metadata={"count": new_world_count, "trigger": trigger},
+                    )
+                    self._emit_activity("world-watch", f"{new_world_count} new items")
 
-        tasks_unblocked = self._detect_unblocked_tasks()
-        repeated_errors = sorted(self._repeating_errors)
+            tasks_unblocked = self._detect_unblocked_tasks()
+            repeated_errors = sorted(self._repeating_errors)
 
-        if await self._maybe_emit_briefing(
-            world_items=world_items,
-            new_world_count=new_world_count,
-            tasks_unblocked=tasks_unblocked,
-            repeated_errors=repeated_errors,
-        ):
-            for signature in repeated_errors:
-                self._repeating_errors.discard(signature)
+            if await self._maybe_emit_briefing(
+                world_items=world_items,
+                new_world_count=new_world_count,
+                tasks_unblocked=tasks_unblocked,
+                repeated_errors=repeated_errors,
+            ):
+                for signature in repeated_errors:
+                    self._repeating_errors.discard(signature)
 
-        self._maybe_write_daily_mission_review(
-            world_items=world_items,
-            new_world_count=new_world_count,
-            tasks_unblocked=tasks_unblocked,
-            repeated_errors=repeated_errors,
-        )
+            self._maybe_write_daily_mission_review(
+                world_items=world_items,
+                new_world_count=new_world_count,
+                tasks_unblocked=tasks_unblocked,
+                repeated_errors=repeated_errors,
+            )
 
     def _detect_unblocked_tasks(self) -> int:
         if self.open_tasks_count_getter is None:
@@ -388,6 +414,42 @@ class Runtime:
             trimmed = sorted(self._error_counts.items(), key=lambda entry: entry[1], reverse=True)[:300]
             self._error_counts = dict(trimmed)
             self._repeating_errors = {item for item in self._repeating_errors if item in self._error_counts}
+
+    def _track_activity(self, event: dict[str, Any]) -> None:
+        event_type = str(event.get("type", "")).strip().lower()
+        if not event_type:
+            return
+        if event_type.startswith(("runtime.service.", "dose.bored.")):
+            return
+        self._last_meaningful_activity_at = time.monotonic()
+
+    async def _maybe_handle_boredom(self, now_monotonic: float) -> None:
+        idle_s = max(0.0, float(now_monotonic) - float(self._last_meaningful_activity_at))
+        if idle_s >= self.boredom_idle_decay_start_s:
+            if (now_monotonic - self._last_idle_decay_at) >= self.boredom_idle_decay_interval_s:
+                self._last_idle_decay_at = now_monotonic
+                self.event_bus.publish_event(
+                    "dose.bored.idle",
+                    f"Idle drift detected ({int(idle_s)}s); emotional indicators are dropping.",
+                    source="runtime",
+                    metadata={"idle_seconds": int(idle_s)},
+                )
+                self._emit_activity("dose", f"idle drift {int(idle_s)}s")
+
+        if idle_s < self.boredom_explore_interval_s:
+            return
+        if (now_monotonic - self._last_boredom_explore_at) < self.boredom_explore_interval_s:
+            return
+
+        self._last_boredom_explore_at = now_monotonic
+        self.event_bus.publish_event(
+            "dose.bored.explore",
+            f"Boredom threshold reached ({int(idle_s)}s idle); launching exploration.",
+            source="runtime",
+            metadata={"idle_seconds": int(idle_s)},
+        )
+        self._emit_activity("explore", "boredom-triggered exploration")
+        await self._run_exploration_tick(trigger="boredom")
 
     def _rollover_day(self, today_iso: str) -> None:
         current_day = str(self._briefing_state.get("day", "")).strip()

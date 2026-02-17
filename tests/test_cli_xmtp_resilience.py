@@ -6,15 +6,18 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from takobot.conversation import ConversationStore
 from takobot.cli import (
     _ConversationWithTyping,
     RuntimeHooks,
+    _chat_reply,
     _canonical_identity_name,
     _chat_prompt,
     _close_xmtp_client,
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
 )
+from takobot.inference import InferenceProviderStatus, InferenceRuntime
 
 
 class _DummyAsyncClosable:
@@ -47,6 +50,29 @@ class _DummyConversation:
 
 
 class TestCliXmtpResilience(unittest.TestCase):
+    @staticmethod
+    def _pi_runtime() -> InferenceRuntime:
+        status = InferenceProviderStatus(
+            provider="pi",
+            cli_name="pi",
+            cli_path="/usr/bin/pi",
+            cli_installed=True,
+            auth_kind="oauth_or_profile",
+            key_env_var=None,
+            key_source="file:~/.pi/agent/auth.json",
+            key_present=True,
+            ready=True,
+            note="",
+        )
+        return InferenceRuntime(
+            statuses={"pi": status},
+            selected_provider="pi",
+            selected_auth_kind=status.auth_kind,
+            selected_key_env_var=status.key_env_var,
+            selected_key_source=status.key_source,
+            _api_keys={},
+        )
+
     def test_cli_canonical_identity_name_defaults(self) -> None:
         self.assertEqual("Tako", _canonical_identity_name(""))
         self.assertEqual("ProTako", _canonical_identity_name(" ProTako "))
@@ -123,6 +149,34 @@ class TestCliXmtpResilience(unittest.TestCase):
             asyncio.run(wrapped.send("hello from takobot"))
         self.assertEqual(["hello from takobot"], convo.sent)
         self.assertEqual([("peer-inbox-123456", "hello from takobot")], outbound)
+
+    def test_chat_reply_logs_pi_turn_summaries(self) -> None:
+        runtime = self._pi_runtime()
+        with TemporaryDirectory() as tmp:
+            conversations = ConversationStore(Path(tmp))
+            runtime_logs: list[tuple[str, str]] = []
+
+            def _capture(level: str, message: str) -> None:
+                runtime_logs.append((level, message))
+
+            hooks = RuntimeHooks(log=_capture, emit_console=False)
+            with patch("takobot.cli.run_inference_prompt_with_fallback", return_value=("pi", "assistant reply")):
+                reply = asyncio.run(
+                    _chat_reply(
+                        "hello there",
+                        runtime,
+                        conversations=conversations,
+                        session_key="xmtp:test",
+                        is_operator=True,
+                        operator_paired=True,
+                        hooks=hooks,
+                    )
+                )
+
+        self.assertEqual("assistant reply", reply)
+        combined = "\n".join(message for _level, message in runtime_logs)
+        self.assertIn("pi chat user: hello there", combined)
+        self.assertIn("pi chat assistant: assistant reply", combined)
 
 
 if __name__ == "__main__":

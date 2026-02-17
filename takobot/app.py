@@ -412,6 +412,7 @@ class TakoTerminalApp(App[None]):
         self.type2_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.event_bus = EventBus()
         self.event_bus.subscribe(self._enqueue_type1_event)
+        self.event_bus.subscribe(self._apply_dose_from_bus_event)
 
         self.instance_kind = "unknown"
         self.health_summary: dict[str, str] = {}
@@ -1305,7 +1306,7 @@ class TakoTerminalApp(App[None]):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         safe_message = _sanitize_for_display(message)
-        event_metadata = metadata or {}
+        event_metadata = dict(metadata or {})
 
         if self.dose is not None:
             try:
@@ -1317,6 +1318,7 @@ class TakoTerminalApp(App[None]):
                     event_metadata,
                 )
                 self.dose_label = self.dose.label()
+                event_metadata["_dose_applied"] = True
             except Exception as exc:  # noqa: BLE001
                 self._write_system(f"dose update warning: {_summarize_error(exc)}")
 
@@ -1379,6 +1381,28 @@ class TakoTerminalApp(App[None]):
         self.event_total_ingested += 1
         with contextlib.suppress(asyncio.QueueFull):
             self.type1_queue.put_nowait(event)
+
+    def _apply_dose_from_bus_event(self, event: dict[str, Any]) -> None:
+        if self.dose is None:
+            return
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            event["metadata"] = metadata
+        if metadata.get("_dose_applied"):
+            return
+        try:
+            self.dose.apply_event(
+                str(event.get("type") or "system.event"),
+                str(event.get("severity") or "info").lower(),
+                str(event.get("source") or "system"),
+                _sanitize_for_display(str(event.get("message") or "")),
+                metadata,
+            )
+            self.dose_label = self.dose.label()
+            metadata["_dose_applied"] = True
+        except Exception as exc:  # noqa: BLE001
+            self._write_system(f"dose update warning: {_summarize_error(exc)}")
 
     async def _type1_loop(self) -> None:
         while True:
@@ -4319,6 +4343,9 @@ class TakoTerminalApp(App[None]):
         self.inference_last_provider = provider
         self.inference_last_error = ""
         self._append_app_log("inference", f"chat-success provider={provider} elapsed={elapsed_s}s")
+        if provider == "pi":
+            self._append_app_log("pi-chat", f"user={_summarize_text(_sanitize_for_display(text))}")
+            self._append_app_log("pi-chat", f"assistant={_summarize_text(cleaned)}")
         self._add_activity("inference", f"terminal chat used provider={provider}")
         self._record_event(
             "inference.chat.reply",

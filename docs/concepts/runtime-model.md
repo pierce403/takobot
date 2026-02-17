@@ -31,8 +31,8 @@ Takobot uses a three-part model:
 All mutable runtime state is under `.tako/`:
 
 - `keys.json`, `operator.json`
-- `logs/` (`runtime.log`, `app.log`)
-- `state/` (events, DOSE, open loops, inference metadata, conversation sessions)
+- `logs/` (`runtime.log`, `app.log`; includes pi chat turn summaries)
+- `state/` (events, DOSE, open loops, inference metadata, conversation sessions, boredom/briefing cadence state)
 - `state/rss_seen.json`, `state/curiosity_seen.json`, `state/operator_profile.json`, and `state/briefing_state.json` (world-watch dedupe + child-stage operator modeling + briefing cadence state)
 - `tmp/` (workspace-local temp files)
 - `xmtp-db/`
@@ -41,5 +41,6 @@ All mutable runtime state is under `.tako/`:
 World-watch notes are committed under `memory/world/` so research accumulation stays visible in git history. In `child` stage, world-watch also samples Reddit/Hacker News/Wikipedia and records mission-linked questions.
 Child-stage operator notes are committed under `memory/people/operator.md`, and captured website preferences are persisted in `tako.toml` (`[world_watch].sites`).
 Life-stage policy is persisted in `tako.toml` (`[life].stage`) and shapes exploration cadence, Type2 budgets, and DOSE baseline multipliers.
+When runtime stays idle, boredom signals are emitted into the event stream, DOSE drifts downward, and Takobot triggers autonomous exploration to re-seek novelty.
 
 This keeps runtime writes inside the workspace while preserving git cleanliness.

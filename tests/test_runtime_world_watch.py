@@ -41,6 +41,17 @@ class OneShotWorldSensor:
         ]
 
 
+class CountingSensor:
+    name = "curiosity"
+
+    def __init__(self) -> None:
+        self.ticks = 0
+
+    async def tick(self, _ctx) -> list[dict[str, object]]:
+        self.ticks += 1
+        return []
+
+
 class TestRuntimeWorldWatch(unittest.TestCase):
     def test_runtime_writes_world_notebook_mission_review_and_briefing(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -117,6 +128,47 @@ class TestRuntimeWorldWatch(unittest.TestCase):
             briefing_state = json.loads((state_dir / "briefing_state.json").read_text(encoding="utf-8"))
             self.assertLessEqual(int(briefing_state.get("briefings_today", 0)), 3)
             self.assertEqual(event_bus.events_written, len((state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()))
+
+    def test_runtime_boredom_triggers_idle_decay_and_hourly_style_explore(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_dir = root / ".tako" / "state"
+            memory_root = root / "memory"
+            daily_root = memory_root / "dailies"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            memory_root.mkdir(parents=True, exist_ok=True)
+            daily_root.mkdir(parents=True, exist_ok=True)
+
+            event_bus = EventBus(state_dir / "events.jsonl")
+            sensor = CountingSensor()
+            runtime = Runtime(
+                event_bus=event_bus,
+                state_dir=state_dir,
+                memory_root=memory_root,
+                daily_log_root=daily_root,
+                sensors=[sensor],
+                heartbeat_interval_s=0.05,
+                heartbeat_jitter_ratio=0.0,
+                explore_interval_s=3600.0,
+                explore_jitter_ratio=0.0,
+                boredom_idle_decay_start_s=0.08,
+                boredom_idle_decay_interval_s=0.08,
+                boredom_explore_interval_s=0.16,
+            )
+            runtime.heartbeat_interval_s = 0.05
+
+            async def _run() -> None:
+                await runtime.start()
+                await asyncio.sleep(0.45)
+                await runtime.stop()
+
+            asyncio.run(_run())
+
+            event_lines = (state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            event_types = [json.loads(line).get("type", "") for line in event_lines if line.strip()]
+            self.assertIn("dose.bored.idle", event_types)
+            self.assertIn("dose.bored.explore", event_types)
+            self.assertGreaterEqual(sensor.ticks, 2)
 
 
 if __name__ == "__main__":

@@ -9,12 +9,14 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
 - Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`) and auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
+- Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
 - EventBus-driven cognition: in-memory event fanout + JSONL audit + Type 1 triage + Type 2 escalation
 - World Watch sensor loop: RSS/Atom polling plus child-stage curiosity crawling (Reddit/Hacker News/Wikipedia), deterministic world notebook writes, and bounded briefings
+- Boredom/autonomy loop: when runtime stays idle, DOSE indicators drift down and Tako triggers boredom-driven exploration (about hourly by default) to find novel signals
 - Child-stage chat tone is relationship-first: it asks one small context question at a time (who/where/what the operator does) and avoids forcing task frameworks unless asked
 - Child-stage operator context is captured into `memory/people/operator.md`; shared websites are added to `[world_watch].sites` in `tako.toml` for monitoring
 - Heartbeat-time git hygiene: if workspace changes are pending, Tako stages (`git add -A`) and commits automatically, and verifies the repo is clean after commit
@@ -182,6 +184,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - World Watch sensor state is stored in `.tako/state/rss_seen.json` and `.tako/state/curiosity_seen.json`; briefing cadence/state is stored in `.tako/state/briefing_state.json`.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
 - Runtime daemon logs are appended to `.tako/logs/runtime.log`; TUI transcript/system logs are appended to `.tako/logs/app.log`.
+- Pi-backed chat adds explicit `pi chat user` / `pi chat assistant` summary lines in runtime/app logs.
 - Inference now runs through workspace-local pi runtime; if pi is not available, Takobot falls back to non-inference heuristic responses.
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
 - Chat context is persisted in `.tako/state/conversations/` (`sessions.json` + per-session JSONL transcripts) and recent turns are injected into prompt context.

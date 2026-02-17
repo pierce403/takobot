@@ -173,6 +173,18 @@ class DoseState:
         elif et.startswith("dose.operator.explore"):
             delta_d += 0.10
             delta_s -= 0.02
+        elif et.startswith("dose.bored.idle"):
+            delta_d -= 0.04
+            delta_s -= 0.05
+            delta_e -= 0.05
+        elif et.startswith("dose.bored.explore"):
+            delta_d += 0.07
+            delta_s -= 0.01
+            delta_e -= 0.01
+        elif et.startswith("world.novelty.detected"):
+            delta_d += 0.09
+            delta_s += 0.03
+            delta_e += 0.04
         else:
             # Conservative default: only nudge on non-info severities.
             if sev == "warn":

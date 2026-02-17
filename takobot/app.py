@@ -4246,9 +4246,7 @@ class TakoTerminalApp(App[None]):
             hinted_task = _task_hint_from_status_line(line)
             if hinted_task:
                 self._note_live_work(hinted_task)
-            self.stream_status_lines.append(line)
-            if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
-                self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
+            self._append_stream_status_line(line)
             self._append_app_log("inference", f"status={_summarize_text(line)}")
             self._stream_render()
             return
@@ -4271,6 +4269,15 @@ class TakoTerminalApp(App[None]):
             return
         self.live_work_items.appendleft(item)
         self._refresh_panels()
+
+    def _append_stream_status_line(self, line: str) -> None:
+        merged = _merge_thinking_status_line(self.stream_status_lines, line)
+        if merged is None:
+            self.stream_status_lines.append(line)
+        else:
+            self.stream_status_lines = merged
+        if len(self.stream_status_lines) > STREAM_BOX_MAX_STATUS_LINES:
+            self.stream_status_lines = self.stream_status_lines[-STREAM_BOX_MAX_STATUS_LINES :]
 
     def _stream_render(self, *, force: bool = False) -> None:
         now = time.monotonic()
@@ -6043,6 +6050,77 @@ def _task_hint_from_status_line(line: str) -> str | None:
     if "running command" in lowered:
         return _summarize_text(cleaned)
     return None
+
+
+def _merge_thinking_status_line(lines: list[str], incoming: str) -> list[str] | None:
+    prefix = "pi thinking:"
+    lowered = incoming.lower()
+    if not lowered.startswith(prefix):
+        return None
+    raw_chunk = incoming[len(prefix) :].strip()
+    chunk = _normalize_stream_chunk(raw_chunk)
+    if not chunk:
+        return list(lines)
+
+    updated = list(lines)
+    if _is_stream_special_token(chunk):
+        updated.append(f"{prefix} {chunk}")
+        return updated
+
+    for index in range(len(updated) - 1, -1, -1):
+        current = updated[index]
+        if not current.lower().startswith(prefix):
+            continue
+        existing_chunk = _normalize_stream_chunk(current[len(prefix) :].strip())
+        merged_chunk = _merge_stream_progress(existing_chunk, chunk)
+        updated[index] = f"{prefix} {merged_chunk}".strip()
+        return updated
+
+    updated.append(f"{prefix} {chunk}".strip())
+    return updated
+
+
+def _normalize_stream_chunk(chunk: str) -> str:
+    cleaned = _sanitize_for_display(chunk).replace("\r\n", "\n").replace("\r", "\n")
+    if not cleaned:
+        return ""
+    return " ".join(cleaned.split())
+
+
+def _merge_stream_progress(existing: str, incoming: str) -> str:
+    if not existing:
+        return incoming
+    if not incoming:
+        return existing
+    if incoming.startswith(existing):
+        return incoming
+    if existing.endswith(incoming):
+        return existing
+
+    max_overlap = min(len(existing), len(incoming), 200)
+    for overlap in range(max_overlap, 0, -1):
+        if existing.endswith(incoming[:overlap]):
+            return existing + incoming[overlap:]
+
+    if incoming[0] in ".,;:!?)]}%":
+        separator = ""
+    elif existing.endswith((" ", "(", "[", "{", "/", "-")):
+        separator = ""
+    else:
+        separator = " "
+    return existing + separator + incoming
+
+
+def _is_stream_special_token(chunk: str) -> bool:
+    if not chunk:
+        return False
+    if chunk.startswith("```"):
+        return True
+    if re.fullmatch(r"<[/a-zA-Z0-9_.:-]+>", chunk):
+        return True
+    if re.fullmatch(r"\[[a-zA-Z0-9_.:-]+\]", chunk):
+        return True
+    return False
 
 
 def _looks_like_login_subcommand_failure(lines: list[str]) -> bool:

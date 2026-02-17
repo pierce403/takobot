@@ -42,6 +42,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Effective thinking defaults are split by cognition lane: Type1 uses fast `minimal` thinking, Type2 uses deep `xhigh` thinking
 - Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
+- Incremental `pi thinking` stream chunks now render inline in one evolving status line (instead of newline-per-token); structural markers stay on separate lines
 - Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
 - XMTP daemon resilience: retries transient send failures and auto-rebuilds XMTP client sessions after repeated stream/poll failures

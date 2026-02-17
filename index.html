@@ -869,6 +869,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Outbound XMTP replies are mirrored into the local TUI transcript/activity feed for a unified conversation view.</li>
               <li>Mission objectives are formalized in <code>SOUL.md</code> (<code>## Mission Objectives</code>) and editable in-app via <code>mission show|set|add|clear</code>.</li>
               <li>Bubble stream now shows the active request focus and elapsed thinking/responding time for long responses.</li>
+              <li>Incremental <code>pi thinking</code> stream chunks are coalesced into one inline thinking line (instead of newline-per-token), while structural markers stay separate.</li>
               <li>During streamed inference, tool/research progress is surfaced as live "active work" in the Tasks panel (for example browsing/search/tool steps).</li>
               <li>TUI right-click on selected transcript/stream text copies that selection in-app without clearing it.</li>
               <li>XMTP runtime is more resilient: transient send errors are retried and repeated poll/stream failures trigger client-session rebuilds.</li>

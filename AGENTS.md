@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-17 — Thinking stream tokens now render inline in the TUI
+
+- What happened: streamed `pi thinking` updates could arrive token-by-token and were appended as separate status lines, causing rapid newline spam and unreadable scroll in the bubble stream.
+- Fix: TUI stream-status handling now coalesces incremental `pi thinking` chunks into one evolving inline status line; structural markers (for example code fences/tags) remain separate lines.
+- Prevention: treat high-frequency streaming status deltas as progressive updates, not append-only log lines, and keep regression tests for token-chunk and cumulative snapshot flows.
+
 ### 2026-02-17 — Inference now splits fast Type1 vs deep Type2, logs pi command failures, and seeds model guide
 
 - What happened: model plan/defaults could show medium thinking for both Type1 and Type2, pi invocation failures often collapsed into generic fallback messaging, and fresh workspaces lacked a baseline model tuning reference.

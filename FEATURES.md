@@ -145,6 +145,7 @@
   - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
   - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
+  - Incremental `pi thinking` stream chunks are coalesced inline into a single thinking-status line (instead of one newline per token), while structural markers remain separate.
   - Bubble stream header includes streamed model identity when provided by inference events.
   - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid stalled pi-runtime turns.
   - When inference is unavailable, local chat returns a clear diagnostics-mode message with immediate repair guidance instead of ambiguous status text.
@@ -178,6 +179,7 @@
   - [x] Serious runtime/health events are escalated from Type 1 triage into Type 2 analysis.
   - [x] Runtime can report pi/ollama/codex/claude/gemini discovery and readiness via `inference` command.
   - [x] Pi JSON stream events are surfaced to TUI stream status/task lines during local chat inference.
+  - [x] Incremental `pi thinking` stream chunks render inline in one status line (special structural markers stay separate).
   - [x] `models` command includes effective type1/type2 model configuration details (not only provider readiness), with fast-vs-deep split visible.
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.

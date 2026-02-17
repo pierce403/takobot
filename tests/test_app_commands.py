@@ -242,6 +242,41 @@ class TestAppCommands(unittest.TestCase):
         self.assertEqual("openai/gpt-5.3-codex", app.stream_model)
         self.assertTrue(any("model: openai/gpt-5.3-codex" in line for line in app.stream_status_lines))
 
+    def test_inference_stream_thinking_status_merges_token_chunks(self) -> None:
+        app = TakoTerminalApp(interval=5.0)
+        with (
+            patch.object(app, "_stream_render", return_value=None),
+            patch.object(app, "_append_app_log", return_value=None),
+        ):
+            app._on_inference_stream_event("status", "pi thinking: hello")
+            app._on_inference_stream_event("status", "pi thinking: world")
+        thinking_lines = [line for line in app.stream_status_lines if line.startswith("pi thinking:")]
+        self.assertEqual(["pi thinking: hello world"], thinking_lines)
+
+    def test_inference_stream_thinking_status_accepts_cumulative_snapshots(self) -> None:
+        app = TakoTerminalApp(interval=5.0)
+        with (
+            patch.object(app, "_stream_render", return_value=None),
+            patch.object(app, "_append_app_log", return_value=None),
+        ):
+            app._on_inference_stream_event("status", "pi thinking: building")
+            app._on_inference_stream_event("status", "pi thinking: building context")
+        thinking_lines = [line for line in app.stream_status_lines if line.startswith("pi thinking:")]
+        self.assertEqual(["pi thinking: building context"], thinking_lines)
+
+    def test_inference_stream_thinking_status_keeps_special_tokens_separate(self) -> None:
+        app = TakoTerminalApp(interval=5.0)
+        with (
+            patch.object(app, "_stream_render", return_value=None),
+            patch.object(app, "_append_app_log", return_value=None),
+        ):
+            app._on_inference_stream_event("status", "pi thinking: analyzing web notes")
+            app._on_inference_stream_event("status", "pi thinking: ```json")
+        thinking_lines = [line for line in app.stream_status_lines if line.startswith("pi thinking:")]
+        self.assertEqual(2, len(thinking_lines))
+        self.assertEqual("pi thinking: analyzing web notes", thinking_lines[0])
+        self.assertEqual("pi thinking: ```json", thinking_lines[1])
+
     def test_local_chat_unavailable_message_is_clear(self) -> None:
         message = _local_chat_unavailable_message(
             operator_paired=True,

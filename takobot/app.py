@@ -3093,6 +3093,9 @@ class TakoTerminalApp(App[None]):
                     sensor_count=len(self.runtime_service.sensors),
                     interesting=interesting,
                     mission_link=mission_link,
+                    life_stage=self.life_stage,
+                    stage_tone=self.stage_policy.tone,
+                    dose_label=self.dose_label,
                 )
             )
             return
@@ -5435,6 +5438,74 @@ def _format_level(value: float) -> str:
     return f"{max(0.0, min(1.0, value)):.2f}".rstrip("0").rstrip(".")
 
 
+def _explore_persona_lines(*, life_stage: str, stage_tone: str, dose_label: str) -> tuple[str, str]:
+    stage = normalize_life_stage_name(life_stage, default=DEFAULT_LIFE_STAGE)
+    mood = " ".join((dose_label or "").split()).strip().lower() or "steady"
+    tone = " ".join((stage_tone or "").split()).strip().lower()
+
+    insight_map: dict[str, dict[str, str]] = {
+        "hatchling": {
+            "stressed": "i found a signal, but i want to double-check it:",
+            "bonded": "i found this while learning with you:",
+            "curious": "tiny discovery:",
+            "steady": "here's what i noticed:",
+        },
+        "child": {
+            "stressed": "i found something, but i want to verify it:",
+            "bonded": "i found this and wanted to share it with you:",
+            "curious": "oooh, this stood out:",
+            "steady": "here's what stood out:",
+        },
+        "teen": {
+            "stressed": "potential signal, needs proof:",
+            "bonded": "worth checking together:",
+            "curious": "new hypothesis:",
+            "steady": "evidence-backed takeaway:",
+        },
+        "adult": {
+            "stressed": "risk signal to watch:",
+            "bonded": "useful signal for us:",
+            "curious": "strategic insight:",
+            "steady": "key finding:",
+        },
+    }
+    mission_map: dict[str, dict[str, str]] = {
+        "hatchling": {
+            "stressed": "mission impact (tentative):",
+            "bonded": "how this might help our mission:",
+            "curious": "mission connection i'm testing:",
+            "steady": "mission connection:",
+        },
+        "child": {
+            "stressed": "mission link (needs validation):",
+            "bonded": "why this might matter for our mission:",
+            "curious": "mission connection i'm curious about:",
+            "steady": "mission connection:",
+        },
+        "teen": {
+            "stressed": "mission risk to validate:",
+            "bonded": "mission angle worth testing:",
+            "curious": "mission hypothesis to test:",
+            "steady": "mission implication:",
+        },
+        "adult": {
+            "stressed": "mission risk signal:",
+            "bonded": "mission leverage:",
+            "curious": "mission opportunity:",
+            "steady": "mission implication:",
+        },
+    }
+
+    stage_insight = insight_map.get(stage, insight_map[DEFAULT_LIFE_STAGE])
+    stage_mission = mission_map.get(stage, mission_map[DEFAULT_LIFE_STAGE])
+    insight_line = stage_insight.get(mood, stage_insight["steady"])
+    mission_line = stage_mission.get(mood, stage_mission["steady"])
+
+    if mood not in stage_insight and tone and tone != "steady":
+        insight_line = f"in a {tone} pass, this stood out:"
+    return insight_line, mission_line
+
+
 def _format_explore_completion_message(
     *,
     requested_topic: str,
@@ -5444,6 +5515,9 @@ def _format_explore_completion_message(
     sensor_count: int,
     interesting: str = "",
     mission_link: str = "",
+    life_stage: str = DEFAULT_LIFE_STAGE,
+    stage_tone: str = "",
+    dose_label: str = "steady",
 ) -> str:
     topic_note = "auto-selected topic" if not requested_topic.strip() else "topic"
     lines = [
@@ -5467,10 +5541,15 @@ def _format_explore_completion_message(
         lines.append(f"topic research notes: {topic_notes} ({notes_path})")
         exciting = " ".join(str(interesting or report.get("topic_research_highlight", "")).split())
         mission = " ".join(str(mission_link).split())
+        insight_line, mission_line = _explore_persona_lines(
+            life_stage=life_stage,
+            stage_tone=stage_tone,
+            dose_label=dose_label,
+        )
         if exciting:
-            lines.append(f"I just learned something exciting: {exciting}")
+            lines.append(f"{insight_line} {exciting}")
         if mission:
-            lines.append(f"Why this might matter to our mission: {mission}")
+            lines.append(f"{mission_line} {mission}")
     return "\n".join(lines)
 
 

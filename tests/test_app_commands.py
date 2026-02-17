@@ -191,11 +191,14 @@ class TestAppCommands(unittest.TestCase):
                 "topic_research_highlight": "Potatoes spread globally because tubers store dense energy and travel well.",
             },
             sensor_count=2,
+            life_stage="child",
+            dose_label="curious",
         )
         self.assertIn("topic: potatoes", message)
         self.assertIn("topic research notes: 4", message)
-        self.assertIn("I just learned something exciting:", message)
+        self.assertIn("oooh, this stood out:", message)
         self.assertIn("Potatoes spread globally", message)
+        self.assertNotIn("I just learned something exciting:", message)
 
     def test_explore_completion_message_includes_mission_link_when_provided(self) -> None:
         message = _format_explore_completion_message(
@@ -209,10 +212,13 @@ class TestAppCommands(unittest.TestCase):
             sensor_count=2,
             interesting="Farcaster developers are converging on open social graph portability.",
             mission_link="This could reduce lock-in risk for operator communication workflows.",
+            life_stage="adult",
+            dose_label="steady",
         )
         self.assertIn("topic research notes: 3", message)
-        self.assertIn("I just learned something exciting:", message)
-        self.assertIn("Why this might matter to our mission:", message)
+        self.assertIn("key finding:", message)
+        self.assertIn("mission implication:", message)
+        self.assertNotIn("I just learned something exciting:", message)
 
     def test_local_input_queue_count_includes_active_processing(self) -> None:
         app = TakoTerminalApp(interval=5.0)

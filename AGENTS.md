@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-17 — Explore completion copy now follows stage/mood persona
+
+- What happened: `/explore` completion messages always used the fixed prefix "I just learned something exciting," which felt canned regardless of stage or mood.
+- Fix: replaced the hardcoded insight/mission prefixes with life-stage + DOSE-label aware phrasing and threaded stage/tone/mood state into explore completion formatting.
+- Prevention: keep operator-facing narrative copy generated from persona state (stage + tone + mood) rather than static one-size-fits-all strings.
+
 ### 2026-02-17 — Idle boredom now drives exploration and pi turns are log-visible
 
 - What happened: long idle stretches could feel like Tako was "doing nothing," and pi-backed chat turns were hard to audit from logs during extended runs.

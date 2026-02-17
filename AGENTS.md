@@ -72,6 +72,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-17 — Chat context stack now includes SOUL and matches across TUI/XMTP
+
+- What happened: local TUI chat prompts carried richer context (focus/RAG/mission metadata), while XMTP chat prompts were lighter and did not include `SOUL.md`, which created behavior drift across channels.
+- Fix: added bounded `SOUL.md` excerpt loading for prompts and aligned XMTP chat context with TUI context blocks (`SOUL.md`, `MEMORY.md` frontmatter, focus summary, semantic RAG context, recent conversation, mission/stage metadata).
+- Prevention: keep prompt-context schema explicit and parity-tested across local and XMTP paths whenever prompt builders evolve.
+
 ### 2026-02-17 — Thinking stream tokens now render inline in the TUI
 
 - What happened: streamed `pi thinking` updates could arrive token-by-token and were appended as separate status lines, causing rapid newline spam and unreadable scroll in the bubble stream.

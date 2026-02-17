@@ -98,6 +98,7 @@ from .sensors import CuriositySensor, RSSSensor, Sensor
 from .soul import (
     DEFAULT_SOUL_NAME,
     DEFAULT_SOUL_ROLE,
+    load_soul_excerpt,
     parse_mission_objectives_text,
     read_identity,
     read_mission_objectives,
@@ -4400,6 +4401,7 @@ class TakoTerminalApp(App[None]):
                 assistant_label=self.identity_name or "Takobot",
             )
         memory_frontmatter = load_memory_frontmatter_excerpt(root=repo_root(), max_chars=1200)
+        soul_excerpt = load_soul_excerpt(path=repo_root() / "SOUL.md", max_chars=1600)
         focus_summary, rag_context = await self._collect_inference_rag_context(
             query=_build_memory_rag_query(text=text, mission_objectives=self.mission_objectives),
             scope="chat",
@@ -4417,6 +4419,7 @@ class TakoTerminalApp(App[None]):
             life_stage=self.life_stage,
             stage_tone=self.stage_policy.tone,
             memory_frontmatter=memory_frontmatter,
+            soul_excerpt=soul_excerpt,
             focus_summary=focus_summary,
             rag_context=rag_context,
         )
@@ -5769,6 +5772,7 @@ def _build_terminal_chat_prompt(
     life_stage: str = DEFAULT_LIFE_STAGE,
     stage_tone: str = "",
     memory_frontmatter: str = "",
+    soul_excerpt: str = "",
     focus_summary: str = "",
     rag_context: str = "",
 ) -> str:
@@ -5781,6 +5785,7 @@ def _build_terminal_chat_prompt(
     if len(objectives) > 4:
         objectives_line += f" | (+{len(objectives) - 4} more)"
     memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
+    soul_block = (soul_excerpt or "").strip() or "SOUL.md unavailable."
     focus_line = " ".join((focus_summary or "").split()).strip() or "unknown"
     rag_block = (rag_context or "").strip() or "No semantic memory context."
     stage_line = life_stage.strip().lower() or DEFAULT_LIFE_STAGE
@@ -5818,6 +5823,8 @@ def _build_terminal_chat_prompt(
         f"session_mode={mode}\n"
         f"session_state={state}\n"
         f"operator_paired={paired}\n"
+        "soul_identity_boundaries=\n"
+        f"{soul_block}\n"
         "memory_frontmatter=\n"
         f"{memory_block}\n"
         f"focus_state={focus_line}\n"

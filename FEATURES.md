@@ -122,7 +122,9 @@
   - If local Codex OAuth tokens exist (`~/.codex/auth.json`), startup/refresh syncs them into `.tako/pi/agent/auth.json` as `openai-codex` for pi inference readiness.
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
+  - Chat prompts include a bounded `SOUL.md` excerpt (`soul_identity_boundaries=`) so identity/boundary policy is always in-model for both local TUI and XMTP chat turns.
   - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
+  - XMTP chat now uses the same core context stack as local TUI chat: mission/objectives, stage/tone, `SOUL.md` excerpt, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history.
   - Manual `explore` bypasses normal sensor poll windows so operator-triggered exploration runs immediately and auto-topic selection avoids immediate repeats.
   - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports synthesized insight + mission impact phrased according to current life stage and mood.
   - Purpose info questions (for example `what is your purpose?`) now return the current purpose text instead of entering the purpose-update path.
@@ -194,6 +196,7 @@
   - [x] Runtime/doctor problem detection auto-creates (or reuses) matching tasks under `tasks/`.
   - [x] `doctor` can auto-repair + diagnose broken inference without inference calls, using local CLI probes and recent runtime error logs.
   - [x] Plain-text chat includes recent same-session history in model prompts (local + XMTP), not only the current message.
+  - [x] Local TUI and XMTP plain-text chat both include `SOUL.md` excerpt + `MEMORY.md` frontmatter + focus/RAG context blocks in the model prompt.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
   - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
   - [x] Local `web` command writes a daily-log note for each successful fetch.

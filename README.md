@@ -39,6 +39,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Mission objectives are formalized in `SOUL.md` (`## Mission Objectives`) and editable in-app via `mission` commands (`mission show|set|add|clear`)
 - Runtime writes deterministic world notes under `memory/world/YYYY-MM-DD.md` and daily mission snapshots under `memory/world/mission-review/YYYY-MM-DD.md`
 - Focus-aware memory recall on every inference: DOSE emotional state drives how much semantic RAG context is pulled from `memory/` via `ragrep` (minimal context when focused, broader context when diffuse)
+- Prompt context stack parity across channels: local TUI chat and XMTP chat now both include `SOUL.md` excerpt, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history
 - Effective thinking defaults are split by cognition lane: Type1 uses fast `minimal` thinking, Type2 uses deep `xhigh` thinking
 - Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent

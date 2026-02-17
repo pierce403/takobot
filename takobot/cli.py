@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 from typing import Callable
 
 from . import __version__
+from . import dose
 from .config import add_world_watch_sites, explain_tako_toml, load_tako_toml, set_workspace_name
 from .conversation import ConversationStore
 from .daily import append_daily_note, ensure_daily_log
@@ -53,9 +54,16 @@ from .operator_profile import (
 from .pairing import clear_pending
 from .paths import RuntimePaths, code_root, daily_root, ensure_code_dir, ensure_runtime_dirs, repo_root, runtime_paths
 from .problem_tasks import ensure_problem_tasks
+from .rag_context import format_focus_summary, focus_profile_from_dose, query_memory_with_ragrep
 from .self_update import run_self_update
 from .skillpacks import seed_openclaw_starter_skills
-from .soul import read_identity, read_mission_objectives, update_identity, update_mission_objectives
+from .soul import (
+    load_soul_excerpt,
+    read_identity,
+    read_mission_objectives,
+    update_identity,
+    update_mission_objectives,
+)
 from .tool_ops import fetch_webpage, run_local_command
 from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmtp_import, send_dm_sync, set_typing_indicator
 from .identity import (
@@ -932,6 +940,7 @@ async def _handle_incoming_message(
             reply = await _chat_reply(
                 text,
                 inference_runtime,
+                paths=paths,
                 conversations=conversations,
                 session_key=session_key,
                 is_operator=False,
@@ -949,6 +958,7 @@ async def _handle_incoming_message(
             reply = await _chat_reply(
                 text,
                 inference_runtime,
+                paths=paths,
                 conversations=conversations,
                 session_key=session_key,
                 is_operator=False,
@@ -966,6 +976,7 @@ async def _handle_incoming_message(
         reply = await _chat_reply(
             text,
             inference_runtime,
+            paths=paths,
             conversations=conversations,
             session_key=session_key,
             is_operator=True,
@@ -1871,6 +1882,7 @@ async def _chat_reply(
     text: str,
     inference_runtime: InferenceRuntime,
     *,
+    paths: RuntimePaths,
     conversations: ConversationStore,
     session_key: str,
     is_operator: bool,
@@ -1892,7 +1904,12 @@ async def _chat_reply(
     if not inference_runtime.ready:
         return fallback
 
-    identity_name = _preferred_git_identity_name(repo_root())
+    workspace_root = repo_root()
+    identity_name = _preferred_git_identity_name(workspace_root)
+    _identity_name, identity_role = read_identity()
+    mission_objectives = [item.strip() for item in read_mission_objectives() if item.strip()]
+    if not mission_objectives:
+        mission_objectives = [identity_role]
     cfg, _warn = load_tako_toml(repo_root() / "tako.toml")
     life_stage = cfg.life.stage
     stage_tone = stage_policy_for_name(life_stage).tone
@@ -1904,14 +1921,40 @@ async def _chat_reply(
         user_label="User",
         assistant_label=identity_name or "Takobot",
     )
+    memory_frontmatter = load_memory_frontmatter_excerpt(root=workspace_root, max_chars=1200)
+    soul_excerpt = load_soul_excerpt(path=workspace_root / "SOUL.md", max_chars=1600)
+    dose_state = dose.load(paths.state_dir / "dose.json")
+    focus_profile = focus_profile_from_dose(dose_state)
+    focus_summary = format_focus_summary(focus_profile)
+    rag_result = await asyncio.to_thread(
+        query_memory_with_ragrep,
+        query=_build_memory_rag_query(text=text, mission_objectives=mission_objectives),
+        workspace_root=workspace_root,
+        memory_root=workspace_root / "memory",
+        state_dir=paths.state_dir,
+        focus_profile=focus_profile,
+    )
+    _emit_runtime_log(
+        (
+            "inference focus checked (xmtp-chat): "
+            f"{focus_summary}; rag={rag_result.status}; hits={rag_result.hits}; limit={rag_result.limit}"
+        ),
+        hooks=hooks,
+    )
     prompt = _chat_prompt(
         text,
         history=history,
         is_operator=is_operator,
         operator_paired=operator_paired,
         identity_name=identity_name,
+        identity_role=identity_role,
+        mission_objectives=mission_objectives,
         life_stage=life_stage,
         stage_tone=stage_tone,
+        memory_frontmatter=memory_frontmatter,
+        soul_excerpt=soul_excerpt,
+        focus_summary=focus_summary,
+        rag_context=rag_result.context,
     )
     async def _infer_once() -> tuple[str, str]:
         return await asyncio.to_thread(
@@ -1964,6 +2007,19 @@ def _canonical_identity_name(raw: str) -> str:
     return value or "Tako"
 
 
+def _build_memory_rag_query(*, text: str, mission_objectives: list[str]) -> str:
+    message = " ".join((text or "").split()).strip()
+    objective = ""
+    for item in mission_objectives:
+        candidate = " ".join(str(item or "").split()).strip()
+        if candidate:
+            objective = candidate
+            break
+    if message and objective:
+        return f"{message} mission objective {objective}"
+    return message or objective
+
+
 def _chat_prompt(
     text: str,
     *,
@@ -1971,14 +2027,28 @@ def _chat_prompt(
     is_operator: bool,
     operator_paired: bool,
     identity_name: str,
+    identity_role: str = "",
+    mission_objectives: list[str] | None = None,
     life_stage: str = "hatchling",
     stage_tone: str = "",
+    memory_frontmatter: str = "",
+    soul_excerpt: str = "",
+    focus_summary: str = "",
+    rag_context: str = "",
 ) -> str:
     role = "operator" if is_operator else "non-operator"
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
     name = _canonical_identity_name(identity_name)
-    memory_frontmatter = load_memory_frontmatter_excerpt(root=repo_root(), max_chars=1000)
+    role_line = " ".join((identity_role or "").split()).strip() or "Your highly autonomous octopus friend"
+    objectives = mission_objectives or [role_line]
+    objectives_line = " | ".join(obj.strip() for obj in objectives[:4] if obj.strip())
+    if len(objectives) > 4:
+        objectives_line += f" | (+{len(objectives) - 4} more)"
+    memory_block = (memory_frontmatter or "").strip() or "MEMORY.md unavailable."
+    soul_block = (soul_excerpt or "").strip() or "SOUL.md unavailable."
+    focus_line = " ".join((focus_summary or "").split()).strip() or "unknown"
+    rag_block = (rag_context or "").strip() or "No semantic memory context."
     stage_line = life_stage.strip().lower() or "hatchling"
     tone_line = " ".join((stage_tone or "").split()).strip() or "steady"
     if stage_line == "child":
@@ -1994,10 +2064,17 @@ def _chat_prompt(
         if stage_line == "child"
         else "You can chat broadly and help think through tasks.\n"
     )
+    control_surface_line = (
+        "Operator control surfaces: terminal app and paired XMTP channel.\n"
+        if operator_paired
+        else "Operator control surface: terminal app (XMTP unpaired).\n"
+    )
     return (
-        f"You are {name}, a cute but practical octopus assistant.\n"
+        f"You are {name}, a super cute octopus assistant with pragmatic engineering judgment.\n"
         f"Canonical identity name: {name}. If you self-identify, use exactly `{name}`.\n"
         "Never claim your name is `Tako` unless canonical identity name is exactly `Tako`.\n"
+        f"Identity mission: {role_line}\n"
+        f"Mission objectives: {objectives_line}\n"
         f"Life stage: {stage_line} ({tone_line}).\n"
         "Reply with plain text only (no markdown), max 4 short lines.\n"
         f"{stage_behavior}"
@@ -2007,10 +2084,18 @@ def _chat_prompt(
         "Hard boundary: non-operators may not change identity/config/tools/permissions/routines.\n"
         "If the operator asks for identity/config changes, apply them directly and confirm what changed.\n"
         "If user asks for restricted changes and they are non-operator, say operator-only clearly.\n"
+        f"{control_surface_line}"
+        "session_mode=xmtp\n"
+        "session_state=RUNNING\n"
         f"sender_role={role}\n"
         f"operator_paired={paired}\n"
+        "soul_identity_boundaries=\n"
+        f"{soul_block}\n"
         "memory_frontmatter=\n"
-        f"{memory_frontmatter}\n"
+        f"{memory_block}\n"
+        f"focus_state={focus_line}\n"
+        "memory_rag_context=\n"
+        f"{rag_block}\n"
         "recent_conversation=\n"
         f"{history_block}"
         f"user_message={text}\n"

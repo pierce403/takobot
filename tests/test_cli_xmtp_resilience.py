@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -84,10 +85,20 @@ class TestCliXmtpResilience(unittest.TestCase):
             is_operator=True,
             operator_paired=True,
             identity_name="ProTako",
+            identity_role="Your highly autonomous octopus friend",
+            mission_objectives=["Keep outcomes clear", "Stay curious"],
+            memory_frontmatter="# MEMORY frontmatter",
+            soul_excerpt="# SOUL.md\n- Name: ProTako",
+            focus_summary="balanced (0.50)",
+            rag_context="1. score=0.9123 source=memory/world/2026-02-17.md",
         )
         self.assertIn("You are ProTako", prompt)
         self.assertIn("Canonical identity name: ProTako", prompt)
         self.assertIn("Never claim your name is `Tako`", prompt)
+        self.assertIn("Mission objectives: Keep outcomes clear | Stay curious", prompt)
+        self.assertIn("soul_identity_boundaries=", prompt)
+        self.assertIn("focus_state=balanced (0.50)", prompt)
+        self.assertIn("memory_rag_context=", prompt)
         self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
 
     def test_retryable_xmtp_error_detection(self) -> None:
@@ -165,6 +176,7 @@ class TestCliXmtpResilience(unittest.TestCase):
                     _chat_reply(
                         "hello there",
                         runtime,
+                        paths=SimpleNamespace(state_dir=Path(tmp) / ".tako" / "state"),
                         conversations=conversations,
                         session_key="xmtp:test",
                         is_operator=True,

@@ -27,8 +27,10 @@ class TestAppStagePolicy(unittest.TestCase):
             life_stage="teen",
             stage_tone="skeptical",
             memory_frontmatter="# MEMORY frontmatter\n- daily notes under memory/dailies",
+            soul_excerpt="# SOUL.md\n- Name: Tako\n- Role: curious researcher",
         )
         self.assertIn("Life stage: teen (skeptical).", prompt)
+        self.assertIn("soul_identity_boundaries=", prompt)
         self.assertIn("memory_frontmatter=", prompt)
         self.assertIn("MEMORY frontmatter", prompt)
         self.assertIn("ask sharp follow-up questions", prompt)
@@ -46,6 +48,7 @@ class TestAppStagePolicy(unittest.TestCase):
             life_stage="child",
             stage_tone="curious",
             memory_frontmatter="# MEMORY frontmatter",
+            soul_excerpt="# SOUL.md\n- Name: Tako",
         )
         self.assertIn("Child-stage behavior", prompt)
         self.assertIn("Ask one gentle question", prompt)

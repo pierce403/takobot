@@ -7,6 +7,7 @@ import unittest
 from takobot.mission import activity_alignment_score, is_activity_mission_aligned
 from takobot.soul import (
     DEFAULT_SOUL_ROLE,
+    load_soul_excerpt,
     parse_mission_objectives_text,
     read_identity_mission,
     read_mission_objectives,
@@ -74,3 +75,12 @@ class TestIdentityAndMission(unittest.TestCase):
             ["Keep outcomes clear", "Stay curious", "Ask before risky changes"],
             parsed,
         )
+
+    def test_load_soul_excerpt_truncates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            soul_path = Path(tmp) / "SOUL.md"
+            soul_path.write_text("# SOUL.md\n\n## Identity\n\n- Name: Tako\n- Role: " + ("x" * 400), encoding="utf-8")
+            excerpt = load_soul_excerpt(path=soul_path, max_chars=240)
+            self.assertTrue(excerpt.startswith("# SOUL.md"))
+            self.assertTrue(len(excerpt) <= 240)
+            self.assertTrue(excerpt.endswith("..."))

@@ -142,6 +142,7 @@ class TestAppCommands(unittest.TestCase):
             state="RUNNING",
             operator_paired=True,
             history="User: hi",
+            soul_excerpt="# SOUL.md\n- Name: ProTako\n- Role: keep outcomes clear",
         )
         self.assertIn("You are ProTako", prompt)
         self.assertIn("Canonical identity name: ProTako", prompt)
@@ -149,6 +150,8 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("Mission objectives: Keep outcomes clear | Stay curious", prompt)
         self.assertIn("Operator control surfaces: terminal app and paired XMTP channel.", prompt)
         self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
+        self.assertIn("soul_identity_boundaries=", prompt)
+        self.assertIn("SOUL.md", prompt)
 
     def test_build_memory_rag_query_includes_mission_objective(self) -> None:
         query = _build_memory_rag_query(

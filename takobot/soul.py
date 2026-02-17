@@ -20,6 +20,29 @@ def soul_path(path: Path | None = None) -> Path:
     return repo_root() / "SOUL.md"
 
 
+def load_soul_excerpt(*, path: Path | None = None, max_chars: int = 1800) -> str:
+    target = soul_path(path)
+    if not target.exists():
+        return "SOUL.md is missing."
+    try:
+        text = target.read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return f"SOUL.md read failed: {exc}"
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    if not lines:
+        return "SOUL.md is empty."
+
+    joined = "\n".join(lines).strip()
+    if not joined:
+        return "SOUL.md is empty."
+
+    limit = max(200, int(max_chars))
+    if len(joined) <= limit:
+        return joined
+    return joined[: limit - 3].rstrip() + "..."
+
+
 def _sanitize(value: str) -> str:
     cleaned = " ".join(value.strip().split())
     return cleaned

@@ -178,10 +178,10 @@ def _fetch_reddit_notes(topic: str, *, mission: str, timeout_s: float, user_agen
         subreddit = _clean_text(str(node.get("subreddit") or ""))
         score = _safe_int(node.get("score"))
         comments = _safe_int(node.get("num_comments"))
-        selftext = _clean_text(str(node.get("selftext") or ""))
-        summary = _trim_sentence(selftext, limit=200)
-        if not summary:
-            summary = f"Community traction: {score} score and {comments} comments."
+        summary = f"Community traction: {score} upvotes and {comments} comments."
+        selftext = _safe_summary(str(node.get("selftext") or ""), limit=160)
+        if selftext:
+            summary = f"{summary} Notes mention: {selftext}"
         notes.append(
             TopicResearchNote(
                 source=f"Reddit r/{subreddit}" if subreddit else "Reddit",
@@ -205,12 +205,12 @@ def _fetch_duckduckgo_note(topic: str, *, mission: str, timeout_s: float, user_a
     )
     if not isinstance(payload, dict):
         return []
-    abstract = _clean_text(str(payload.get("AbstractText") or payload.get("Answer") or ""))
+    abstract = _safe_summary(str(payload.get("AbstractText") or ""), limit=220)
     if not abstract:
         return []
     title = _clean_text(str(payload.get("Heading") or "")) or f"{topic.title()} quick brief"
     link = _clean_text(str(payload.get("AbstractURL") or "")) or f"https://duckduckgo.com/?q={quote_plus(topic)}"
-    summary = _trim_sentence(abstract, limit=240)
+    summary = _trim_sentence(abstract, limit=220)
     return [
         TopicResearchNote(
             source="DuckDuckGo",
@@ -256,6 +256,33 @@ def _trim_sentence(value: str, *, limit: int) -> str:
     return first[: limit - 3].rstrip() + "..."
 
 
+def _safe_summary(value: str, *, limit: int) -> str:
+    candidate = _trim_sentence(value, limit=limit)
+    if not candidate:
+        return ""
+    if _looks_low_signal_text(candidate):
+        return ""
+    return candidate
+
+
+def _looks_low_signal_text(value: str) -> bool:
+    cleaned = _clean_text(value)
+    if not cleaned:
+        return True
+    lowered = cleaned.lower()
+    if lowered.startswith(("source:", "sources:", "by the way", "http://", "https://")):
+        return True
+    if " long ass " in f" {lowered} ":
+        return True
+    url_count = len(re.findall(r"https?://", lowered))
+    if url_count >= 2:
+        return True
+    words = lowered.split()
+    if len(words) < 6:
+        return True
+    return False
+
+
 def _safe_int(value: Any) -> int:
     try:
         return int(float(value))
@@ -277,11 +304,34 @@ def _follow_up_question(title: str, topic: str) -> str:
 def _pick_highlight(topic: str, notes: list[TopicResearchNote]) -> str:
     if not notes:
         return ""
-    ranked = sorted(notes, key=lambda note: (len(note.summary), len(note.title)), reverse=True)
+    ranked = sorted(notes, key=_highlight_score, reverse=True)
     top = ranked[0]
-    if top.summary:
-        return top.summary
+    summary = _safe_summary(top.summary, limit=200)
+    if summary:
+        return f"{top.title} ({top.source}) stood out: {summary}"
+    title = _clean_text(top.title)
+    source = _clean_text(top.source)
+    if title:
+        return f"{title} from {source or 'a tracked source'} looks like a high-signal thread for {topic}."
     return f"I found fresh signals about {topic} worth tracking."
+
+
+def _highlight_score(note: TopicResearchNote) -> tuple[int, int, int, int]:
+    source = _clean_text(note.source).lower()
+    source_priority = 0
+    if "wikipedia" in source:
+        source_priority = 5
+    elif "hacker news" in source:
+        source_priority = 4
+    elif "reddit" in source:
+        source_priority = 3
+    elif "duckduckgo" in source:
+        source_priority = 2
+    summary = _safe_summary(note.summary, limit=220)
+    summary_quality = len(summary)
+    title_quality = len(_clean_text(note.title))
+    relevance_quality = len(_clean_text(note.mission_relevance))
+    return (source_priority, summary_quality, relevance_quality, title_quality)
 
 
 class _suppress_exceptions:
@@ -290,4 +340,3 @@ class _suppress_exceptions:
 
     def __exit__(self, _exc_type, _exc, _tb) -> bool:
         return True
-

@@ -123,7 +123,7 @@
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
   - Manual `explore` bypasses normal sensor poll windows so operator-triggered exploration runs immediately and auto-topic selection avoids immediate repeats.
-  - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports a highlighted insight to the operator.
+  - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports a synthesized insight tied to mission impact using the gathered evidence.
   - Purpose info questions (for example `what is your purpose?`) now return the current purpose text instead of entering the purpose-update path.
   - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
@@ -162,6 +162,7 @@
   - [x] Child stage randomly explores Reddit/Hacker News/Wikipedia and emits mission-linked world questions.
   - [x] Manual `explore` bypasses sensor poll windows, avoids immediate auto-topic repeats, and reports scan stats when no new world items are found.
   - [x] Manual `explore <topic>` writes structured world notes and surfaces an explicit “just learned” highlight.
+  - [x] Topic explore highlights are derived from evidence and filtered for low-signal snippets (for example raw URL dumps/source noise).
   - [x] Natural purpose queries are classified as read-only (show current purpose), while update requests still route to `SOUL.md` edits.
   - [x] Child-stage chat can capture operator context and write/update `memory/people/operator.md`.
   - [x] Child-stage chat can capture website URLs and add them to `[world_watch].sites`.

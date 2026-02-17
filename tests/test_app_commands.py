@@ -197,6 +197,23 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("I just learned something exciting:", message)
         self.assertIn("Potatoes spread globally", message)
 
+    def test_explore_completion_message_includes_mission_link_when_provided(self) -> None:
+        message = _format_explore_completion_message(
+            requested_topic="farcaster",
+            selected_topic="farcaster",
+            new_world_count=1,
+            report={
+                "topic_research_notes": 3,
+                "topic_research_path": "memory/world/2026-02-17.md",
+            },
+            sensor_count=2,
+            interesting="Farcaster developers are converging on open social graph portability.",
+            mission_link="This could reduce lock-in risk for operator communication workflows.",
+        )
+        self.assertIn("topic research notes: 3", message)
+        self.assertIn("I just learned something exciting:", message)
+        self.assertIn("Why this might matter to our mission:", message)
+
     def test_local_input_queue_count_includes_active_processing(self) -> None:
         app = TakoTerminalApp(interval=5.0)
         self.assertEqual(0, app._queued_input_total())

@@ -104,6 +104,7 @@ class Runtime:
             "topic_research_notes": 0,
             "topic_research_highlight": "",
             "topic_research_path": "",
+            "topic_research_brief": [],
         }
 
         self._world_dir = self.memory_root / "world"
@@ -280,6 +281,7 @@ class Runtime:
             topic_research_notes = 0
             topic_research_highlight = ""
             topic_research_path = ""
+            topic_research_brief: list[dict[str, str]] = []
             if trigger == "manual" and topic_focus:
                 research_result = await asyncio.to_thread(
                     collect_topic_research,
@@ -292,6 +294,7 @@ class Runtime:
                     notes_path, topic_research_notes = _append_topic_research_entries(self._world_dir, today, research_result)
                     topic_research_path = str(notes_path)
                     topic_research_highlight = _clean_value(research_result.highlight)
+                    topic_research_brief = [_topic_note_brief(note) for note in research_result.notes[:6]]
                     append_daily_note(
                         self.daily_log_root,
                         today,
@@ -306,6 +309,7 @@ class Runtime:
                             "path": topic_research_path,
                             "notes": int(topic_research_notes),
                             "highlight": topic_research_highlight,
+                            "titles": [entry.get("title", "") for entry in topic_research_brief[:4]],
                         },
                     )
                     self._emit_activity("research", f"topic `{topic_focus}` -> {topic_research_notes} notes")
@@ -327,6 +331,7 @@ class Runtime:
                 "topic_research_notes": int(topic_research_notes),
                 "topic_research_highlight": topic_research_highlight,
                 "topic_research_path": topic_research_path,
+                "topic_research_brief": topic_research_brief,
             }
             if trigger == "manual" and new_world_count == 0:
                 append_daily_note(
@@ -766,6 +771,16 @@ def _append_topic_research_entries(world_dir: Path, day: date, result: TopicRese
             handle.write(f"  - Question: {question}\n")
         handle.write("\n")
     return path, len(notes)
+
+
+def _topic_note_brief(note: Any) -> dict[str, str]:
+    return {
+        "source": _clean_value(getattr(note, "source", "")),
+        "title": _clean_value(getattr(note, "title", "")),
+        "summary": _clean_value(getattr(note, "summary", "")),
+        "link": _clean_value(getattr(note, "link", "")),
+        "mission_relevance": _clean_value(getattr(note, "mission_relevance", "")),
+    }
 
 
 def _ensure_world_memory_scaffold(world_dir: Path) -> None:

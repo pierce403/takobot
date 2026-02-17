@@ -3071,6 +3071,13 @@ class TakoTerminalApp(App[None]):
             self.explore_ticks = self.runtime_service.explore_ticks
             self.last_explore_at = self.runtime_service.last_explore_at
             report = dict(getattr(self.runtime_service, "last_explore_report", {}) or {})
+            interesting = ""
+            mission_link = ""
+            if requested_topic.strip() and int(report.get("topic_research_notes", 0) or 0) > 0:
+                interesting, mission_link = await self._compose_topic_explore_insight(
+                    selected_topic=selected_topic,
+                    report=report,
+                )
             self._write_tako(
                 _format_explore_completion_message(
                     requested_topic=requested_topic,
@@ -3078,6 +3085,8 @@ class TakoTerminalApp(App[None]):
                     new_world_count=int(new_world_count),
                     report=report,
                     sensor_count=len(self.runtime_service.sensors),
+                    interesting=interesting,
+                    mission_link=mission_link,
                 )
             )
             return
@@ -4581,6 +4590,75 @@ class TakoTerminalApp(App[None]):
         )
         return role
 
+    async def _compose_topic_explore_insight(self, *, selected_topic: str, report: dict[str, Any]) -> tuple[str, str]:
+        notes_raw = report.get("topic_research_brief")
+        notes: list[dict[str, str]] = []
+        if isinstance(notes_raw, list):
+            for entry in notes_raw[:6]:
+                if not isinstance(entry, dict):
+                    continue
+                title = " ".join(str(entry.get("title", "")).split()).strip()
+                source = " ".join(str(entry.get("source", "")).split()).strip()
+                summary = " ".join(str(entry.get("summary", "")).split()).strip()
+                relevance = " ".join(str(entry.get("mission_relevance", "")).split()).strip()
+                if not (title or summary):
+                    continue
+                notes.append(
+                    {
+                        "title": title,
+                        "source": source,
+                        "summary": summary,
+                        "mission_relevance": relevance,
+                    }
+                )
+
+        if not notes:
+            fallback = " ".join(str(report.get("topic_research_highlight", "")).split()).strip()
+            return fallback, ""
+
+        fallback_interesting, fallback_mission = _fallback_topic_insight(selected_topic=selected_topic, notes=notes)
+
+        if self.inference_runtime is None or not self.inference_runtime.ready:
+            return fallback_interesting, fallback_mission
+
+        mission = "; ".join(item.strip() for item in self.mission_objectives if item.strip()) or "(none)"
+        evidence_lines = []
+        for idx, note in enumerate(notes, start=1):
+            evidence_lines.append(
+                f"{idx}. source={note.get('source') or 'unknown'} | title={note.get('title') or '(untitled)'} "
+                f"| summary={note.get('summary') or '(none)'} | mission_relevance={note.get('mission_relevance') or '(none)'}"
+            )
+
+        prompt = (
+            "You are synthesizing insights from a live research pass.\n"
+            "Write from evidence only; do not invent facts.\n"
+            "Return exactly one JSON object: "
+            '{"interesting":"...","mission_link":"..."}\n'
+            "Rules:\n"
+            "- `interesting`: one sentence, concrete, specific to the evidence.\n"
+            "- `mission_link`: one sentence connecting evidence to mission impact.\n"
+            "- No URLs, no markdown, no bullet lists, no filler.\n"
+            "- If evidence is weak, be explicit about uncertainty.\n"
+            f"topic={selected_topic}\n"
+            f"mission_objectives={mission}\n"
+            "evidence:\n"
+            + "\n".join(evidence_lines)
+        )
+        try:
+            provider, output = await asyncio.to_thread(
+                run_inference_prompt_with_fallback,
+                self.inference_runtime,
+                prompt,
+                timeout_s=45.0,
+            )
+            interesting, mission_link = _extract_topic_insight_from_output(output)
+            if interesting:
+                self._add_activity("research", f"topic insight synthesized via {provider}")
+                return interesting, mission_link or fallback_mission
+        except Exception as exc:  # noqa: BLE001
+            self._add_activity("research", f"topic insight synthesis fallback: {_summarize_error(exc)}")
+        return fallback_interesting, fallback_mission
+
     async def _maybe_handle_inline_role_change(self, text: str) -> bool:
         if not looks_like_role_change_request(text):
             return False
@@ -5345,6 +5423,8 @@ def _format_explore_completion_message(
     new_world_count: int,
     report: dict[str, Any],
     sensor_count: int,
+    interesting: str = "",
+    mission_link: str = "",
 ) -> str:
     topic_note = "auto-selected topic" if not requested_topic.strip() else "topic"
     lines = [
@@ -5366,10 +5446,73 @@ def _format_explore_completion_message(
         if not notes_path:
             notes_path = f"memory/world/{date.today().isoformat()}.md"
         lines.append(f"topic research notes: {topic_notes} ({notes_path})")
-        highlight = " ".join(str(report.get("topic_research_highlight", "")).split())
-        if highlight:
-            lines.append(f"I just learned something exciting: {highlight}")
+        exciting = " ".join(str(interesting or report.get("topic_research_highlight", "")).split())
+        mission = " ".join(str(mission_link).split())
+        if exciting:
+            lines.append(f"I just learned something exciting: {exciting}")
+        if mission:
+            lines.append(f"Why this might matter to our mission: {mission}")
     return "\n".join(lines)
+
+
+def _extract_topic_insight_from_output(value: str) -> tuple[str, str]:
+    raw = value.strip()
+    if not raw:
+        return "", ""
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if len(lines) >= 3 and lines[-1].strip().startswith("```"):
+            raw = "\n".join(lines[1:-1]).strip()
+
+    interesting = ""
+    mission = ""
+    if raw.startswith("{") and raw.endswith("}"):
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            interesting = " ".join(str(payload.get("interesting", "")).split()).strip()
+            mission = " ".join(str(payload.get("mission_link", "")).split()).strip()
+    if not interesting:
+        clean = " ".join(raw.split()).strip()
+        if clean:
+            parts = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)
+            interesting = parts[0].strip()
+            if len(parts) > 1:
+                mission = parts[1].strip()
+    return _trim_summary_line(interesting), _trim_summary_line(mission)
+
+
+def _fallback_topic_insight(*, selected_topic: str, notes: list[dict[str, str]]) -> tuple[str, str]:
+    if not notes:
+        return "", ""
+    ranked = sorted(
+        notes,
+        key=lambda entry: (
+            len(" ".join(str(entry.get("summary", "")).split())),
+            len(" ".join(str(entry.get("mission_relevance", "")).split())),
+            len(" ".join(str(entry.get("title", "")).split())),
+        ),
+        reverse=True,
+    )
+    top = ranked[0]
+    title = " ".join(str(top.get("title", "")).split()).strip() or selected_topic
+    source = " ".join(str(top.get("source", "")).split()).strip() or "a tracked source"
+    summary = _trim_summary_line(" ".join(str(top.get("summary", "")).split()).strip())
+    relevance = _trim_summary_line(" ".join(str(top.get("mission_relevance", "")).split()).strip())
+    interesting = f"{title} from {source} stood out. {summary}".strip()
+    mission = relevance
+    return _trim_summary_line(interesting), _trim_summary_line(mission)
+
+
+def _trim_summary_line(value: str, *, limit: int = 260) -> str:
+    cleaned = " ".join((value or "").split()).strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 3].rstrip() + "..."
 
 
 def _looks_like_local_command(text: str) -> bool:

@@ -36,6 +36,7 @@ What bootstrap does:
 - Inference uses focus-aware memory recall: emotional focus level controls `ragrep` retrieval breadth from `memory/` (narrow when focused, broad when diffuse).
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
+- Pairing/runtime now best-effort syncs XMTP profile metadata from identity name and creates a local deterministic avatar cache (`.tako/state/xmtp-avatar.svg` + `.tako/state/xmtp-profile.json`).
 - Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.
 - First-run templates include `resources/model-guide.md` for model family and thinking-level tuning.
 

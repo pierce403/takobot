@@ -73,7 +73,16 @@ from .soul import (
     update_mission_objectives,
 )
 from .tool_ops import fetch_webpage, run_local_command
-from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmtp_import, send_dm_sync, set_typing_indicator
+from .xmtp import (
+    close_client,
+    create_client,
+    default_message,
+    hint_for_xmtp_error,
+    probe_xmtp_import,
+    send_dm_sync,
+    set_typing_indicator,
+    sync_identity_profile,
+)
 from .identity import (
     build_identity_name_prompt,
     build_identity_role_prompt,
@@ -623,6 +632,14 @@ async def _run_daemon(
                 hooks=hooks,
             )
 
+    await _sync_xmtp_profile(
+        client,
+        paths=paths,
+        identity_name=git_identity_name,
+        hooks=hooks,
+        context="startup",
+    )
+
     if operator_inbox_id:
         clear_pending(paths.state_dir / "pairing.json")
         _emit_runtime_log("status: paired", hooks=hooks)
@@ -714,6 +731,13 @@ async def _run_daemon(
                             seen_message_order.clear()
                             with contextlib.suppress(Exception):
                                 await _prime_seen_messages(client, seen_message_ids, seen_message_order)
+                            await _sync_xmtp_profile(
+                                client,
+                                paths=paths,
+                                identity_name=_preferred_git_identity_name(root),
+                                hooks=hooks,
+                                context="rebuild",
+                            )
                             poll_error_streak = 0
                             stream_crash_streak = 0
                             reconnect_attempt = 0
@@ -795,6 +819,13 @@ async def _run_daemon(
                         seen_message_order.clear()
                         with contextlib.suppress(Exception):
                             await _prime_seen_messages(client, seen_message_ids, seen_message_order)
+                        await _sync_xmtp_profile(
+                            client,
+                            paths=paths,
+                            identity_name=_preferred_git_identity_name(root),
+                            hooks=hooks,
+                            context="rebuild",
+                        )
                         stream_crash_streak = 0
                         poll_error_streak = 0
                         reconnect_attempt = 0
@@ -992,7 +1023,14 @@ async def _handle_incoming_message(
         return
 
     if not _looks_like_command(text):
-        if await _maybe_handle_operator_identity_update(text, inference_runtime, paths, convo, hooks=hooks):
+        if await _maybe_handle_operator_identity_update(
+            text,
+            inference_runtime,
+            paths,
+            convo,
+            client=client,
+            hooks=hooks,
+        ):
             return
         child_followups = await _capture_child_operator_context(text, paths, hooks=hooks)
         reply = await _chat_reply(
@@ -1436,6 +1474,7 @@ async def _maybe_handle_operator_identity_update(
     paths,
     convo,
     *,
+    client,
     hooks: RuntimeHooks | None,
 ) -> bool:
     if looks_like_role_info_query(text):
@@ -1488,6 +1527,13 @@ async def _maybe_handle_operator_identity_update(
         ok_name, summary_name = set_workspace_name(repo_root() / "tako.toml", parsed)
         if not ok_name:
             _emit_runtime_log(f"name sync warning: {summary_name}", level="warn", hooks=hooks)
+        await _sync_xmtp_profile(
+            client,
+            paths=paths,
+            identity_name=parsed,
+            hooks=hooks,
+            context="operator-name-update",
+        )
         append_daily_note(daily_root(), date.today(), f"Operator renamed via XMTP: {current_name} -> {parsed}")
         await convo.send(f"ink dried. I'll go by `{parsed}` now.")
         return True
@@ -1641,15 +1687,63 @@ async def _poll_new_messages(client, seen_ids: set[bytes], seen_order: deque[byt
 
 
 async def _close_xmtp_client(client) -> None:
-    for attr in ("close", "disconnect"):
-        method = getattr(client, attr, None)
-        if not callable(method):
-            continue
-        with contextlib.suppress(Exception):
-            result = method()
-            if asyncio.iscoroutine(result):
-                await result
+    await close_client(client)
+
+
+async def _sync_xmtp_profile(
+    client,
+    *,
+    paths: RuntimePaths,
+    identity_name: str,
+    hooks: RuntimeHooks | None = None,
+    context: str,
+) -> None:
+    try:
+        result = await sync_identity_profile(
+            client,
+            state_dir=paths.state_dir,
+            identity_name=identity_name,
+            generate_avatar=True,
+        )
+    except asyncio.CancelledError:
+        raise
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _emit_runtime_log(
+            f"XMTP profile sync ({context}) failed: {_summarize_stream_error(exc)}",
+            level="warn",
+            stderr=True,
+            hooks=hooks,
+        )
         return
+
+    if result.applied_name or result.applied_avatar:
+        _emit_runtime_log(
+            (
+                f"xmtp profile sync ({context}): "
+                f"name={result.name} applied_name={'yes' if result.applied_name else 'no'} "
+                f"applied_avatar={'yes' if result.applied_avatar else 'no'}"
+            ),
+            hooks=hooks,
+        )
+        return
+
+    if result.profile_api_found:
+        detail = result.errors[0] if result.errors else "profile method signature mismatch"
+        _emit_runtime_log(
+            f"xmtp profile sync ({context}) attempted but not applied: {detail}",
+            level="warn",
+            stderr=True,
+            hooks=hooks,
+        )
+        return
+
+    avatar_note = str(result.avatar_path) if result.avatar_path is not None else "(none)"
+    _emit_runtime_log(
+        f"xmtp profile sync ({context}): metadata API unavailable in this SDK; avatar cached at {avatar_note}",
+        hooks=hooks,
+    )
 
 
 async def _rebuild_xmtp_client(

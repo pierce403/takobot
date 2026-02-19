@@ -116,7 +116,7 @@ from .soul import (
 )
 from .tool_ops import fetch_webpage, run_local_command
 from .runtime import EventBus, Runtime, RuntimeHeartbeatTick
-from .xmtp import create_client, hint_for_xmtp_error, probe_xmtp_import
+from .xmtp import close_client, create_client, hint_for_xmtp_error, probe_xmtp_import, sync_identity_profile
 from .productivity import open_loops as prod_open_loops
 from .productivity import outcomes as prod_outcomes
 from .productivity import promote as prod_promote
@@ -1797,6 +1797,8 @@ class TakoTerminalApp(App[None]):
             metadata={"name": self.identity_name},
         )
         self._add_activity("identity", f"name/role updated ({self.identity_name})")
+        if self.operator_paired:
+            await self._sync_xmtp_profile_best_effort(reason="onboarding-identity")
         self._write_tako(f"identity tucked away in my little shell: {self.identity_name} — {self.identity_role}")
         if self.mode == "onboarding" and self.onboarding_collect_xmtp_handle and not self.operator_paired:
             if not self.mission_objectives:
@@ -1932,6 +1934,7 @@ class TakoTerminalApp(App[None]):
 
         try:
             client = await create_client(DEFAULT_ENV, self.paths.xmtp_db_dir, self.wallet_key, self.db_encryption_key)
+            await self._sync_xmtp_profile_with_client(client, reason="pairing")
             dm = await client.conversations.new_dm(resolved)
             await dm.send(outbound_message)
             operator_inbox_id = await _resolve_operator_inbox_id(client, resolved, dm)
@@ -2056,6 +2059,63 @@ class TakoTerminalApp(App[None]):
             await self._finalize_onboarding()
         else:
             self._schedule_identity_onboarding_after_awake()
+
+    async def _sync_xmtp_profile_with_client(self, client: object, *, reason: str) -> None:
+        if self.paths is None:
+            return
+        try:
+            result = await sync_identity_profile(
+                client,
+                state_dir=self.paths.state_dir,
+                identity_name=self.identity_name,
+                generate_avatar=True,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self._add_activity("xmtp", f"profile sync failed ({reason}): {_summarize_error(exc)}")
+            return
+
+        if result.applied_name or result.applied_avatar:
+            self._add_activity(
+                "xmtp",
+                (
+                    f"profile synced ({reason}) name={result.name} "
+                    f"name={'yes' if result.applied_name else 'no'} "
+                    f"avatar={'yes' if result.applied_avatar else 'no'}"
+                ),
+            )
+            return
+
+        if result.profile_api_found:
+            detail = result.errors[0] if result.errors else "profile method signature mismatch"
+            self._add_activity("xmtp", f"profile sync attempted ({reason}) but not applied: {detail}")
+            return
+
+        avatar_note = str(result.avatar_path) if result.avatar_path is not None else "(none)"
+        self._add_activity("xmtp", f"profile metadata API unavailable ({reason}); avatar cached at {avatar_note}")
+
+    async def _sync_xmtp_profile_best_effort(self, *, reason: str) -> None:
+        if self.paths is None:
+            return
+        try:
+            client = await create_client(
+                DEFAULT_ENV,
+                self.paths.xmtp_db_dir,
+                self.wallet_key,
+                self.db_encryption_key,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self._add_activity("xmtp", f"profile sync skipped ({reason}): {_summarize_error(exc)}")
+            return
+
+        try:
+            await self._sync_xmtp_profile_with_client(client, reason=reason)
+        finally:
+            with contextlib.suppress(Exception):
+                await close_client(client)
 
     async def _cleanup_pairing_resources(self) -> None:
         current = asyncio.current_task()
@@ -4669,6 +4729,8 @@ class TakoTerminalApp(App[None]):
             metadata={"old": previous, "new": self.identity_name},
         )
         self._add_activity("identity", f"name updated {previous} -> {self.identity_name}")
+        if self.operator_paired:
+            await self._sync_xmtp_profile_best_effort(reason="local-name-update")
         self._write_tako(f"ink dried. I'll go by `{self.identity_name}` now.")
         return True
 

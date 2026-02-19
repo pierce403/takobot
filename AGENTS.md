@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — XMTP profile sync now aligns identity name + avatar
+
+- What happened: XMTP runtime had no dedicated profile-sync path, so identity renames in `SOUL.md` / `tako.toml` were not propagated to XMTP profile metadata and no first-class avatar artifact existed.
+- Fix: added best-effort XMTP profile sync across startup, rebuild, pairing, and name-update flows; sync now derives display name from identity, generates deterministic avatar SVG at `.tako/state/xmtp-avatar.svg`, and records sync state at `.tako/state/xmtp-profile.json`.
+- Prevention: keep profile sync wired into both daemon and TUI rename/pairing paths and keep unit tests for API-present/API-absent SDK behavior.
+
 ### 2026-02-19 — Pi runtime now enforces Node >=20 compatibility
 
 - What happened: some fresh installs had system Node present but below pi package requirements, so workspace pi CLI installed but failed at runtime with syntax errors from `@mariozechner/pi-tui`.

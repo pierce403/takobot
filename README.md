@@ -90,6 +90,7 @@ Pairing flow:
   - purpose
   - XMTP handle yes/no (pair now or continue local-only)
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
+- Rename handling in running chat is inference-classified (not phrase-gated): if you request a rename without giving the target name, Tako asks for the exact replacement.
 - After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
 
 Productivity (GTD + PARA):

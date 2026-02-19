@@ -95,13 +95,12 @@ from .xmtp import (
     sync_identity_profile,
 )
 from .identity import (
-    build_identity_name_prompt,
+    build_identity_name_intent_prompt,
     build_identity_role_prompt,
+    extract_name_intent_from_model_output,
     extract_name_from_text,
-    extract_name_from_model_output,
     extract_role_from_model_output,
     extract_role_from_text,
-    looks_like_name_change_request,
     looks_like_role_change_request,
     looks_like_role_info_query,
 )
@@ -1579,34 +1578,32 @@ async def _maybe_handle_operator_identity_update(
             await convo.send("I don't have a clear purpose line yet. send `your purpose is ...` and I'll write it to `SOUL.md`.")
         return True
 
-    requested_name_change = looks_like_name_change_request(text)
+    current_name, current_role = read_identity()
+    parsed = extract_name_from_text(text)
+    requested_name_change = bool(parsed)
+    if not requested_name_change and inference_runtime.ready:
+        prompt = build_identity_name_intent_prompt(text=text, current_name=current_name)
+        try:
+            _, output = await asyncio.to_thread(
+                run_inference_prompt_with_fallback,
+                inference_runtime,
+                prompt,
+                timeout_s=30.0,
+            )
+            requested_name_change, inferred_name = extract_name_intent_from_model_output(output)
+            if inferred_name:
+                parsed = inferred_name
+        except Exception as exc:  # noqa: BLE001
+            _emit_runtime_log(f"identity name intent check failed: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
     requested_role_change = looks_like_role_change_request(text)
     if not requested_name_change and not requested_role_change:
         return False
     if requested_name_change:
-        current_name, current_role = read_identity()
-        parsed = extract_name_from_text(text)
         if not parsed:
-            if not inference_runtime.ready:
-                await convo.send("I can rename myself once inference is awake. (inference is unavailable right now.)")
-                return True
-
-            prompt = build_identity_name_prompt(text=text, current_name=current_name)
-            try:
-                _, output = await asyncio.to_thread(
-                    run_inference_prompt_with_fallback,
-                    inference_runtime,
-                    prompt,
-                    timeout_s=45.0,
-                )
-            except Exception as exc:  # noqa: BLE001
-                _emit_runtime_log(f"identity name extraction failed: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
-                await convo.send("little ink blot: I couldn't extract a clean name right now. try again in a moment.")
-                return True
-
-            parsed = extract_name_from_model_output(output)
-        if not parsed:
-            await convo.send("tiny clarification bubble: I couldn't isolate the name. try: `call yourself SILLYTAKO`.")
+            await convo.send(
+                "I can do that. send the exact name you want me to use, for example: "
+                "`set your name to TAKOBOT`."
+            )
             return True
         if parsed == current_name:
             await convo.send(f"already swimming under `{parsed}`.")
@@ -1627,7 +1624,6 @@ async def _maybe_handle_operator_identity_update(
         await convo.send(f"ink dried. I'll go by `{parsed}` now.")
         return True
 
-    current_name, current_role = read_identity()
     parsed_role = extract_role_from_text(text)
     if not parsed_role and inference_runtime.ready:
         prompt = build_identity_role_prompt(text=text, current_role=current_role)

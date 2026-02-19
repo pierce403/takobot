@@ -87,7 +87,8 @@
   - Hatchling onboarding is stage-aware and ordered: name, purpose, then XMTP handle yes/no.
   - On onboarding completion, stage transitions from `hatchling` to `child`, updates `tako.toml`, and logs the transition in `memory/dailies/`.
   - Name capture in identity onboarding accepts freeform phrases and uses inference to extract a clean name token (not entire sentence).
-  - In running chat, the operator can rename Tako inline with a natural message (e.g. “call yourself SILLYTAKO”) and the app persists the parsed name into `SOUL.md`.
+  - In running chat, rename intent is inference-classified (not phrase-gated), so natural requests can trigger rename flows and missing target-name requests prompt for exact replacement text.
+  - When a target name is provided, the app persists identity rename updates into `SOUL.md` and keeps `tako.toml` (`workspace.name`) in sync.
   - Uses a playful octopus voice in onboarding transcript copy.
   - Runs a runtime service (heartbeat + exploration + sensors) under UI orchestration, then applies Type 1 triage continuously.
   - Uses an in-memory EventBus that writes `.tako/state/events.jsonl` for audit while dispatching events directly to Type 1 queues (no JSONL polling loop).

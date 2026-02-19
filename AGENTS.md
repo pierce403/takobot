@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — Name updates now use inference intent (not hardcoded phrase gates)
+
+- What happened: operator rename handling depended on hardcoded name-change phrase recognition before inference, so broad requests could hit generic clarification even when intent was clear.
+- Fix: removed phrase-gated name-change detection in local and XMTP operator chat flows; rename intent is now inference-classified with structured JSON (`intent` + `name`), and explicit follow-up prompts request the target name when omitted.
+- Prevention: keep rename-intent parsing/prompt schema in unit tests and prefer model-based intent extraction for operator config changes where rigid phrase gates cause UX misses.
+
 ### 2026-02-19 — Natural-language cron jobs now run through heartbeat and XMTP controls
 
 - What happened: operators could ask for recurring work in plain language, but there was no durable jobs store or command surface for scheduling/listing/removing/running jobs across terminal and XMTP.

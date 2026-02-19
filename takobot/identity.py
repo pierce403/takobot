@@ -8,31 +8,6 @@ def _normalize_text(text: str) -> str:
     return " ".join(text.strip().split())
 
 
-def looks_like_name_change_request(text: str) -> bool:
-    """Heuristic gate before we spend inference calls extracting a name."""
-    lowered = _normalize_text(text).lower()
-    if not lowered:
-        return False
-
-    # Strong/direct phrasing
-    if "call yourself" in lowered:
-        return True
-    if "name yourself" in lowered or "rename yourself" in lowered:
-        return True
-    if "set your name" in lowered or "change your name" in lowered:
-        return True
-
-    # Common/typo variants: "your name can be X" / "you name can be X"
-    if ("your name" in lowered or "you name" in lowered) and ("can be" in lowered or "should be" in lowered or " is " in f" {lowered} "):
-        return True
-
-    # Broader "name can be X" but require it to be about the agent ("you/your/tako") to avoid false positives.
-    if "name can be" in lowered and any(token in lowered for token in (" you ", " your ", " tako ")):
-        return True
-
-    return False
-
-
 def looks_like_role_change_request(text: str) -> bool:
     """Heuristic gate for purpose/mission updates."""
     lowered = _normalize_text(text).lower()
@@ -157,6 +132,21 @@ def build_identity_name_prompt(*, text: str, current_name: str) -> str:
     )
 
 
+def build_identity_name_intent_prompt(*, text: str, current_name: str) -> str:
+    return (
+        "Classify whether the user is asking you to change your identity/display name.\n"
+        "Return exactly one JSON object with this schema: {\"intent\":\"rename|none\",\"name\":\"...\"}\n"
+        "Rules:\n"
+        "- Set intent=rename only when the user is requesting a name change (including XMTP profile name requests).\n"
+        "- If intent=rename and a concrete replacement name is provided, put that in `name`.\n"
+        "- If intent=rename but no concrete replacement name is present, set `name` to an empty string.\n"
+        "- For informational questions or unrelated chat, set intent=none and name=\"\".\n"
+        "- No prose, no markdown, no extra keys.\n"
+        f"current_name={current_name}\n"
+        f"user_message={text}\n"
+    )
+
+
 def extract_name_from_model_output(value: str) -> str:
     raw = value.strip()
     if not raw:
@@ -192,6 +182,55 @@ def extract_name_from_model_output(value: str) -> str:
         candidate = line
 
     return _sanitize_name_candidate(candidate)
+
+
+def extract_name_intent_from_model_output(value: str) -> tuple[bool, str]:
+    raw = value.strip()
+    if not raw:
+        return False, ""
+
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if len(lines) >= 3 and lines[-1].strip().startswith("```"):
+            raw = "\n".join(lines[1:-1]).strip()
+
+    requested = False
+    candidate = ""
+    parsed_payload = False
+
+    if raw.startswith("{") and raw.endswith("}"):
+        try:
+            parsed = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            parsed = None
+        if isinstance(parsed, dict):
+            parsed_payload = True
+            intent_raw = " ".join(str(parsed.get("intent") or "").split()).strip().lower().replace("-", "_")
+            requested_raw = parsed.get("requested")
+            if isinstance(requested_raw, bool):
+                requested = requested_raw
+            if intent_raw in {"rename", "set_name", "change_name", "update_name", "name_change"}:
+                requested = True
+            elif intent_raw in {"none", "no_change", "ignore", "chat"} and not isinstance(requested_raw, bool):
+                requested = False
+
+            maybe_name = parsed.get("name")
+            if isinstance(maybe_name, str):
+                candidate = maybe_name
+
+    if not parsed_payload:
+        first_line = raw.splitlines()[0].strip().lower()
+        if first_line in {"rename", "rename requested", "intent: rename", "intent=rename"}:
+            requested = True
+        elif first_line in {"none", "intent: none", "intent=none"}:
+            requested = False
+        else:
+            fallback_name = extract_name_from_model_output(raw)
+            if fallback_name:
+                requested = True
+                candidate = fallback_name
+
+    return requested, _sanitize_name_candidate(candidate)
 
 
 def build_identity_role_prompt(*, text: str, current_role: str) -> str:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from takobot.identity import (
+    build_identity_name_intent_prompt,
+    extract_name_intent_from_model_output,
     extract_name_from_model_output,
     extract_name_from_text,
     extract_role_from_model_output,
@@ -13,6 +15,29 @@ from takobot.identity import (
 
 
 class TestIdentityUpdates(unittest.TestCase):
+    def test_build_identity_name_intent_prompt_mentions_schema(self) -> None:
+        prompt = build_identity_name_intent_prompt(
+            text="can you set your name on xmtp?",
+            current_name="Tako",
+        )
+        self.assertIn('{"intent":"rename|none","name":"..."}', prompt)
+        self.assertIn("current_name=Tako", prompt)
+
+    def test_extract_name_intent_from_model_output_rename_with_name(self) -> None:
+        requested, name = extract_name_intent_from_model_output('{"intent":"rename","name":"DantoBot"}')
+        self.assertTrue(requested)
+        self.assertEqual("DantoBot", name)
+
+    def test_extract_name_intent_from_model_output_rename_without_name(self) -> None:
+        requested, name = extract_name_intent_from_model_output('{"intent":"rename","name":""}')
+        self.assertTrue(requested)
+        self.assertEqual("", name)
+
+    def test_extract_name_intent_from_model_output_none(self) -> None:
+        requested, name = extract_name_intent_from_model_output('{"intent":"none","name":""}')
+        self.assertFalse(requested)
+        self.assertEqual("", name)
+
     def test_extract_name_from_text_accepts_plain_name_when_allowed(self) -> None:
         self.assertEqual("DantoBot", extract_name_from_text("DantoBot", allow_plain_name=True))
 

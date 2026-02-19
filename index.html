@@ -859,6 +859,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li><code>jobs</code> supports natural-language schedules (for example <code>every day at 3pm run doctor</code>) and persists schedules under <code>.tako/state/cron/jobs.json</code>.</li>
               <li><code>run</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
+              <li>Identity rename handling is inference-classified instead of phrase-gated; if no replacement name is provided, Tako asks for the exact target name.</li>
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>
               <li><code>doctor</code> auto-runs inference repair first (workspace pi runtime/auth), then runs offline diagnostics (provider CLI probes + recent inference error scan) without needing inference.</li>
               <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>tool-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>

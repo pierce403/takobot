@@ -25,6 +25,7 @@ Common commands:
 - `inference login` starts an assisted pi login workflow. When prompts appear, answer with `inference login answer <text>` or cancel with `inference login cancel`.
 - `models` reports the effective Type1/Type2 pi model plan and the last streamed model observed in TUI. Defaults are tuned for split cognition: Type1 fast (`minimal`), Type2 deep (`xhigh`).
 - Natural-language scheduling also works in plain chat text (for example: `every day at 3pm explore ai news`, `at 09:30 every weekday run doctor`).
+- Identity rename requests in plain chat are inference-classified (not phrase-gated). If a rename request does not include the target name, Tako asks for the exact replacement.
 - Type `/` in the input box to open the slash-command dropdown under the input field.
 - Press `Tab` in the input box to autocomplete command names (and cycle candidates).
 - Asking purpose info questions (for example, `what is your purpose?`) returns the current purpose text; purpose updates still require explicit replacement wording.

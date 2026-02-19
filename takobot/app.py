@@ -70,13 +70,14 @@ from .inference import (
     stream_inference_prompt_with_fallback,
 )
 from .identity import (
+    build_identity_name_intent_prompt,
     build_identity_name_prompt,
     build_identity_role_prompt,
+    extract_name_intent_from_model_output,
     extract_name_from_text,
     extract_name_from_model_output,
     extract_role_from_model_output,
     extract_role_from_text,
-    looks_like_name_change_request,
     looks_like_role_change_request,
     looks_like_role_info_query,
 )
@@ -4751,21 +4752,72 @@ class TakoTerminalApp(App[None]):
         )
         return name
 
+    async def _infer_identity_name_intent(self, text: str) -> tuple[bool, str]:
+        if self.inference_runtime is None or not self.inference_runtime.ready:
+            self._add_activity("identity", "name intent check blocked: inference unavailable")
+            return False, ""
+
+        prompt = build_identity_name_intent_prompt(text=text, current_name=self.identity_name)
+        self._add_activity("inference", "identity name intent check requested")
+        try:
+            provider, output = await asyncio.to_thread(
+                run_inference_prompt_with_fallback,
+                self.inference_runtime,
+                prompt,
+                timeout_s=30.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.inference_last_error = _summarize_error(exc)
+            self._add_activity("inference", f"identity name intent check failed: {self.inference_last_error}")
+            self._record_event(
+                "inference.identity_name_intent.error",
+                f"Identity name intent check failed: {exc}",
+                severity="warn",
+                source="inference",
+            )
+            return False, ""
+
+        self.inference_ever_used = True
+        self.inference_last_provider = provider
+        self.inference_last_error = ""
+        requested, name = extract_name_intent_from_model_output(_sanitize_for_display(output))
+        self._add_activity(
+            "inference",
+            (
+                f"identity name intent check via provider={provider} "
+                f"requested={_yes_no(requested)} has_name={_yes_no(bool(name))}"
+            ),
+        )
+        self._record_event(
+            "inference.identity_name_intent.result",
+            "Identity name intent check completed.",
+            source="inference",
+            metadata={
+                "provider": provider,
+                "requested": _yes_no(requested),
+                "has_name": _yes_no(bool(name)),
+            },
+        )
+        return requested, name
+
     async def _maybe_handle_inline_name_change(self, text: str) -> bool:
-        if not looks_like_name_change_request(text):
-            return False
         if self.paths is None:
             return False
-        if self.inference_runtime is None or not self.inference_runtime.ready:
-            self._write_tako("I can do that once inference is awake. try again in a moment, little captain.")
-            return True
 
         previous = self.identity_name
         parsed_name = extract_name_from_text(text)
+        requested = bool(parsed_name)
+        if not requested:
+            requested, inferred_name = await self._infer_identity_name_intent(text)
+            if not requested:
+                return False
+            parsed_name = inferred_name
+
         if not parsed_name:
-            parsed_name = await self._infer_identity_name(text)
-        if not parsed_name:
-            self._write_tako("tiny clarification bubble: I couldn't isolate the name. try like: `call yourself SILLYTAKO`.")
+            self._write_tako(
+                "I can do that. send the exact name you want me to use, for example: "
+                "`set your name to TAKOBOT`."
+            )
             return True
         if parsed_name == previous:
             self._write_tako(f"already swimming under the name `{parsed_name}`.")

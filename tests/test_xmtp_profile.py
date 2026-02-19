@@ -9,6 +9,7 @@ import unittest
 
 from takobot.xmtp import (
     build_profile_avatar_svg,
+    parse_profile_message,
     canonical_profile_name,
     sync_identity_profile,
 )
@@ -48,6 +49,45 @@ class _ClientWithReadableProfileApi:
         self.profile["avatar_url"] = value
 
 
+class _FakeIdentifier:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+class _FakeDmConversation:
+    def __init__(self, peer_inbox_id: str) -> None:
+        self.peer_inbox_id = peer_inbox_id
+        self.sent: list[tuple[str, object | None]] = []
+
+    async def send(self, content: str, content_type: object | None = None) -> None:
+        self.sent.append((content, content_type))
+
+
+class _FakeConversations:
+    def __init__(self, dms: list[_FakeDmConversation], self_dm: _FakeDmConversation) -> None:
+        self._dms = dms
+        self._self_dm = self_dm
+
+    async def list_dms(self) -> list[_FakeDmConversation]:
+        return list(self._dms)
+
+    async def new_dm(self, _address: str) -> _FakeDmConversation:
+        return self._self_dm
+
+
+class _ClientWithBroadcastFallback:
+    def __init__(self) -> None:
+        self.inbox_id = "inbox-self"
+        self.account_identifier = _FakeIdentifier("0x1111111111111111111111111111111111111111")
+        self.self_dm = _FakeDmConversation("inbox-self")
+        self.peer_dm = _FakeDmConversation("inbox-peer")
+        self.conversations = _FakeConversations([self.peer_dm], self.self_dm)
+        self.codecs: list[object] = []
+
+    def register_codec(self, codec: object) -> None:
+        self.codecs.append(codec)
+
+
 def _avatar_data_uri(name: str) -> str:
     svg = build_profile_avatar_svg(name)
     encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
@@ -85,6 +125,8 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertFalse(result.applied_avatar)
             self.assertFalse(result.name_in_sync)
             self.assertFalse(result.avatar_in_sync)
+            self.assertFalse(result.fallback_self_sent)
+            self.assertEqual(0, result.fallback_peer_sent_count)
             self.assertIsNotNone(result.avatar_path)
             self.assertTrue(result.avatar_path.exists())
             self.assertTrue(result.state_path.exists())
@@ -97,6 +139,8 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertFalse(payload["applied_avatar"])
             self.assertFalse(payload["name_in_sync"])
             self.assertFalse(payload["avatar_in_sync"])
+            self.assertFalse(payload["fallback_self_sent"])
+            self.assertEqual(0, payload["fallback_peer_sent_count"])
 
     def test_sync_profile_uses_available_profile_methods(self) -> None:
         client = _ClientWithProfileApi()
@@ -117,6 +161,8 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertTrue(result.applied_avatar)
             self.assertTrue(result.name_in_sync)
             self.assertTrue(result.avatar_in_sync)
+            self.assertFalse(result.fallback_self_sent)
+            self.assertEqual(0, result.fallback_peer_sent_count)
             self.assertEqual(["InkTako"], client.name_updates)
             self.assertEqual(1, len(client.avatar_updates))
             self.assertTrue(client.avatar_updates[0].startswith("data:image/svg+xml;base64,"))
@@ -143,6 +189,8 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertFalse(result.applied_avatar)
             self.assertTrue(result.name_in_sync)
             self.assertTrue(result.avatar_in_sync)
+            self.assertFalse(result.fallback_self_sent)
+            self.assertEqual(0, result.fallback_peer_sent_count)
             self.assertEqual([], client.name_updates)
             self.assertEqual([], client.avatar_updates)
 
@@ -168,9 +216,43 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertTrue(result.applied_avatar)
             self.assertTrue(result.name_in_sync)
             self.assertTrue(result.avatar_in_sync)
+            self.assertFalse(result.fallback_self_sent)
+            self.assertEqual(0, result.fallback_peer_sent_count)
             self.assertEqual(["InkTako"], client.name_updates)
             self.assertEqual(1, len(client.avatar_updates))
             self.assertTrue(client.avatar_updates[0].startswith("data:image/svg+xml;base64,"))
+
+    def test_sync_profile_broadcasts_profile_message_to_self_and_peer_dm(self) -> None:
+        client = _ClientWithBroadcastFallback()
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            result = asyncio.run(
+                sync_identity_profile(
+                    client,
+                    state_dir=state_dir,
+                    identity_name="InkTako",
+                    generate_avatar=True,
+                )
+            )
+
+            self.assertTrue(result.fallback_self_sent)
+            self.assertEqual(1, result.fallback_peer_sent_count)
+            self.assertEqual(1, len(client.self_dm.sent))
+            self.assertEqual(1, len(client.peer_dm.sent))
+
+            self_message = client.self_dm.sent[0][0]
+            peer_message = client.peer_dm.sent[0][0]
+            self.assertTrue(self_message.startswith("tako:profile:"))
+            self.assertTrue(peer_message.startswith("tako:profile:"))
+
+            parsed = parse_profile_message(peer_message)
+            self.assertIsNotNone(parsed)
+            assert parsed is not None
+            self.assertEqual("InkTako", parsed.name)
+            self.assertTrue((parsed.avatar_url or "").startswith("data:image/svg+xml;base64,"))
+
+    def test_parse_profile_message_returns_none_for_non_profile_text(self) -> None:
+        self.assertIsNone(parse_profile_message("hello world"))
 
 
 if __name__ == "__main__":

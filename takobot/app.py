@@ -2097,7 +2097,9 @@ class TakoTerminalApp(App[None]):
                 (
                     f"profile synced ({reason}) name={result.name} "
                     f"name={'yes' if result.applied_name else 'no'} "
-                    f"avatar={'yes' if result.applied_avatar else 'no'}"
+                    f"avatar={'yes' if result.applied_avatar else 'no'} "
+                    f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                    f"fallback_peers={result.fallback_peer_sent_count}"
                 ),
             )
             return
@@ -2108,26 +2110,46 @@ class TakoTerminalApp(App[None]):
                 (
                     f"profile already in sync ({reason}) name={result.name} "
                     f"verified_name={'yes' if result.name_in_sync else 'no'} "
-                    f"verified_avatar={'yes' if result.avatar_in_sync else 'no'}"
+                    f"verified_avatar={'yes' if result.avatar_in_sync else 'no'} "
+                    f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                    f"fallback_peers={result.fallback_peer_sent_count}"
                 ),
             )
             return
 
         if result.profile_api_found:
             detail = result.errors[0] if result.errors else "profile method signature mismatch"
-            self._add_activity("xmtp", f"profile sync attempted ({reason}) but not applied: {detail}")
+            self._add_activity(
+                "xmtp",
+                (
+                    f"profile sync attempted ({reason}) but not applied: {detail} "
+                    f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                    f"fallback_peers={result.fallback_peer_sent_count}"
+                ),
+            )
             return
 
         if result.profile_read_api_found:
             observed = result.observed_name or "(none)"
             self._add_activity(
                 "xmtp",
-                f"profile sync blocked ({reason}): metadata appears mismatched (observed name={observed}) but SDK has no profile update API",
+                (
+                    f"profile sync blocked ({reason}): metadata appears mismatched (observed name={observed}) "
+                    f"but SDK has no profile update API; fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                    f"fallback_peers={result.fallback_peer_sent_count}"
+                ),
             )
             return
 
         avatar_note = str(result.avatar_path) if result.avatar_path is not None else "(none)"
-        self._add_activity("xmtp", f"profile metadata API unavailable ({reason}); avatar cached at {avatar_note}")
+        self._add_activity(
+            "xmtp",
+            (
+                f"profile metadata API unavailable ({reason}); avatar cached at {avatar_note} "
+                f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                f"fallback_peers={result.fallback_peer_sent_count}"
+            ),
+        )
 
     async def _sync_xmtp_profile_best_effort(self, *, reason: str) -> None:
         if self.paths is None:

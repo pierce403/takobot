@@ -19,6 +19,10 @@ XMTP_PROFILE_STATE_VERSION = 2
 XMTP_PROFILE_STATE_FILE = "xmtp-profile.json"
 XMTP_PROFILE_AVATAR_FILE = "xmtp-avatar.svg"
 XMTP_PROFILE_NAME_MAX_CHARS = 40
+XMTP_PROFILE_BROADCAST_STATE_VERSION = 1
+XMTP_PROFILE_BROADCAST_STATE_FILE = "xmtp-profile-broadcast.json"
+XMTP_PROFILE_MESSAGE_PREFIX = "tako:profile:"
+XMTP_PROFILE_TEXT_CONTENT_TYPE = "xmtp.org/text:1.0"
 
 _AVATAR_BACKGROUNDS: tuple[tuple[str, str], ...] = (
     ("#ECFEFF", "#A5F3FC"),
@@ -61,7 +65,24 @@ class XmtpProfileSyncResult:
     observed_avatar: str | None
     name_in_sync: bool
     avatar_in_sync: bool
+    fallback_self_sent: bool
+    fallback_peer_sent_count: int
     errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class XmtpProfileBroadcastResult:
+    payload_sha256: str
+    self_sent: bool
+    peer_sent_count: int
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class XmtpProfileMessage:
+    name: str | None
+    avatar_url: str | None
+    raw: str
 
 
 def default_message() -> str:
@@ -152,6 +173,55 @@ def canonical_profile_name(identity_name: str) -> str:
     if not cleaned:
         return "Tako"
     return cleaned[:XMTP_PROFILE_NAME_MAX_CHARS].strip() or "Tako"
+
+
+def _trim_profile_avatar_url(value: str | None) -> str:
+    avatar = (value or "").strip()
+    if not avatar:
+        return ""
+    return avatar[:4096]
+
+
+def build_profile_message(name: str, avatar_url: str) -> str:
+    payload: dict[str, Any] = {
+        "type": "profile",
+        "v": 1,
+        "display_name": canonical_profile_name(name),
+        "ts": datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    trimmed_avatar = _trim_profile_avatar_url(avatar_url)
+    if trimmed_avatar:
+        payload["avatar_url"] = trimmed_avatar
+    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return f"{XMTP_PROFILE_MESSAGE_PREFIX}{encoded}"
+
+
+def parse_profile_message(text: str) -> XmtpProfileMessage | None:
+    if not isinstance(text, str):
+        return None
+    stripped = text.strip()
+    if not stripped.startswith(XMTP_PROFILE_MESSAGE_PREFIX):
+        return None
+    raw_json = stripped[len(XMTP_PROFILE_MESSAGE_PREFIX) :].strip()
+    try:
+        payload = json.loads(raw_json)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw_name = payload.get("display_name")
+    if not isinstance(raw_name, str):
+        raw_name = payload.get("name")
+    parsed_name = canonical_profile_name(raw_name) if isinstance(raw_name, str) and raw_name.strip() else None
+    raw_avatar = payload.get("avatar_url")
+    if not isinstance(raw_avatar, str):
+        raw_avatar = payload.get("avatar")
+    parsed_avatar = _trim_profile_avatar_url(raw_avatar if isinstance(raw_avatar, str) else "")
+    return XmtpProfileMessage(
+        name=parsed_name,
+        avatar_url=parsed_avatar or None,
+        raw=stripped,
+    )
 
 
 def _avatar_initial(name: str) -> str:
@@ -451,6 +521,272 @@ def _avatar_candidates(avatar_path: Path | None, avatar_data_uri: str) -> tuple[
     return tuple(deduped)
 
 
+def _read_profile_broadcast_state(path: Path) -> tuple[str, str, dict[str, str]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "", "", {}
+    except Exception:
+        return "", "", {}
+    if not isinstance(payload, dict):
+        return "", "", {}
+    payload_sha256 = str(payload.get("payload_sha256") or "").strip().lower()
+    self_sent_at = str(payload.get("self_sent_at") or "").strip()
+    peers_raw = payload.get("peer_sent")
+    peer_sent: dict[str, str] = {}
+    if isinstance(peers_raw, dict):
+        for key, value in peers_raw.items():
+            if not isinstance(key, str):
+                continue
+            inbox = key.strip().lower()
+            stamp = str(value or "").strip()
+            if inbox and stamp:
+                peer_sent[inbox] = stamp
+    return payload_sha256, self_sent_at, peer_sent
+
+
+def _write_profile_broadcast_state(
+    path: Path,
+    *,
+    payload_sha256: str,
+    self_sent_at: str,
+    peer_sent: dict[str, str],
+) -> None:
+    payload = {
+        "version": XMTP_PROFILE_BROADCAST_STATE_VERSION,
+        "updated_at": datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat(),
+        "payload_sha256": payload_sha256,
+        "self_sent_at": self_sent_at,
+        "peer_sent": dict(sorted(peer_sent.items())),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _client_eth_address(client: object) -> str:
+    for candidate in (
+        getattr(client, "account_identifier", None),
+        getattr(client, "_identifier", None),
+    ):
+        if candidate is None:
+            continue
+        for attr in ("value", "identifier"):
+            value = getattr(candidate, attr, None)
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if trimmed.startswith(("0x", "0X")) and len(trimmed) == 42:
+                    return trimmed
+    return ""
+
+
+async def _list_dm_conversations(client: object) -> list[object]:
+    conversations = getattr(client, "conversations", None)
+    if conversations is None:
+        return []
+    list_dms = getattr(conversations, "list_dms", None)
+    if callable(list_dms):
+        try:
+            result = list_dms()
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, list):
+                return result
+        except Exception:
+            return []
+    return []
+
+
+async def _open_self_dm(client: object) -> object | None:
+    inbox_id = _coerce_nonempty_string(getattr(client, "inbox_id", None))
+    if inbox_id:
+        for dm in await _list_dm_conversations(client):
+            peer = _coerce_nonempty_string(getattr(dm, "peer_inbox_id", None))
+            if peer and peer.lower() == inbox_id.lower():
+                return dm
+
+    address = _client_eth_address(client)
+    if not address:
+        return None
+    conversations = getattr(client, "conversations", None)
+    if conversations is None:
+        return None
+    new_dm = getattr(conversations, "new_dm", None)
+    if not callable(new_dm):
+        return None
+    try:
+        dm = new_dm(address)
+        if inspect.isawaitable(dm):
+            dm = await dm
+        return dm
+    except Exception:
+        return None
+
+
+def _profile_text_content_type() -> Any | None:
+    try:
+        from xmtp_content_type_primitives import ContentTypeId
+    except Exception:
+        return None
+    return ContentTypeId(
+        authority_id="xmtp.org",
+        type_id="text",
+        version_major=1,
+        version_minor=0,
+    )
+
+
+def _register_silent_text_codec(client: object) -> Any | None:
+    register = getattr(client, "register_codec", None)
+    if not callable(register):
+        return None
+    content_type = _profile_text_content_type()
+    if content_type is None:
+        return None
+    try:
+        from xmtp_content_type_primitives import BaseContentCodec, EncodedContent
+        from xmtp_bindings import xmtpv3
+    except Exception:
+        return None
+
+    class _SilentTextCodec(BaseContentCodec[str]):
+        @property
+        def content_type(self):  # type: ignore[override]
+            return content_type
+
+        def encode(self, content: str, registry=None):  # type: ignore[override]
+            encoded = xmtpv3.encode_text(content)
+            return EncodedContent(
+                type_id=content_type,
+                parameters={"encoding": "UTF-8"},
+                content=encoded,
+            )
+
+        def decode(self, content, registry=None):  # type: ignore[override]
+            payload = getattr(content, "content", b"")
+            if not isinstance(payload, (bytes, bytearray)):
+                raise TypeError("profile codec payload must be bytes")
+            return xmtpv3.decode_text(bytes(payload))
+
+        def fallback(self, content: str):  # type: ignore[override]
+            return None
+
+        def should_push(self, content: str):  # type: ignore[override]
+            return False
+
+    try:
+        register(_SilentTextCodec())
+    except Exception:
+        return None
+    return content_type
+
+
+async def _send_profile_message(
+    conversation: object,
+    *,
+    message: str,
+    content_type: Any | None,
+) -> tuple[bool, str | None]:
+    send = getattr(conversation, "send", None)
+    if not callable(send):
+        return False, "conversation.send missing"
+
+    if content_type is not None:
+        for args, kwargs in (
+            ((message, content_type), {}),
+            ((message,), {"content_type": content_type}),
+        ):
+            try:
+                result = send(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    await result
+                return True, None
+            except TypeError:
+                continue
+            except Exception as exc:  # noqa: BLE001
+                return False, f"{exc.__class__.__name__}: {exc}"
+    try:
+        result = send(message)
+        if inspect.isawaitable(result):
+            await result
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+
+async def publish_profile_message(
+    client: object,
+    *,
+    state_dir: Path,
+    identity_name: str,
+    avatar_url: str = "",
+    include_self_dm: bool = True,
+    include_known_dm_peers: bool = True,
+    target_conversation: object | None = None,
+) -> XmtpProfileBroadcastResult:
+    message = build_profile_message(identity_name, avatar_url)
+    payload_sha256 = hashlib.sha256(message.encode("utf-8")).hexdigest()
+    state_path = state_dir / XMTP_PROFILE_BROADCAST_STATE_FILE
+    previous_hash, self_sent_at, peer_sent = _read_profile_broadcast_state(state_path)
+    if previous_hash != payload_sha256:
+        self_sent_at = ""
+        peer_sent = {}
+
+    self_sent = False
+    peer_sent_count = 0
+    errors: list[str] = []
+    content_type = _register_silent_text_codec(client)
+    now_stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+
+    if include_self_dm and not self_sent_at:
+        dm = await _open_self_dm(client)
+        if dm is not None:
+            ok, error = await _send_profile_message(dm, message=message, content_type=content_type)
+            if ok:
+                self_sent = True
+                self_sent_at = now_stamp
+            elif error:
+                errors.append(f"self-dm: {error}")
+
+    target_peer = _coerce_nonempty_string(getattr(target_conversation, "peer_inbox_id", None))
+    if target_conversation is not None and target_peer:
+        peer_key = target_peer.lower()
+        if peer_key not in peer_sent:
+            ok, error = await _send_profile_message(target_conversation, message=message, content_type=content_type)
+            if ok:
+                peer_sent[peer_key] = now_stamp
+                peer_sent_count += 1
+            elif error:
+                errors.append(f"peer:{peer_key}: {error}")
+
+    if include_known_dm_peers:
+        for dm in await _list_dm_conversations(client):
+            peer = _coerce_nonempty_string(getattr(dm, "peer_inbox_id", None))
+            if not peer:
+                continue
+            peer_key = peer.lower()
+            if peer_key in peer_sent:
+                continue
+            ok, error = await _send_profile_message(dm, message=message, content_type=content_type)
+            if ok:
+                peer_sent[peer_key] = now_stamp
+                peer_sent_count += 1
+            elif error:
+                errors.append(f"peer:{peer_key}: {error}")
+
+    _write_profile_broadcast_state(
+        state_path,
+        payload_sha256=payload_sha256,
+        self_sent_at=self_sent_at,
+        peer_sent=peer_sent,
+    )
+    return XmtpProfileBroadcastResult(
+        payload_sha256=payload_sha256,
+        self_sent=self_sent,
+        peer_sent_count=peer_sent_count,
+        errors=tuple(errors[:8]),
+    )
+
+
 async def _apply_profile_metadata(
     targets: list[object],
     name: str,
@@ -621,6 +957,8 @@ def _write_profile_state(
     observed_avatar: str | None,
     name_in_sync: bool,
     avatar_in_sync: bool,
+    fallback_self_sent: bool,
+    fallback_peer_sent_count: int,
     errors: tuple[str, ...],
 ) -> None:
     payload = {
@@ -637,6 +975,8 @@ def _write_profile_state(
         "observed_avatar": observed_avatar or "",
         "name_in_sync": name_in_sync,
         "avatar_in_sync": avatar_in_sync,
+        "fallback_self_sent": fallback_self_sent,
+        "fallback_peer_sent_count": fallback_peer_sent_count,
         "errors": list(errors),
     }
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -680,7 +1020,15 @@ async def sync_identity_profile(
         )
     name_in_sync = name_verified or applied_name
     avatar_in_sync = (not avatar_values) or avatar_verified or applied_avatar
-    errors = tuple(list(read_errors) + list(apply_errors))[:8]
+    fallback_result = await publish_profile_message(
+        client,
+        state_dir=state_dir,
+        identity_name=name,
+        avatar_url=avatar_data_uri,
+        include_self_dm=True,
+        include_known_dm_peers=True,
+    )
+    errors = tuple(list(read_errors) + list(apply_errors) + list(fallback_result.errors))[:8]
 
     state_path = state_dir / XMTP_PROFILE_STATE_FILE
     _write_profile_state(
@@ -696,6 +1044,8 @@ async def sync_identity_profile(
         observed_avatar=observed_avatar,
         name_in_sync=name_in_sync,
         avatar_in_sync=avatar_in_sync,
+        fallback_self_sent=fallback_result.self_sent,
+        fallback_peer_sent_count=fallback_result.peer_sent_count,
         errors=errors,
     )
     return XmtpProfileSyncResult(
@@ -710,7 +1060,28 @@ async def sync_identity_profile(
         observed_avatar=observed_avatar,
         name_in_sync=name_in_sync,
         avatar_in_sync=avatar_in_sync,
+        fallback_self_sent=fallback_result.self_sent,
+        fallback_peer_sent_count=fallback_result.peer_sent_count,
         errors=errors,
+    )
+
+
+async def ensure_profile_message_for_conversation(
+    client: object,
+    conversation: object,
+    *,
+    state_dir: Path,
+    identity_name: str,
+    avatar_url: str = "",
+) -> XmtpProfileBroadcastResult:
+    return await publish_profile_message(
+        client,
+        state_dir=state_dir,
+        identity_name=identity_name,
+        avatar_url=avatar_url,
+        include_self_dm=False,
+        include_known_dm_peers=False,
+        target_conversation=conversation,
     )
 
 

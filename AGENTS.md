@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — XMTP profile fallback now uses DM metadata messages for SDKs without profile writes
+
+- What happened: some runtime environments still lacked XMTP profile metadata write methods, so display name/avatar updates could remain invisible to clients expecting profile data even after local sync attempts.
+- Fix: added Takobot profile fallback publishing (`tako:profile:{...}`) to self-DM + known peers during profile sync, plus active-DM publish on inbound chat paths; added parser/ignore logic so inbound profile metadata messages do not trigger chat replies.
+- Prevention: keep profile sync multi-path (SDK profile API verify/repair + DM metadata fallback), persist fallback broadcast state under `.tako/state/xmtp-profile-broadcast.json`, and test fallback publish behavior alongside API-present/API-missing sync tests.
+
 ### 2026-02-19 — XMTP profile sync now verifies before writing and reports SDK limits
 
 - What happened: operators could request XMTP name/avatar updates, but sync behavior was write-first and status logs could not clearly distinguish “already synced” from “SDK cannot update profile metadata.”

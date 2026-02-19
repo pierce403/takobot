@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import base64
 import contextlib
 from collections import deque
 from dataclasses import dataclass, replace
@@ -88,7 +89,9 @@ from .xmtp import (
     close_client,
     create_client,
     default_message,
+    ensure_profile_message_for_conversation,
     hint_for_xmtp_error,
+    parse_profile_message,
     probe_xmtp_import,
     send_dm_sync,
     set_typing_indicator,
@@ -997,6 +1000,16 @@ async def _handle_incoming_message(
     text = content.strip()
     if not text:
         return
+    profile_message = parse_profile_message(text)
+    if profile_message is not None:
+        _emit_runtime_log(
+            (
+                "xmtp profile metadata received and ignored for chat routing "
+                f"(sender={sender_inbox_id[:10]} name={profile_message.name or '(none)'})"
+            ),
+            hooks=hooks,
+        )
+        return
     if hooks and hooks.inbound_message:
         hooks.inbound_message(sender_inbox_id, text)
 
@@ -1008,6 +1021,29 @@ async def _handle_incoming_message(
     raw_convo = await client.conversations.get_conversation_by_id(bytes(convo_id))
     if raw_convo is None:
         return
+    identity_name = _preferred_git_identity_name(repo_root())
+    avatar_cache = paths.state_dir / "xmtp-avatar.svg"
+    avatar_url = ""
+    with contextlib.suppress(Exception):
+        if avatar_cache.exists():
+            encoded = base64.b64encode(avatar_cache.read_bytes()).decode("ascii")
+            avatar_url = f"data:image/svg+xml;base64,{encoded}"
+    with contextlib.suppress(Exception):
+        broadcast = await ensure_profile_message_for_conversation(
+            client,
+            raw_convo,
+            state_dir=paths.state_dir,
+            identity_name=identity_name,
+            avatar_url=avatar_url,
+        )
+        if broadcast.self_sent or broadcast.peer_sent_count:
+            _emit_runtime_log(
+                (
+                    "xmtp profile metadata published for active DM "
+                    f"(self={'yes' if broadcast.self_sent else 'no'} peers={broadcast.peer_sent_count})"
+                ),
+                hooks=hooks,
+            )
     convo = _ConversationWithTyping(raw_convo, hooks=hooks)
 
     operator_cfg = load_operator(paths.operator_json)
@@ -1835,7 +1871,9 @@ async def _sync_xmtp_profile(
             (
                 f"xmtp profile sync ({context}): "
                 f"name={result.name} applied_name={'yes' if result.applied_name else 'no'} "
-                f"applied_avatar={'yes' if result.applied_avatar else 'no'}"
+                f"applied_avatar={'yes' if result.applied_avatar else 'no'} "
+                f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                f"fallback_peers={result.fallback_peer_sent_count}"
             ),
             hooks=hooks,
         )
@@ -1846,7 +1884,9 @@ async def _sync_xmtp_profile(
             (
                 f"xmtp profile sync ({context}): profile already in sync "
                 f"name={result.name} verified_name={'yes' if result.name_in_sync else 'no'} "
-                f"verified_avatar={'yes' if result.avatar_in_sync else 'no'}"
+                f"verified_avatar={'yes' if result.avatar_in_sync else 'no'} "
+                f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                f"fallback_peers={result.fallback_peer_sent_count}"
             ),
             hooks=hooks,
         )
@@ -1855,7 +1895,11 @@ async def _sync_xmtp_profile(
     if result.profile_api_found:
         detail = result.errors[0] if result.errors else "profile method signature mismatch"
         _emit_runtime_log(
-            f"xmtp profile sync ({context}) attempted but not applied: {detail}",
+            (
+                f"xmtp profile sync ({context}) attempted but not applied: {detail} "
+                f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                f"fallback_peers={result.fallback_peer_sent_count}"
+            ),
             level="warn",
             stderr=True,
             hooks=hooks,
@@ -1867,7 +1911,9 @@ async def _sync_xmtp_profile(
         _emit_runtime_log(
             (
                 f"xmtp profile sync ({context}): metadata appears mismatched (observed name={observed}) "
-                "but SDK has no profile update API"
+                "but SDK has no profile update API; "
+                f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+                f"fallback_peers={result.fallback_peer_sent_count}"
             ),
             level="warn",
             stderr=True,
@@ -1877,7 +1923,11 @@ async def _sync_xmtp_profile(
 
     avatar_note = str(result.avatar_path) if result.avatar_path is not None else "(none)"
     _emit_runtime_log(
-        f"xmtp profile sync ({context}): metadata API unavailable in this SDK; avatar cached at {avatar_note}",
+        (
+            f"xmtp profile sync ({context}): metadata API unavailable in this SDK; avatar cached at {avatar_note} "
+            f"fallback_self={'yes' if result.fallback_self_sent else 'no'} "
+            f"fallback_peers={result.fallback_peer_sent_count}"
+        ),
         hooks=hooks,
     )
 

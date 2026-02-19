@@ -77,6 +77,7 @@ from .xmtp import create_client, default_message, hint_for_xmtp_error, probe_xmt
 from .identity import (
     build_identity_name_prompt,
     build_identity_role_prompt,
+    extract_name_from_text,
     extract_name_from_model_output,
     extract_role_from_model_output,
     extract_role_from_text,
@@ -1455,25 +1456,27 @@ async def _maybe_handle_operator_identity_update(
     if not requested_name_change and not requested_role_change:
         return False
     if requested_name_change:
-        if not inference_runtime.ready:
-            await convo.send("I can rename myself once inference is awake. (inference is unavailable right now.)")
-            return True
-
         current_name, current_role = read_identity()
-        prompt = build_identity_name_prompt(text=text, current_name=current_name)
-        try:
-            _, output = await asyncio.to_thread(
-                run_inference_prompt_with_fallback,
-                inference_runtime,
-                prompt,
-                timeout_s=45.0,
-            )
-        except Exception as exc:  # noqa: BLE001
-            _emit_runtime_log(f"identity name extraction failed: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
-            await convo.send("little ink blot: I couldn't extract a clean name right now. try again in a moment.")
-            return True
+        parsed = extract_name_from_text(text)
+        if not parsed:
+            if not inference_runtime.ready:
+                await convo.send("I can rename myself once inference is awake. (inference is unavailable right now.)")
+                return True
 
-        parsed = extract_name_from_model_output(output)
+            prompt = build_identity_name_prompt(text=text, current_name=current_name)
+            try:
+                _, output = await asyncio.to_thread(
+                    run_inference_prompt_with_fallback,
+                    inference_runtime,
+                    prompt,
+                    timeout_s=45.0,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _emit_runtime_log(f"identity name extraction failed: {_summarize_stream_error(exc)}", level="warn", hooks=hooks)
+                await convo.send("little ink blot: I couldn't extract a clean name right now. try again in a moment.")
+                return True
+
+            parsed = extract_name_from_model_output(output)
         if not parsed:
             await convo.send("tiny clarification bubble: I couldn't isolate the name. try: `call yourself SILLYTAKO`.")
             return True

@@ -117,6 +117,34 @@ def extract_role_from_text(text: str) -> str:
     return ""
 
 
+def extract_name_from_text(text: str, *, allow_plain_name: bool = False) -> str:
+    cleaned = _normalize_text(text)
+    if not cleaned:
+        return ""
+
+    patterns = (
+        r"(?:call|name|rename)\s+(?:yourself|you)\s*(?:to|as|:|=)?\s*(.+)",
+        r"(?:set|change|update)\s+(?:your\s+)?name\s*(?:to|as|:|=)\s*(.+)",
+        r"(?:your|you)\s+name\s*(?:can|should)\s*be\s+(.+)",
+        r"(?:your|you)\s+name\s+is\s+(.+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, cleaned, re.IGNORECASE)
+        if not match:
+            continue
+        candidate = _sanitize_name_candidate(match.group(1))
+        if candidate:
+            return candidate
+
+    if not allow_plain_name:
+        return ""
+
+    candidate = _sanitize_name_candidate(cleaned)
+    if _is_plain_name_candidate(candidate):
+        return candidate
+    return ""
+
+
 def build_identity_name_prompt(*, text: str, current_name: str) -> str:
     return (
         "Extract the intended display name from the user message.\n"
@@ -163,20 +191,7 @@ def extract_name_from_model_output(value: str) -> str:
                 break
         candidate = line
 
-    candidate = candidate.strip().strip("`\"' ")
-    candidate = candidate.strip(" .,:;!?-_")
-    candidate = " ".join(candidate.split())
-    if not candidate:
-        return ""
-
-    lowered = candidate.lower()
-    blocked = {"none", "null", "n/a", "unknown", "you", "me", "it", "myself", "yourself"}
-    if lowered in blocked:
-        return ""
-
-    if len(candidate) > 48:
-        candidate = candidate[:48].rstrip()
-    return candidate
+    return _sanitize_name_candidate(candidate)
 
 
 def build_identity_role_prompt(*, text: str, current_role: str) -> str:
@@ -259,3 +274,70 @@ def _sanitize_role_candidate(value: str) -> str:
     if len(candidate) > 280:
         candidate = candidate[:280].rstrip()
     return candidate
+
+
+def _sanitize_name_candidate(value: str) -> str:
+    candidate = _normalize_text(value)
+    if not candidate:
+        return ""
+    candidate = candidate.strip().strip("`\"' ")
+    candidate = re.sub(r"^(?:name|candidate)\s*(?::|=)\s*", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r"^(?:your\s+name\s+is|name\s+is)\s+", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r"(?:\s+)?(?:please|thanks|thank you)\.?$", "", candidate, flags=re.IGNORECASE).strip()
+    candidate = candidate.strip(" .,:;!?-_")
+    if not candidate:
+        return ""
+
+    lowered = candidate.casefold()
+    blocked = {
+        "none",
+        "null",
+        "n/a",
+        "unknown",
+        "you",
+        "me",
+        "it",
+        "myself",
+        "yourself",
+        "yes",
+        "no",
+        "ok",
+        "okay",
+        "keep",
+        "same",
+        "default",
+        "skip",
+        "later",
+    }
+    if lowered in blocked:
+        return ""
+
+    if len(candidate) > 48:
+        candidate = candidate[:48].rstrip()
+    return candidate
+
+
+def _is_plain_name_candidate(candidate: str) -> bool:
+    if not candidate:
+        return False
+    if len(candidate) > 48:
+        return False
+    if any(char in candidate for char in ",:;!?/\\()[]{}<>"):
+        return False
+    words = candidate.split()
+    if not words or len(words) > 3:
+        return False
+    lowered_words = {word.casefold() for word in words}
+    blocked_words = {
+        "your",
+        "name",
+        "call",
+        "rename",
+        "set",
+        "change",
+        "update",
+        "purpose",
+        "mission",
+        "role",
+    }
+    return not bool(lowered_words & blocked_words)

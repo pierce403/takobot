@@ -72,6 +72,7 @@ from .inference import (
 from .identity import (
     build_identity_name_prompt,
     build_identity_role_prompt,
+    extract_name_from_text,
     extract_name_from_model_output,
     extract_role_from_model_output,
     extract_role_from_text,
@@ -1761,7 +1762,9 @@ class TakoTerminalApp(App[None]):
                 self._write_tako("cute. and what should my purpose be? one sentence is perfect.")
                 return
 
-            parsed_name = await self._infer_identity_name(text)
+            parsed_name = extract_name_from_text(text, allow_plain_name=True)
+            if not parsed_name:
+                parsed_name = await self._infer_identity_name(text)
             if not parsed_name:
                 self._write_tako(
                     "tiny clarification bubble: inference couldn't isolate a confident name yet. "
@@ -4636,7 +4639,9 @@ class TakoTerminalApp(App[None]):
             return True
 
         previous = self.identity_name
-        parsed_name = await self._infer_identity_name(text)
+        parsed_name = extract_name_from_text(text)
+        if not parsed_name:
+            parsed_name = await self._infer_identity_name(text)
         if not parsed_name:
             self._write_tako("tiny clarification bubble: I couldn't isolate the name. try like: `call yourself SILLYTAKO`.")
             return True

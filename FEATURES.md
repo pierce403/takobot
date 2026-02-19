@@ -108,7 +108,7 @@
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
-  - XMTP runtime startup/rebuild and pairing/name-update flows now run best-effort profile sync: display name follows identity name, deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and sync state is recorded at `.tako/state/xmtp-profile.json`.
+  - XMTP runtime startup/rebuild and pairing/name-update flows run profile verify+repair: when profile read APIs exist, Tako checks whether name/avatar match identity and only applies updates on mismatch; deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and detailed sync state (including API-availability signals) is recorded at `.tako/state/xmtp-profile.json`.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Mirrors outbound XMTP replies into the local TUI transcript/activity feed.
   - Keeps full local operator control in the terminal for identity/config/tools/permissions/routines, even when XMTP is paired.

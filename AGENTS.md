@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — XMTP profile sync now verifies before writing and reports SDK limits
+
+- What happened: operators could request XMTP name/avatar updates, but sync behavior was write-first and status logs could not clearly distinguish “already synced” from “SDK cannot update profile metadata.”
+- Fix: XMTP profile sync now attempts a read/verify pass first, updates only when mismatched, and records verification/update API availability plus observed values in `.tako/state/xmtp-profile.json`; runtime/TUI logs now explicitly report `already in sync` vs `read-only/no update API`.
+- Prevention: keep verify/repair behavior covered with unit tests (matched profile skip-write + mismatch repair), and keep docs explicit that some installed XMTP Python SDK builds expose inbox state but no profile metadata write methods.
+
 ### 2026-02-19 — XMTP update now requests TUI restart after apply
 
 - What happened: operator `update` over XMTP applied package changes but still replied with manual restart copy, so paired TUI sessions could remain on stale code until manual restart.

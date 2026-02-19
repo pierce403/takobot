@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-XMTP_PROFILE_STATE_VERSION = 1
+XMTP_PROFILE_STATE_VERSION = 2
 XMTP_PROFILE_STATE_FILE = "xmtp-profile.json"
 XMTP_PROFILE_AVATAR_FILE = "xmtp-avatar.svg"
 XMTP_PROFILE_NAME_MAX_CHARS = 40
@@ -52,9 +53,14 @@ class XmtpProfileSyncResult:
     name: str
     state_path: Path
     avatar_path: Path | None
+    profile_read_api_found: bool
     profile_api_found: bool
     applied_name: bool
     applied_avatar: bool
+    observed_name: str | None
+    observed_avatar: str | None
+    name_in_sync: bool
+    avatar_in_sync: bool
     errors: tuple[str, ...]
 
 
@@ -225,6 +231,192 @@ def _profile_targets(client: object) -> list[object]:
     return targets
 
 
+def _coerce_nonempty_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", errors="ignore")
+        except Exception:
+            return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _looks_like_avatar_value(value: str) -> bool:
+    lowered = value.strip().lower()
+    if not lowered:
+        return False
+    if lowered.startswith(("data:image/", "http://", "https://", "ipfs://", "file://")):
+        return True
+    if lowered.startswith("/"):
+        return True
+    return lowered.endswith((".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"))
+
+
+def _extract_profile_fields(payload: Any) -> tuple[str | None, str | None]:
+    if payload is None:
+        return None, None
+    if isinstance(payload, str):
+        text = _coerce_nonempty_string(payload)
+        if not text:
+            return None, None
+        if _looks_like_avatar_value(text):
+            return None, text
+        return text, None
+
+    keys_name = ("display_name", "displayName", "name", "username", "profile_name", "profileName", "inbox_name", "inboxName")
+    keys_avatar = ("avatar_url", "avatarUrl", "avatar", "image_url", "imageUrl", "profile_image", "profileImage")
+
+    if isinstance(payload, dict):
+        name = None
+        avatar = None
+        for key in keys_name:
+            if key in payload:
+                name = _coerce_nonempty_string(payload.get(key))
+                if name:
+                    break
+        for key in keys_avatar:
+            if key in payload:
+                avatar = _coerce_nonempty_string(payload.get(key))
+                if avatar:
+                    break
+        return name, avatar
+
+    name = None
+    avatar = None
+    for key in keys_name:
+        with contextlib.suppress(Exception):
+            candidate = _coerce_nonempty_string(getattr(payload, key))
+            if candidate:
+                name = candidate
+                break
+    for key in keys_avatar:
+        with contextlib.suppress(Exception):
+            candidate = _coerce_nonempty_string(getattr(payload, key))
+            if candidate:
+                avatar = candidate
+                break
+    return name, avatar
+
+
+async def _call_noarg_member(member: Any) -> tuple[bool, Any, str | None]:
+    try:
+        result = member() if callable(member) else member
+        if inspect.isawaitable(result):
+            result = await result
+        return True, result, None
+    except TypeError:
+        return False, None, None
+    except Exception as exc:  # noqa: BLE001
+        return False, None, f"{exc.__class__.__name__}: {exc}"
+
+
+def _name_matches(observed_name: str | None, desired_name: str) -> bool:
+    if not observed_name:
+        return False
+    return canonical_profile_name(observed_name) == desired_name
+
+
+def _avatar_matches(observed_avatar: str | None, avatar_values: tuple[str, ...]) -> bool:
+    if not observed_avatar:
+        return False
+    probe = observed_avatar.strip()
+    if not probe:
+        return False
+    if probe in avatar_values:
+        return True
+    lowered = probe.lower()
+    for value in avatar_values:
+        if lowered == value.strip().lower():
+            return True
+    return False
+
+
+async def _read_profile_metadata(targets: list[object]) -> tuple[bool, str | None, str | None, tuple[str, ...]]:
+    read_api_found = False
+    observed_name: str | None = None
+    observed_avatar: str | None = None
+    errors: list[str] = []
+
+    combined_members = (
+        "get_profile",
+        "profile",
+        "get_user_profile",
+        "user_profile",
+        "get_public_profile",
+        "public_profile",
+        "get_identity_profile",
+        "identity_profile",
+        "get_profile_metadata",
+        "profile_metadata",
+    )
+    name_members = (
+        "get_display_name",
+        "display_name",
+        "get_inbox_name",
+        "inbox_name",
+        "get_profile_name",
+        "profile_name",
+        "get_username",
+        "username",
+        "get_name",
+    )
+    avatar_members = (
+        "get_avatar_url",
+        "avatar_url",
+        "get_avatar",
+        "avatar",
+        "get_profile_image",
+        "profile_image",
+        "get_image_url",
+        "image_url",
+    )
+
+    async def inspect_member(target: object, member_name: str, *, mode: str) -> None:
+        nonlocal read_api_found, observed_name, observed_avatar
+        member = getattr(target, member_name, None)
+        if member is None:
+            return
+        read_api_found = True
+        success, value, call_error = await _call_noarg_member(member)
+        if call_error:
+            entry = f"{target.__class__.__name__}.{member_name}: {call_error}"
+            if entry not in errors:
+                errors.append(entry)
+        if not success:
+            return
+        if mode == "name":
+            candidate = _coerce_nonempty_string(value)
+            if candidate and observed_name is None:
+                observed_name = candidate
+            return
+        if mode == "avatar":
+            candidate = _coerce_nonempty_string(value)
+            if candidate and observed_avatar is None:
+                observed_avatar = candidate
+            return
+        extracted_name, extracted_avatar = _extract_profile_fields(value)
+        if extracted_name and observed_name is None:
+            observed_name = extracted_name
+        if extracted_avatar and observed_avatar is None:
+            observed_avatar = extracted_avatar
+
+    for target in targets:
+        for member_name in combined_members:
+            await inspect_member(target, member_name, mode="combined")
+        for member_name in name_members:
+            await inspect_member(target, member_name, mode="name")
+        for member_name in avatar_members:
+            await inspect_member(target, member_name, mode="avatar")
+        if observed_name is not None and observed_avatar is not None:
+            break
+
+    return read_api_found, observed_name, observed_avatar, tuple(errors[:8])
+
+
 async def _invoke_method_variants(method: Any, variants: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> tuple[bool, tuple[str, ...]]:
     errors: list[str] = []
     for args, kwargs in variants:
@@ -259,7 +451,14 @@ def _avatar_candidates(avatar_path: Path | None, avatar_data_uri: str) -> tuple[
     return tuple(deduped)
 
 
-async def _apply_profile_metadata(targets: list[object], name: str, avatar_values: tuple[str, ...]) -> tuple[bool, bool, bool, tuple[str, ...]]:
+async def _apply_profile_metadata(
+    targets: list[object],
+    name: str,
+    avatar_values: tuple[str, ...],
+    *,
+    apply_name: bool,
+    apply_avatar: bool,
+) -> tuple[bool, bool, bool, tuple[str, ...]]:
     profile_api_found = False
     applied_name = False
     applied_avatar = False
@@ -292,47 +491,62 @@ async def _apply_profile_metadata(targets: list[object], name: str, avatar_value
         "set_image_url",
     )
 
-    for target in targets:
-        target_name = target.__class__.__name__
-        for method_name in combined_methods:
-            method = getattr(target, method_name, None)
-            if not callable(method):
-                continue
-            profile_api_found = True
-            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-            for avatar in avatar_values:
-                variants.extend(
-                    [
-                        ((), {"name": name, "avatar_url": avatar}),
-                        ((), {"display_name": name, "avatar_url": avatar}),
-                        ((), {"name": name, "avatar": avatar}),
-                        ((), {"display_name": name, "avatar": avatar}),
-                        (({"name": name, "avatar_url": avatar},), {}),
-                        (({"display_name": name, "avatar_url": avatar},), {}),
-                    ]
-                )
-            variants.extend(
-                [
-                    ((), {"name": name}),
-                    ((), {"display_name": name}),
-                    (({"name": name},), {}),
-                    (({"display_name": name},), {}),
-                ]
-            )
-            success, call_errors = await _invoke_method_variants(method, variants)
-            for item in call_errors:
-                entry = f"{target_name}.{method_name}: {item}"
-                if entry not in errors:
-                    errors.append(entry)
-            if success:
-                applied_name = True
-                if avatar_values:
-                    applied_avatar = True
+    if apply_name or (apply_avatar and avatar_values):
+        for target in targets:
+            target_name = target.__class__.__name__
+            for method_name in combined_methods:
+                method = getattr(target, method_name, None)
+                if not callable(method):
+                    continue
+                profile_api_found = True
+                success = False
+                avatar_success = False
+                if apply_avatar and avatar_values:
+                    avatar_variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+                    for avatar in avatar_values:
+                        avatar_variants.extend(
+                            [
+                                ((), {"name": name, "avatar_url": avatar}),
+                                ((), {"display_name": name, "avatar_url": avatar}),
+                                ((), {"name": name, "avatar": avatar}),
+                                ((), {"display_name": name, "avatar": avatar}),
+                                (({"name": name, "avatar_url": avatar},), {}),
+                                (({"display_name": name, "avatar_url": avatar},), {}),
+                            ]
+                        )
+                    success, call_errors = await _invoke_method_variants(method, avatar_variants)
+                    for item in call_errors:
+                        entry = f"{target_name}.{method_name}: {item}"
+                        if entry not in errors:
+                            errors.append(entry)
+                    if success:
+                        avatar_success = True
+                if not success and apply_name:
+                    success, call_errors = await _invoke_method_variants(
+                        method,
+                        [
+                            ((), {"name": name}),
+                            ((), {"display_name": name}),
+                            (({"name": name},), {}),
+                            (({"display_name": name},), {}),
+                        ],
+                    )
+                    for item in call_errors:
+                        entry = f"{target_name}.{method_name}: {item}"
+                        if entry not in errors:
+                            errors.append(entry)
+                if success:
+                    if apply_name:
+                        applied_name = True
+                    if avatar_success:
+                        applied_avatar = True
+                    break
+            name_done = (not apply_name) or applied_name
+            avatar_done = (not apply_avatar) or (not avatar_values) or applied_avatar
+            if name_done and avatar_done:
                 break
-        if applied_name and (applied_avatar or not avatar_values):
-            break
 
-    if not applied_name:
+    if apply_name and not applied_name:
         for target in targets:
             target_name = target.__class__.__name__
             for method_name in name_methods:
@@ -359,7 +573,7 @@ async def _apply_profile_metadata(targets: list[object], name: str, avatar_value
             if applied_name:
                 break
 
-    if avatar_values and not applied_avatar:
+    if apply_avatar and avatar_values and not applied_avatar:
         for target in targets:
             target_name = target.__class__.__name__
             for method_name in avatar_methods:
@@ -399,9 +613,14 @@ def _write_profile_state(
     name: str,
     avatar_path: Path | None,
     avatar_sha256: str,
+    profile_read_api_found: bool,
     profile_api_found: bool,
     applied_name: bool,
     applied_avatar: bool,
+    observed_name: str | None,
+    observed_avatar: str | None,
+    name_in_sync: bool,
+    avatar_in_sync: bool,
     errors: tuple[str, ...],
 ) -> None:
     payload = {
@@ -410,9 +629,14 @@ def _write_profile_state(
         "name": name,
         "avatar_path": str(avatar_path) if avatar_path is not None else "",
         "avatar_sha256": avatar_sha256,
+        "profile_read_api_found": profile_read_api_found,
         "profile_api_found": profile_api_found,
         "applied_name": applied_name,
         "applied_avatar": applied_avatar,
+        "observed_name": observed_name or "",
+        "observed_avatar": observed_avatar or "",
+        "name_in_sync": name_in_sync,
+        "avatar_in_sync": avatar_in_sync,
         "errors": list(errors),
     }
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,32 +654,62 @@ async def sync_identity_profile(
     avatar_path: Path | None = None
     avatar_data_uri = ""
     avatar_sha256 = ""
+    avatar_values: tuple[str, ...] = ()
     if generate_avatar:
         avatar_path, avatar_data_uri, avatar_sha256 = ensure_profile_avatar(state_dir, name)
+        avatar_values = _avatar_candidates(avatar_path, avatar_data_uri)
 
-    profile_api_found, applied_name, applied_avatar, errors = await _apply_profile_metadata(
-        _profile_targets(client),
-        name,
-        _avatar_candidates(avatar_path, avatar_data_uri),
-    )
+    targets = _profile_targets(client)
+    profile_read_api_found, observed_name, observed_avatar, read_errors = await _read_profile_metadata(targets)
+    name_verified = _name_matches(observed_name, name)
+    avatar_verified = (not avatar_values) or _avatar_matches(observed_avatar, avatar_values)
+    needs_name_update = not name_verified
+    needs_avatar_update = bool(avatar_values) and not avatar_verified
+
+    profile_api_found = False
+    applied_name = False
+    applied_avatar = False
+    apply_errors: tuple[str, ...] = ()
+    if needs_name_update or needs_avatar_update:
+        profile_api_found, applied_name, applied_avatar, apply_errors = await _apply_profile_metadata(
+            targets,
+            name,
+            avatar_values,
+            apply_name=needs_name_update,
+            apply_avatar=needs_avatar_update,
+        )
+    name_in_sync = name_verified or applied_name
+    avatar_in_sync = (not avatar_values) or avatar_verified or applied_avatar
+    errors = tuple(list(read_errors) + list(apply_errors))[:8]
+
     state_path = state_dir / XMTP_PROFILE_STATE_FILE
     _write_profile_state(
         state_path,
         name=name,
         avatar_path=avatar_path,
         avatar_sha256=avatar_sha256,
+        profile_read_api_found=profile_read_api_found,
         profile_api_found=profile_api_found,
         applied_name=applied_name,
         applied_avatar=applied_avatar,
+        observed_name=observed_name,
+        observed_avatar=observed_avatar,
+        name_in_sync=name_in_sync,
+        avatar_in_sync=avatar_in_sync,
         errors=errors,
     )
     return XmtpProfileSyncResult(
         name=name,
         state_path=state_path,
         avatar_path=avatar_path,
+        profile_read_api_found=profile_read_api_found,
         profile_api_found=profile_api_found,
         applied_name=applied_name,
         applied_avatar=applied_avatar,
+        observed_name=observed_name,
+        observed_avatar=observed_avatar,
+        name_in_sync=name_in_sync,
+        avatar_in_sync=avatar_in_sync,
         errors=errors,
     )
 

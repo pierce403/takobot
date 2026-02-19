@@ -2102,9 +2102,28 @@ class TakoTerminalApp(App[None]):
             )
             return
 
+        if result.name_in_sync and result.avatar_in_sync:
+            self._add_activity(
+                "xmtp",
+                (
+                    f"profile already in sync ({reason}) name={result.name} "
+                    f"verified_name={'yes' if result.name_in_sync else 'no'} "
+                    f"verified_avatar={'yes' if result.avatar_in_sync else 'no'}"
+                ),
+            )
+            return
+
         if result.profile_api_found:
             detail = result.errors[0] if result.errors else "profile method signature mismatch"
             self._add_activity("xmtp", f"profile sync attempted ({reason}) but not applied: {detail}")
+            return
+
+        if result.profile_read_api_found:
+            observed = result.observed_name or "(none)"
+            self._add_activity(
+                "xmtp",
+                f"profile sync blocked ({reason}): metadata appears mismatched (observed name={observed}) but SDK has no profile update API",
+            )
             return
 
         avatar_note = str(result.avatar_path) if result.avatar_path is not None else "(none)"

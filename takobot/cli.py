@@ -1841,10 +1841,34 @@ async def _sync_xmtp_profile(
         )
         return
 
+    if result.name_in_sync and result.avatar_in_sync:
+        _emit_runtime_log(
+            (
+                f"xmtp profile sync ({context}): profile already in sync "
+                f"name={result.name} verified_name={'yes' if result.name_in_sync else 'no'} "
+                f"verified_avatar={'yes' if result.avatar_in_sync else 'no'}"
+            ),
+            hooks=hooks,
+        )
+        return
+
     if result.profile_api_found:
         detail = result.errors[0] if result.errors else "profile method signature mismatch"
         _emit_runtime_log(
             f"xmtp profile sync ({context}) attempted but not applied: {detail}",
+            level="warn",
+            stderr=True,
+            hooks=hooks,
+        )
+        return
+
+    if result.profile_read_api_found:
+        observed = result.observed_name or "(none)"
+        _emit_runtime_log(
+            (
+                f"xmtp profile sync ({context}): metadata appears mismatched (observed name={observed}) "
+                "but SDK has no profile update API"
+            ),
             level="warn",
             stderr=True,
             hooks=hooks,

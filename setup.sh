@@ -11,6 +11,7 @@ ENGINE_PYPI_NAME="takobot"
 ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/takobot.git"
 PI_PACKAGE_VERSION="0.52.12"
 NVM_VERSION="v0.40.1"
+PI_MIN_NODE_MAJOR="20"
 
 WORKDIR="$(pwd -P)"
 VENV_DIR="$WORKDIR/.venv"
@@ -23,6 +24,19 @@ log() {
 die() {
   printf "Error: %s\n" "$*" >&2
   exit 1
+}
+
+node_major_version() {
+  local node_path="$1"
+  local version major
+  version="$("$node_path" --version 2>/dev/null || true)"
+  version="${version#v}"
+  major="${version%%.*}"
+  if [[ "$major" =~ ^[0-9]+$ ]]; then
+    printf "%s\n" "$major"
+    return 0
+  fi
+  printf "\n"
 }
 
 is_workspace() {
@@ -123,8 +137,28 @@ install_pi_runtime() {
   export TMP="$tmp_dir"
   export TEMP="$tmp_dir"
 
-  if ! command -v npm >/dev/null 2>&1; then
-    log "inference(pi): npm not found; bootstrapping workspace-local nvm ($NVM_VERSION)"
+  local system_node system_npm system_node_major bootstrap_reason
+  local need_local_node=0
+  system_node="$(command -v node || true)"
+  system_npm="$(command -v npm || true)"
+  system_node_major=""
+  if [[ -n "$system_node" ]]; then
+    system_node_major="$(node_major_version "$system_node")"
+  fi
+
+  if [[ -z "$system_npm" ]]; then
+    need_local_node=1
+    bootstrap_reason="npm not found"
+  elif [[ -z "$system_node" ]]; then
+    need_local_node=1
+    bootstrap_reason="node not found"
+  elif [[ -z "$system_node_major" || "$system_node_major" -lt "$PI_MIN_NODE_MAJOR" ]]; then
+    need_local_node=1
+    bootstrap_reason="node ${system_node_major:-unknown} is below required >=$PI_MIN_NODE_MAJOR"
+  fi
+
+  if [[ "$need_local_node" -eq 1 ]]; then
+    log "inference(pi): $bootstrap_reason; bootstrapping workspace-local nvm ($NVM_VERSION)"
     local nvm_tar="$tmp_dir/nvm-${NVM_VERSION#v}.tar.gz"
     local nvm_unpack="$tmp_dir/nvm-${NVM_VERSION#v}"
     if [[ ! -s "$nvm_dir/nvm.sh" ]]; then

@@ -19,6 +19,7 @@ from takobot.inference import (
     _ensure_workspace_pi_auth,
     _detect_ollama,
     _detect_pi,
+    _pi_node_available,
     _provider_env,
     _run_pi,
     _workspace_node_bin_dir,
@@ -79,6 +80,41 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertIsNotNone(selected)
         assert selected is not None
         self.assertIn("v22.13.1", str(selected))
+
+    def test_workspace_node_bin_dir_ignores_incompatible_versions(self) -> None:
+        with TemporaryDirectory() as tmp:
+            nvm_dir = Path(tmp) / "nvm"
+            node_name = "node.exe" if os.name == "nt" else "node"
+            for version in ("v18.19.0", "v19.9.0"):
+                bin_dir = nvm_dir / "versions" / "node" / version / "bin"
+                bin_dir.mkdir(parents=True, exist_ok=True)
+                (bin_dir / node_name).write_text("", encoding="utf-8")
+
+            with patch("takobot.inference._workspace_nvm_dir", return_value=nvm_dir):
+                selected = _workspace_node_bin_dir()
+
+        self.assertIsNone(selected)
+
+    def test_pi_node_available_requires_node_20_plus(self) -> None:
+        with (
+            patch("takobot.inference._workspace_node_bin_dir", return_value=None),
+            patch("takobot.inference.shutil.which", return_value="/usr/bin/node"),
+            patch(
+                "takobot.inference.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout="v18.19.0\n", stderr=""),
+            ),
+        ):
+            self.assertFalse(_pi_node_available())
+
+        with (
+            patch("takobot.inference._workspace_node_bin_dir", return_value=None),
+            patch("takobot.inference.shutil.which", return_value="/usr/bin/node"),
+            patch(
+                "takobot.inference.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout="v20.11.0\n", stderr=""),
+            ),
+        ):
+            self.assertTrue(_pi_node_available())
 
     def test_provider_env_prepends_workspace_node_bin_for_pi(self) -> None:
         runtime = InferenceRuntime(
@@ -202,14 +238,14 @@ class TestInferencePiRuntime(unittest.TestCase):
             pi_bin.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
             env = {"OPENAI_API_KEY": "test-key"}
 
-            with (
-                patch("takobot.inference._workspace_pi_cli_path", return_value=pi_bin),
-                patch("takobot.inference._pi_node_available", return_value=False),
-            ):
-                status, _key = _detect_pi(home, env)
+        with (
+            patch("takobot.inference._workspace_pi_cli_path", return_value=pi_bin),
+            patch("takobot.inference._pi_node_available", return_value=False),
+        ):
+            status, _key = _detect_pi(home, env)
 
         self.assertFalse(status.ready)
-        self.assertIn("node runtime is unavailable", status.note)
+        self.assertIn("requires node >=", status.note)
 
     def test_detect_ollama_uses_configured_or_discovered_model(self) -> None:
         with patch("takobot.inference.shutil.which", return_value="/usr/bin/ollama"):

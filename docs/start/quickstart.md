@@ -20,7 +20,7 @@ What bootstrap does:
 
 - creates `.venv/`
 - installs/updates `takobot` from PyPI
-- installs a local pi runtime under `.tako/pi/node` when `npm` is available
+- installs a local pi runtime under `.tako/pi/node` (bootstraps workspace-local nvm/node when host Node/npm is missing or Node is `<20`)
 - materializes workspace templates without overwriting edits
 - initializes git on `main`
 - launches TUI when a TTY is available, otherwise starts daemon mode

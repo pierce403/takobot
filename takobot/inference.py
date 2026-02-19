@@ -29,6 +29,7 @@ CODEX_AGENTIC_EXEC_ARGS = [
 INFERENCE_SETTINGS_FILENAME = "inference-settings.json"
 PI_PACKAGE_VERSION = "0.52.12"
 NVM_VERSION = "v0.40.1"
+PI_MIN_NODE_MAJOR = 20
 KNOWN_INFERENCE_PROVIDERS = ("pi", "ollama", "codex", "claude", "gemini")
 PI_KEY_ENV_VARS = (
     "OPENAI_API_KEY",
@@ -803,7 +804,9 @@ def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
     env["TEMP"] = tmp_value
 
     node_bin_dir = _workspace_node_bin_dir()
-    if node_bin_dir is None and shutil.which("node") is None:
+    system_node = shutil.which("node")
+    system_node_compatible = _node_path_meets_pi_runtime(system_node)
+    if node_bin_dir is None and not system_node_compatible:
         ok, detail = _install_workspace_nvm_node_lts(tmp_dir=tmp_dir)
         if not ok:
             return False, detail
@@ -814,7 +817,9 @@ def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
         env["PATH"] = f"{node_bin_dir}{os.pathsep}{current_path}" if current_path else str(node_bin_dir)
         env["NVM_DIR"] = str(_workspace_nvm_dir())
 
-    npm_exec = _workspace_npm_executable(node_bin_dir=node_bin_dir) or shutil.which("npm")
+    npm_exec = _workspace_npm_executable(node_bin_dir=node_bin_dir)
+    if not npm_exec and system_node_compatible:
+        npm_exec = shutil.which("npm")
     if not npm_exec:
         return False, "npm is unavailable; cannot install workspace-local pi runtime"
 
@@ -986,7 +991,7 @@ def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderSta
                     note=(
                         "pi runtime detected; key sourced from environment."
                         if node_ready
-                        else "pi CLI detected but node runtime is unavailable."
+                        else f"pi CLI detected but compatible node runtime is unavailable (requires node >= {PI_MIN_NODE_MAJOR})."
                     ),
                 ),
                 env_key,
@@ -1021,7 +1026,7 @@ def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderSta
                     note=(
                         "pi auth profile detected." + oauth_hint
                         if node_ready
-                        else "pi auth profile detected but node runtime is unavailable." + oauth_hint
+                        else f"pi auth profile detected but compatible node runtime is unavailable (requires node >= {PI_MIN_NODE_MAJOR})." + oauth_hint
                     ),
                 ),
                 None,
@@ -1041,7 +1046,7 @@ def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderSta
             note=(
                 "install workspace-local pi runtime and configure auth to enable."
                 if node_ready
-                else "node runtime missing; setup will install workspace-local nvm/node before pi runtime."
+                else f"compatible node runtime missing (pi requires node >= {PI_MIN_NODE_MAJOR}); setup will install workspace-local nvm/node before pi runtime."
             )
             + global_cli_note,
         ),
@@ -2686,7 +2691,8 @@ def _workspace_node_bin_dir() -> Path | None:
         if not child.is_dir():
             continue
         bin_dir = child / "bin"
-        if not (bin_dir / node_name).exists():
+        node_bin = bin_dir / node_name
+        if not node_bin.exists():
             continue
         version = child.name.lstrip("v")
         parts: list[int] = []
@@ -2695,6 +2701,8 @@ def _workspace_node_bin_dir() -> Path | None:
                 parts.append(int(token))
             else:
                 break
+        if not parts or parts[0] < PI_MIN_NODE_MAJOR:
+            continue
         candidates.append((tuple(parts), bin_dir))
 
     if not candidates:
@@ -2704,9 +2712,40 @@ def _workspace_node_bin_dir() -> Path | None:
 
 
 def _pi_node_available() -> bool:
-    if shutil.which("node"):
+    node_bin_dir = _workspace_node_bin_dir()
+    if node_bin_dir is not None:
         return True
-    return _workspace_node_bin_dir() is not None
+    return _node_path_meets_pi_runtime(shutil.which("node"))
+
+
+def _node_path_meets_pi_runtime(node_path: str | None) -> bool:
+    if not node_path:
+        return False
+    try:
+        proc = subprocess.run(
+            [node_path, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=4.0,
+        )
+    except Exception:
+        return False
+    raw = (proc.stdout or proc.stderr or "").strip()
+    if not raw:
+        return False
+    major = _node_major_from_version(raw)
+    return major is not None and major >= PI_MIN_NODE_MAJOR
+
+
+def _node_major_from_version(raw: str) -> int | None:
+    cleaned = (raw or "").strip().lower()
+    if cleaned.startswith("v"):
+        cleaned = cleaned[1:]
+    token = cleaned.split(".", 1)[0].strip()
+    if not token.isdigit():
+        return None
+    return int(token)
 
 
 def _ensure_workspace_pi_auth(agent_dir: Path) -> list[str]:

@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — Pi runtime now enforces Node >=20 compatibility
+
+- What happened: some fresh installs had system Node present but below pi package requirements, so workspace pi CLI installed but failed at runtime with syntax errors from `@mariozechner/pi-tui`.
+- Fix: inference runtime discovery/bootstrap and `setup.sh` now treat Node `<20` as incompatible and auto-bootstrap workspace-local nvm/node before using pi; detection copy now reports compatible-node requirement explicitly.
+- Prevention: keep Node-version compatibility checks in bootstrap/runtime paths and cover them with inference runtime tests so old-system-node environments auto-heal.
+
 ### 2026-02-19 — Fresh workspace launcher + Codex OAuth import now happen at startup
 
 - What happened: fresh workspace materialization did not create a local `tako.sh` launcher, and Codex OAuth import into workspace pi auth could be skipped until a later pi invocation.

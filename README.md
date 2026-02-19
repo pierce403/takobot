@@ -11,7 +11,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
-- Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing
+- Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
@@ -130,7 +130,7 @@ Runtime-only (ignored):
 
 - Creates a local Python virtual environment in `.venv/`.
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
-- Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing, bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
+- Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing or Node is below the pi requirement (`>=20`), bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files (including workspace `tako.sh` launcher materialization).
 - Seeds a baseline model tuning guide at `resources/model-guide.md`.
 - Initializes git (if available) and commits the initial workspace.

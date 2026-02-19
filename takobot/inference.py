@@ -392,6 +392,7 @@ def discover_inference_runtime() -> InferenceRuntime:
     env: dict[str, str] = dict(os.environ)
     env.update(settings.api_keys)
     bootstrap_note = _ensure_workspace_pi_runtime_if_needed()
+    auth_sync_notes = _ensure_workspace_pi_auth(_workspace_pi_agent_dir())
     provider_env_overrides: dict[str, dict[str, str]] = {}
     ollama_host = settings.ollama_host or _env_non_empty(env, "OLLAMA_HOST")
     if ollama_host:
@@ -409,6 +410,12 @@ def discover_inference_runtime() -> InferenceRuntime:
         note = pi_status.note or ""
         note = f"{note} {bootstrap_note}".strip()
         pi_status = replace(pi_status, note=note)
+    if auth_sync_notes:
+        note = pi_status.note or ""
+        extra = " ".join(_dedupe_non_empty_lines(list(auth_sync_notes)))
+        if extra:
+            note = f"{note} {extra}".strip()
+            pi_status = replace(pi_status, note=note)
     statuses["pi"] = pi_status
     if pi_key:
         api_keys["pi"] = pi_key

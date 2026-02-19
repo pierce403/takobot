@@ -91,6 +91,10 @@ def _probe_fresh_workspace_bootstrap() -> bool:
         first = materialize_workspace(workspace)
         if not (workspace / "SOUL.md").exists():
             return False
+        if not (workspace / "tako.sh").exists():
+            return False
+        if not ((workspace / "tako.sh").stat().st_mode & 0o111):
+            return False
         if not first.created:
             return False
         soul = workspace / "SOUL.md"

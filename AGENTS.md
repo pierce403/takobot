@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — Fresh workspace launcher + Codex OAuth import now happen at startup
+
+- What happened: fresh workspace materialization did not create a local `tako.sh` launcher, and Codex OAuth import into workspace pi auth could be skipped until a later pi invocation.
+- Fix: added `tako.sh` to workspace templates with executable mode on creation, and moved pi auth sync (including Codex OAuth import) into runtime discovery so startup/refresh state reflects available auth immediately.
+- Prevention: keep startup bootstrap assertions for workspace launcher presence and discovery-time auth sync behavior in tests so packaging/runtime regressions are caught before release.
+
 ### 2026-02-17 — Skills/tools frontmatter now participates in chat context stack
 
 - What happened: prompt context previously emphasized identity (`SOUL.md`) and memory (`MEMORY.md`) but lacked explicit capability-governance frontmatter, so skill/tool fallback behavior could drift.

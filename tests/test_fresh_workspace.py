@@ -36,6 +36,7 @@ class TestFreshWorkspace(unittest.TestCase):
             "SOUL.md",
             "SKILLS.md",
             "TOOLS.md",
+            "tako.sh",
             "tako.toml",
             "resources/model-guide.md",
         )
@@ -59,6 +60,7 @@ class TestFreshWorkspace(unittest.TestCase):
 
         for rel in required_files:
             self.assertTrue((self.workspace / rel).is_file(), f"missing file: {rel}")
+        self.assertTrue((self.workspace / "tako.sh").stat().st_mode & 0o111, "tako.sh should be executable")
         for rel in required_dirs:
             self.assertTrue((self.workspace / rel).is_dir(), f"missing dir: {rel}")
         self.assertGreater(len(self.first_materialize.created), 0)

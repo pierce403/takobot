@@ -40,6 +40,7 @@
   - If Node/npm are missing, bootstraps workspace-local `nvm` + Node under `.tako/nvm` and keeps npm cache under `.tako/npm-cache`.
   - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
+  - Fresh workspace materialization now includes a local executable `tako.sh` launcher.
   - First-run templates include `resources/model-guide.md` so operators have a baseline model-family/thinking tuning reference.
   - Initializes git on `main` + `.gitignore` + first commit if git is available; warns if git is missing.
   - Launches `.venv/bin/takobot` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.

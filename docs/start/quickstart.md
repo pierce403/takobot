@@ -42,7 +42,7 @@ What bootstrap does:
 ## Core checks
 
 - `takobot` opens the TUI.
-- `tako.sh` is installed with the package as a shell wrapper; in deployed environments it dispatches to the installed `takobot`.
+- `tako.sh` is installed with the package and also materialized into fresh workspaces as a local launcher; deployed mode dispatches to installed `takobot`.
 - Memory notes are written under `memory/` (world-watch notebook under `memory/world/`).
 - Pi chat turn summaries are visible in logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`).
 - Inference command failures are logged to `.tako/logs/error.log` with invoked command + stderr/stdout tails.

@@ -62,6 +62,11 @@ def materialize_workspace(root: Path) -> MaterializeResult:
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
+                if child_rel.suffix == ".sh":
+                    try:
+                        target.chmod(0o755)
+                    except Exception:  # noqa: BLE001
+                        pass
                 created.append(str(child_rel))
                 continue
 

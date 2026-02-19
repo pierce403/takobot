@@ -47,7 +47,7 @@ include = ["takobot*"]
 script-files = ["tako.sh"]
 
 [tool.setuptools.package-data]
-takobot = ["templates/**/*.md", "templates/**/*.toml", "templates/**/*.py"]
+takobot = ["templates/**/*"]
 
 [tool.setuptools.exclude-package-data]
 takobot = ["**/*.pyc", "**/__pycache__/*"]

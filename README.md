@@ -3,7 +3,7 @@
 Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. By default, Tako is intentionally curious about the world and pushes toward evidence-backed answers. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
-- Installed shell wrapper support: `tako.sh` is packaged and available in deployments (dispatching to installed `takobot` outside repo mode)
+- Installed shell wrapper support: `tako.sh` is packaged for deployments and fresh workspaces now materialize a local `tako.sh` launcher (dispatching to installed `takobot` outside repo mode)
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
@@ -131,7 +131,7 @@ Runtime-only (ignored):
 - Creates a local Python virtual environment in `.venv/`.
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
 - Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing, bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
-- Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files.
+- Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files (including workspace `tako.sh` launcher materialization).
 - Seeds a baseline model tuning guide at `resources/model-guide.md`.
 - Initializes git (if available) and commits the initial workspace.
 - If initial git commit is blocked by missing identity, bootstrap sets repo-local fallback identity from `workspace.name` (email format: `<name>.tako.eth@xmtp.mx`) and retries.
@@ -142,7 +142,7 @@ Runtime-only (ignored):
 - Launches the interactive terminal app main loop (`takobot`, default).
 - Runs a startup health check to classify instance context (brand-new vs established), verify lock/safety, and inspect local resources.
 - If required setup is missing, emits an in-app operator request with direct remediation steps.
-- Detects pi runtime/auth/key sources and persists runtime metadata to `.tako/state/inference.json`.
+- Detects pi runtime/auth/key sources (including Codex OAuth import into `.tako/pi/agent/auth.json` when available) and persists runtime metadata to `.tako/state/inference.json`.
 - If workspace-local pi runtime is missing, runtime discovery bootstraps workspace-local nvm/node and installs pi tooling under `.tako/`.
 - Loads auto-update policy from `tako.toml` (`[updates].auto_apply`, default `true`).
 - Runs stage-aware onboarding as an explicit state machine inside the app (`name -> purpose -> XMTP handle`).

@@ -253,6 +253,8 @@ class TestInferencePiRuntime(unittest.TestCase):
         offline = self._status("ollama", cli_installed=False, ready=False)
         with (
             patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value="workspace pi bootstrap complete: installed"),
+            patch("takobot.inference._workspace_pi_agent_dir", return_value=Path("/tmp/pi-agent")),
+            patch("takobot.inference._ensure_workspace_pi_auth", return_value=[]),
             patch("takobot.inference._detect_pi", return_value=(pi_status, None)),
             patch("takobot.inference._detect_ollama", return_value=(offline, None)),
             patch("takobot.inference._detect_codex", return_value=(self._status("codex", cli_installed=False, ready=False), None)),
@@ -278,6 +280,8 @@ class TestInferencePiRuntime(unittest.TestCase):
         )
         with (
             patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value=""),
+            patch("takobot.inference._workspace_pi_agent_dir", return_value=Path("/tmp/pi-agent")),
+            patch("takobot.inference._ensure_workspace_pi_auth", return_value=[]),
             patch("takobot.inference._detect_pi", return_value=(pi_status, None)),
             patch("takobot.inference._detect_ollama", return_value=(self._status("ollama", cli_installed=False, ready=False), None)),
             patch("takobot.inference._detect_codex", return_value=(codex_status, "sk-system-openai")),
@@ -291,6 +295,22 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertEqual("OPENAI_API_KEY", runtime.selected_key_env_var)
         self.assertEqual("sk-system-openai", runtime._api_keys.get("pi"))
         self.assertIn("local system", runtime.statuses["pi"].note)
+
+    def test_discover_runtime_appends_pi_auth_sync_notes(self) -> None:
+        pi_status = self._status("pi", cli_installed=True, ready=True, note="pi runtime detected")
+        with (
+            patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value=""),
+            patch("takobot.inference._workspace_pi_agent_dir", return_value=Path("/tmp/pi-agent")),
+            patch("takobot.inference._ensure_workspace_pi_auth", return_value=["imported local Codex OAuth session into workspace pi auth."]),
+            patch("takobot.inference._detect_pi", return_value=(pi_status, None)),
+            patch("takobot.inference._detect_ollama", return_value=(self._status("ollama", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_codex", return_value=(self._status("codex", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_claude", return_value=(self._status("claude", cli_installed=False, ready=False), None)),
+            patch("takobot.inference._detect_gemini", return_value=(self._status("gemini", cli_installed=False, ready=False), None)),
+        ):
+            runtime = discover_inference_runtime()
+
+        self.assertIn("Codex OAuth session", runtime.statuses["pi"].note)
 
     def test_auth_inventory_masks_api_keys(self) -> None:
         settings = InferenceSettings(

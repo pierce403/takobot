@@ -119,6 +119,7 @@
   - Pi chat adds explicit turn summaries to logs (`pi chat user` / `pi chat assistant`) in app and daemon runtime logs.
   - Transcript panel is a selectable read-only text area for native mouse highlight/copy in supporting terminals.
   - App heartbeat performs git auto-commit for pending workspace changes (`git add -A` + `git commit`).
+  - App heartbeat also evaluates scheduled jobs from `.tako/state/cron/jobs.json`, claims due slots, and queues actions through local input processing.
   - If git identity is missing, startup/heartbeat auto-configure repo-local identity from the bot name (email pattern: `<name>.tako.eth@xmtp.mx`) and retry commit.
   - Daemon startup and heartbeat only emit operator-request guidance when automatic local git identity setup fails.
   - When required setup is missing (for example XMTP dependency or failed git identity auto-setup), app mode emits a polite operator request with concrete next steps.
@@ -131,11 +132,14 @@
   - Chat prompts include bounded `SKILLS.md` and `TOOLS.md` frontmatter blocks plus live `skills/` and `tools/` inventories.
   - Every inference call checks a DOSE-derived focus profile and uses `ragrep` semantic recall over `memory/` with adaptive breadth (focused: small context, diffuse: larger context).
   - XMTP chat now uses the same core context stack as local TUI chat: mission/objectives, stage/tone, `SOUL.md` excerpt, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history.
+  - XMTP operator command routing includes `jobs` controls (`jobs list|add <natural schedule>|remove <id>|run <id>`), and operator plain-text schedule messages can auto-create jobs.
+  - XMTP `jobs run` immediate triggers require the terminal app runtime queue; daemon-only mode can still list/add/remove schedules.
   - Manual `explore` bypasses normal sensor poll windows so operator-triggered exploration runs immediately and auto-topic selection avoids immediate repeats.
   - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports synthesized insight + mission impact phrased according to current life stage and mood.
   - Purpose info questions (for example `what is your purpose?`) now return the current purpose text instead of entering the purpose-update path.
   - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
+  - Local `jobs` command manages recurring schedules (`jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`), and plain-text operator schedule requests can auto-create jobs.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.
   - Runtime auto-seeds an OpenClaw-informed starter skill pack into `skills/` (auto-enabled), including `skill-creator`, `tool-creator`, `mcporter-mcp`, and `agent-cli-inferencing` (pi-ai nudge).
@@ -150,7 +154,7 @@
   - Persists chat sessions as JSONL transcripts under `.tako/state/conversations/` and injects recent history windows into inference prompts.
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
   - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
-  - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
+  - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/jobs`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
   - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
   - Incremental `pi thinking` stream chunks are coalesced inline into a single thinking-status line (instead of one newline per token), while structural markers remain separate.

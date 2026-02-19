@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — Natural-language cron jobs now run through heartbeat and XMTP controls
+
+- What happened: operators could ask for recurring work in plain language, but there was no durable jobs store or command surface for scheduling/listing/removing/running jobs across terminal and XMTP.
+- Fix: added a versioned jobs store at `.tako/state/cron/jobs.json`, natural-language schedule parsing (`every day at 3pm ...`, weekday/day-of-week variants), local `jobs` command controls, XMTP `jobs` controls, and heartbeat-time due-job claiming/queueing in app runtime.
+- Prevention: keep jobs parsing/claim semantics and command detection under unit tests, and keep docs/website/feature tracker updated together whenever command surfaces expand.
+
 ### 2026-02-19 — XMTP profile sync now aligns identity name + avatar
 
 - What happened: XMTP runtime had no dedicated profile-sync path, so identity renames in `SOUL.md` / `tako.toml` were not propagated to XMTP profile metadata and no first-class avatar artifact existed.

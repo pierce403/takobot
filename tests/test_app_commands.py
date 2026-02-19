@@ -53,6 +53,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertTrue(_looks_like_local_command("models"))
         self.assertTrue(_looks_like_local_command("mission"))
         self.assertTrue(_looks_like_local_command("mission set keep things safe; stay curious"))
+        self.assertTrue(_looks_like_local_command("jobs list"))
         self.assertTrue(_looks_like_local_command("upgrade check"))
         self.assertTrue(_looks_like_local_command("dose o 0.4"))
         self.assertTrue(_looks_like_local_command("explore"))
@@ -64,6 +65,7 @@ class TestAppCommands(unittest.TestCase):
         commands = {command for command, _summary in items}
         self.assertIn("/mission", commands)
         self.assertIn("/models", commands)
+        self.assertIn("/jobs", commands)
         self.assertIn("/upgrade", commands)
         self.assertIn("/stats", commands)
         self.assertIn("/explore", commands)

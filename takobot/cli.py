@@ -5,6 +5,7 @@ import argparse
 import contextlib
 from collections import deque
 from dataclasses import dataclass, replace
+import inspect
 import json
 from pathlib import Path
 import random
@@ -48,6 +49,16 @@ from .keys import derive_eth_address, load_or_create_keys
 from .life_stage import stage_policy_for_name
 from .locks import instance_lock
 from .memory_frontmatter import load_memory_frontmatter_excerpt
+from .jobs import (
+    add_job_from_natural_text,
+    format_jobs_report,
+    get_job,
+    list_jobs,
+    looks_like_natural_job_request,
+    mark_job_manual_trigger,
+    record_job_error,
+    remove_job,
+)
 from .operator import clear_operator, get_operator_inbox_id, load_operator
 from .operator_profile import (
     apply_operator_profile_update,
@@ -132,6 +143,7 @@ class RuntimeHooks:
     log: Callable[[str, str], None] | None = None
     inbound_message: Callable[[str, str], None] | None = None
     outbound_message: Callable[[str, str], None] | None = None
+    job_runner: Callable[[str, str], object] | None = None
     emit_console: bool = True
     log_file: Path | None = None
 
@@ -1032,6 +1044,12 @@ async def _handle_incoming_message(
             hooks=hooks,
         ):
             return
+        if looks_like_natural_job_request(text):
+            ok, summary, _job = add_job_from_natural_text(paths.state_dir, text)
+            if ok:
+                append_daily_note(daily_root(), date.today(), f"Scheduled job added via XMTP (natural): {text}")
+            await convo.send(summary)
+            return
         child_followups = await _capture_child_operator_context(text, paths, hooks=hooks)
         reply = await _chat_reply(
             text,
@@ -1090,6 +1108,77 @@ async def _handle_incoming_message(
         if warn:
             report = f"{report}\n\nwarning: {warn}"
         await convo.send(report)
+        return
+    if cmd == "jobs":
+        action = " ".join(rest.split()).strip()
+        if action in {"", "list", "ls", "show", "status"}:
+            await convo.send(format_jobs_report(list_jobs(paths.state_dir)))
+            return
+        if action.startswith("add "):
+            spec = action[4:].strip()
+            if not spec:
+                await convo.send("usage: `jobs add <natural schedule>`")
+                return
+            ok, summary, _job = add_job_from_natural_text(paths.state_dir, spec)
+            if ok:
+                append_daily_note(daily_root(), date.today(), f"Scheduled job added via XMTP: {spec}")
+            await convo.send(summary)
+            return
+        if action.startswith(("remove ", "delete ", "rm ")):
+            parts = action.split(maxsplit=1)
+            job_id = parts[1].strip() if len(parts) == 2 else ""
+            if not job_id:
+                await convo.send("usage: `jobs remove <job-id>`")
+                return
+            removed = remove_job(paths.state_dir, job_id)
+            if not removed:
+                await convo.send(f"job not found: {job_id}")
+                return
+            append_daily_note(daily_root(), date.today(), f"Scheduled job removed via XMTP: {job_id}")
+            await convo.send(f"removed job: {job_id}")
+            return
+        if action.startswith("run "):
+            parts = action.split(maxsplit=1)
+            job_id = parts[1].strip() if len(parts) == 2 else ""
+            if not job_id:
+                await convo.send("usage: `jobs run <job-id>`")
+                return
+            runner = hooks.job_runner if hooks is not None else None
+            if runner is None:
+                await convo.send(
+                    "jobs run unavailable in daemon-only mode. run from the terminal app where the local job runner queue is active."
+                )
+                return
+            job = get_job(paths.state_dir, job_id)
+            if job is None:
+                await convo.send(f"job not found: {job_id}")
+                return
+            action_text = " ".join(job.action.split()).strip()
+            if not action_text:
+                record_job_error(paths.state_dir, job.job_id, "empty action")
+                await convo.send(f"job has empty action: {job.job_id}")
+                return
+            triggered = mark_job_manual_trigger(paths.state_dir, job.job_id)
+            if triggered is None:
+                await convo.send(f"job run failed to mark: {job.job_id}")
+                return
+            try:
+                maybe_result = runner(triggered.job_id, action_text)
+                if inspect.isawaitable(maybe_result):
+                    await maybe_result
+            except Exception as exc:  # noqa: BLE001
+                summary = _summarize_stream_error(exc)
+                record_job_error(paths.state_dir, triggered.job_id, summary)
+                await convo.send(f"job run failed: {summary}")
+                return
+            append_daily_note(
+                daily_root(),
+                date.today(),
+                f"Scheduled job manual run via XMTP: {triggered.job_id} -> {action_text}",
+            )
+            await convo.send(f"manual run queued: {triggered.job_id} -> {action_text}")
+            return
+        await convo.send("usage: `jobs [list]`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`")
         return
     if cmd == "task":
         spec = rest.strip()
@@ -1918,6 +2007,7 @@ def _help_text() -> str:
         "- status\n"
         "- doctor\n"
         "- config (explain `tako.toml` options)\n"
+        "- jobs (or `jobs list|add <natural schedule>|remove <id>|run <id>`)\n"
         "- task <title> (optional: | project=... | area=... | due=YYYY-MM-DD)\n"
         "- tasks (or `tasks project <name>` / `tasks area <name>` / `tasks due YYYY-MM-DD`)\n"
         "- done <task-id>\n"
@@ -1951,6 +2041,8 @@ def _looks_like_command(text: str) -> bool:
     tail_lower = tail.lower()
     if cmd in {"help", "h", "?", "status", "doctor", "config", "toml"}:
         return tail == ""
+    if cmd == "jobs":
+        return True
     if cmd == "task":
         return True
     if cmd == "tasks":

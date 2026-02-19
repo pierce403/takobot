@@ -85,6 +85,17 @@ from .keys import derive_eth_address, load_or_create_keys
 from .life_stage import DEFAULT_LIFE_STAGE, normalize_life_stage_name, stage_policy_for_name, stage_titles_csv
 from .locks import instance_lock
 from .memory_frontmatter import load_memory_frontmatter_excerpt
+from .jobs import (
+    add_job_from_natural_text,
+    claim_due_jobs,
+    format_jobs_report,
+    get_job,
+    list_jobs,
+    looks_like_natural_job_request,
+    mark_job_manual_trigger,
+    remove_job,
+    record_job_error,
+)
 from .operator import clear_operator, get_operator_inbox_id, imprint_operator, load_operator
 from .operator_profile import (
     apply_operator_profile_update,
@@ -174,6 +185,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/models", "Show type1/type2 model plan + inference auth"),
     ("/dose", "Show or tune DOSE levels"),
     ("/explore", "Trigger manual exploration (optional topic)"),
+    ("/jobs", "Manage scheduled jobs"),
     ("/task", "Create a task"),
     ("/tasks", "List tasks"),
     ("/done", "Mark a task done"),
@@ -220,6 +232,7 @@ LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
     "help",
     "inference",
     "install",
+    "jobs",
     "mission",
     "models",
     "morning",
@@ -2293,6 +2306,7 @@ class TakoTerminalApp(App[None]):
             log=self._on_runtime_log,
             inbound_message=self._on_runtime_inbound,
             outbound_message=self._on_runtime_outbound,
+            job_runner=self._on_runtime_job_runner,
             emit_console=False,
             log_file=self.paths.logs_dir / "runtime.log",
         )
@@ -2544,6 +2558,7 @@ class TakoTerminalApp(App[None]):
                     dose.save(self.dose_path, self.dose)
                 except Exception as exc:  # noqa: BLE001
                     self._write_system(f"dose save warning: {_summarize_error(exc)}")
+        await self._run_due_jobs()
         self._refresh_open_loops(save=True)
         await self._run_git_autocommit()
 
@@ -2795,6 +2810,8 @@ class TakoTerminalApp(App[None]):
                 return
             if await self._maybe_handle_inline_role_change(text):
                 return
+            if await self._maybe_handle_inline_job_schedule(text):
+                return
             child_followups = await self._capture_child_stage_operator_context(text)
             reply = await self._local_chat_reply(text)
             self._record_local_chat_turn(user_text=text, assistant_text=reply)
@@ -2812,12 +2829,13 @@ class TakoTerminalApp(App[None]):
             return
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, explore, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, explore, jobs, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
                 "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
                 "stage controls: `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
                 "explore controls: `explore` or `explore <topic>`\n"
-                "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/explore`, `/upgrade`, `/stats`, `/dose ...`)\n"
+                "jobs controls: `jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`\n"
+                "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/explore`, `/jobs`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
@@ -3193,6 +3211,50 @@ class TakoTerminalApp(App[None]):
                     dose_label=self.dose_label,
                 )
             )
+            return
+
+        if cmd == "jobs":
+            if self.paths is None:
+                self._write_tako("jobs unavailable: runtime paths missing.")
+                return
+            action = " ".join(rest.split()).strip()
+            if action in {"", "list", "ls", "show", "status"}:
+                self._write_tako(format_jobs_report(list_jobs(self.paths.state_dir)))
+                return
+            if action.startswith("add "):
+                spec = action[4:].strip()
+                if not spec:
+                    self._write_tako("usage: `jobs add <natural schedule>`")
+                    return
+                ok, summary, _job = add_job_from_natural_text(self.paths.state_dir, spec)
+                self._write_tako(summary)
+                if ok:
+                    self._add_activity("jobs", "scheduled job added")
+                    append_daily_note(daily_root(), date.today(), f"Scheduled job added: {spec}")
+                return
+            if action.startswith(("remove ", "delete ", "rm ")):
+                parts = action.split(maxsplit=1)
+                job_id = parts[1].strip() if len(parts) == 2 else ""
+                if not job_id:
+                    self._write_tako("usage: `jobs remove <job-id>`")
+                    return
+                removed = remove_job(self.paths.state_dir, job_id)
+                if not removed:
+                    self._write_tako(f"job not found: {job_id}")
+                    return
+                self._add_activity("jobs", f"removed {job_id}")
+                append_daily_note(daily_root(), date.today(), f"Scheduled job removed: {job_id}")
+                self._write_tako(f"removed job: {job_id}")
+                return
+            if action.startswith("run "):
+                parts = action.split(maxsplit=1)
+                job_id = parts[1].strip() if len(parts) == 2 else ""
+                if not job_id:
+                    self._write_tako("usage: `jobs run <job-id>`")
+                    return
+                await self._run_scheduled_job_now(job_id)
+                return
+            self._write_tako("usage: `jobs [list]`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`")
             return
 
         if cmd == "task":
@@ -4916,6 +4978,75 @@ class TakoTerminalApp(App[None]):
             )
         return True
 
+    async def _maybe_handle_inline_job_schedule(self, text: str) -> bool:
+        if self.paths is None:
+            return False
+        if not looks_like_natural_job_request(text):
+            return False
+        ok, summary, _job = add_job_from_natural_text(self.paths.state_dir, text)
+        self._write_tako(summary)
+        if ok:
+            self._add_activity("jobs", "scheduled job added from natural language")
+            append_daily_note(daily_root(), date.today(), f"Scheduled job added (natural): {text}")
+        return True
+
+    async def _run_due_jobs(self) -> None:
+        if self.paths is None:
+            return
+        due_jobs = claim_due_jobs(self.paths.state_dir)
+        for job in due_jobs:
+            await self._trigger_scheduled_job_action(job, trigger="scheduled")
+
+    async def _run_scheduled_job_now(self, job_id: str) -> None:
+        if self.paths is None:
+            self._write_tako("jobs unavailable: runtime paths missing.")
+            return
+        job = get_job(self.paths.state_dir, job_id)
+        if job is None:
+            self._write_tako(f"job not found: {job_id}")
+            return
+        triggered = mark_job_manual_trigger(self.paths.state_dir, job.job_id)
+        if triggered is None:
+            self._write_tako(f"job run failed to mark: {job.job_id}")
+            return
+        self._write_tako(f"manual run queued: {triggered.job_id} -> {triggered.action}")
+        await self._trigger_scheduled_job_action(triggered, trigger="manual")
+
+    async def _trigger_scheduled_job_action(self, job, *, trigger: str) -> None:
+        if self.paths is None:
+            return
+        action = _sanitize(job.action)
+        if not action:
+            record_job_error(self.paths.state_dir, job.job_id, "empty action")
+            self._add_activity("jobs", f"{job.job_id} skipped: empty action")
+            return
+        try:
+            pending = self._enqueue_local_input(action)
+        except Exception as exc:  # noqa: BLE001
+            summary = _summarize_error(exc)
+            record_job_error(self.paths.state_dir, job.job_id, summary)
+            self._add_activity("jobs", f"{job.job_id} failed: {summary}")
+            self._record_event(
+                "jobs.execute.error",
+                f"Scheduled job failed to enqueue: {job.job_id}",
+                severity="warn",
+                source="jobs",
+                metadata={"id": job.job_id, "trigger": trigger, "error": summary},
+            )
+            return
+        self._add_activity("jobs", f"{trigger} {job.job_id} queued ({pending} pending)")
+        self._record_event(
+            "jobs.execute.queued",
+            f"Scheduled job queued: {job.job_id}",
+            source="jobs",
+            metadata={"id": job.job_id, "trigger": trigger, "action": _summarize_text(action)},
+        )
+        append_daily_note(
+            daily_root(),
+            date.today(),
+            f"Scheduled job {trigger}: {job.job_id} -> {action}",
+        )
+
     def _on_runtime_log(self, level: str, message: str) -> None:
         lowered = message.lower()
         if "switching to polling" in lowered:
@@ -4964,6 +5095,13 @@ class TakoTerminalApp(App[None]):
             source="xmtp",
             metadata={"recipient_inbox_id": recipient_inbox_id, "preview": _summarize_text(safe_text)},
         )
+
+    def _on_runtime_job_runner(self, job_id: str, action: str) -> None:
+        safe_action = _sanitize(action)
+        if not safe_action:
+            return
+        pending = self._enqueue_local_input(safe_action)
+        self._add_activity("jobs", f"xmtp job trigger {job_id} queued ({pending} pending)")
 
     async def _shutdown_background_tasks(self) -> None:
         if self.shutdown_complete:
@@ -5795,6 +5933,8 @@ def _looks_like_local_command(text: str) -> bool:
     if cmd == "dose":
         return tail in {"", "show", "status", "calm", "explore", "help", "?"} or _parse_dose_set_request(tail) is not None
     if cmd == "explore":
+        return True
+    if cmd == "jobs":
         return True
     if cmd == "morning":
         return tail == ""

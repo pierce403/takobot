@@ -37,6 +37,7 @@ What bootstrap does:
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
 - Pairing/runtime now best-effort syncs XMTP profile metadata from identity name and creates a local deterministic avatar cache (`.tako/state/xmtp-avatar.svg` + `.tako/state/xmtp-profile.json`).
+- Recurring jobs can be scheduled from natural language (for example `every day at 3pm run doctor`) and are stored in `.tako/state/cron/jobs.json`.
 - Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.
 - First-run templates include `resources/model-guide.md` for model family and thinking-level tuning.
 
@@ -49,3 +50,4 @@ What bootstrap does:
 - Inference command failures are logged to `.tako/logs/error.log` with invoked command + stderr/stdout tails.
 - `takobot doctor` reports local/offline diagnostics.
 - `takobot run` starts daemon mode directly.
+- `jobs` / `jobs list` shows scheduled jobs; `jobs add <natural schedule>` creates one.

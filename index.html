@@ -851,10 +851,12 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 After pairing, operator commands include:
                 <code>help</code>, <code>status</code>, <code>doctor</code>,
                 <code>config</code>,
+                <code>jobs</code>,
                 <code>task</code>/<code>tasks</code>/<code>done</code>,
                 <code>morning</code>/<code>outcomes</code>/<code>compress</code>/<code>weekly</code>/<code>promote</code>,
                 <code>update</code>, <code>web</code>, <code>run</code>, <code>reimprint</code>.
               </li>
+              <li><code>jobs</code> supports natural-language schedules (for example <code>every day at 3pm run doctor</code>) and persists schedules under <code>.tako/state/cron/jobs.json</code>.</li>
               <li><code>run</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>
@@ -866,7 +868,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Terminal remains a local cockpit for status/logs/safe mode, plain-text chat, and local operator configuration commands.</li>
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>
               <li>TUI input supports history recall: <code>↑</code>/<code>↓</code> cycles previously submitted local messages.</li>
-              <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>
+              <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code>, <code>/jobs</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>
               <li>TUI command input supports <code>Tab</code> autocomplete for command names and cycles matching candidates on repeated <code>Tab</code>.</li>
               <li>Local TUI input is queued so long-running turns do not block new entry; pending input count is visible in status and sensors.</li>
               <li>Outbound XMTP replies are mirrored into the local TUI transcript/activity feed for a unified conversation view.</li>

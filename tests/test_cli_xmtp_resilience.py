@@ -15,6 +15,7 @@ from takobot.cli import (
     _canonical_identity_name,
     _chat_prompt,
     _close_xmtp_client,
+    _looks_like_command,
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
 )
@@ -112,6 +113,11 @@ class TestCliXmtpResilience(unittest.TestCase):
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("grpc-status header missing")))
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("deadline exceeded while sending message")))
         self.assertFalse(_is_retryable_xmtp_error(RuntimeError("invalid inbox id")))
+
+    def test_command_detection_includes_jobs(self) -> None:
+        self.assertTrue(_looks_like_command("jobs"))
+        self.assertTrue(_looks_like_command("jobs add every day at 3pm run doctor"))
+        self.assertFalse(_looks_like_command("tell me about octopus habitats"))
 
     def test_close_xmtp_client_supports_async_and_sync(self) -> None:
         async_client = _DummyAsyncClosable()

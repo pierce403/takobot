@@ -27,14 +27,15 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Runtime problem capture: detected warnings/errors are converted into committed `tasks/` items for follow-up
 - Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
-- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
+- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
+- Natural-language scheduling for recurring jobs (`every day at 3pm ...`) with persisted job state at `.tako/state/cron/jobs.json`
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`), plus standard autonomous web tools in `tools/`: `web_search` and `web_fetch`
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - Built-in starter skills are auto-seeded into `skills/` and auto-enabled: OpenClaw top skills, `skill-creator`, `tool-creator`, MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators
 - Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
-- Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
+- Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/jobs` for schedule control, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
 - Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors
 - XMTP outbound replies are mirrored into the local TUI transcript/activity feed so remote conversations stay visible in one place
@@ -89,7 +90,7 @@ Pairing flow:
   - purpose
   - XMTP handle yes/no (pair now or continue local-only)
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
-- After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
+- After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
 
 Productivity (GTD + PARA):
 
@@ -100,6 +101,7 @@ Productivity (GTD + PARA):
 - `compress` writes a progressive summary block into today’s daily log.
 - `weekly` runs a weekly review report.
 - `promote <note>` appends an operator-approved durable note into `MEMORY.md`.
+- `jobs add <natural schedule>` (or plain language like `every day at 3pm explore ai news`) schedules recurring actions.
 
 ## Architecture (minimal)
 
@@ -197,6 +199,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Inference subprocess temp output and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local only).
 - Chat context is persisted in `.tako/state/conversations/` (`sessions.json` + per-session JSONL transcripts) and recent turns are injected into prompt context.
 - On each heartbeat, Tako checks git status and auto-commits pending workspace changes (`git add -A` + `git commit`) when possible.
+- Scheduled jobs are evaluated on heartbeat ticks (default cadence: every 30s in app mode), then queued as local actions when due.
 - If git auto-commit encounters missing git identity, Tako auto-configures repo-local identity from the bot name (`<name> <name.tako.eth@xmtp.mx>`) and retries the commit.
 - When runtime/doctor detects actionable problems (git/inference/dependency/runtime), Tako opens/maintains matching tasks under `tasks/` automatically.
 - The bootstrap launcher rebinds stdin to `/dev/tty` for app mode, so `curl ... | bash` can still start an interactive TUI.

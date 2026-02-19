@@ -434,6 +434,7 @@ class TakoTerminalApp(App[None]):
         self.input_worker_task: asyncio.Task[None] | None = None
         self.boot_task: asyncio.Task[None] | None = None
         self.update_check_task: asyncio.Task[None] | None = None
+        self.runtime_update_restart_task: asyncio.Task[None] | None = None
 
         self.lock_context = None
         self.lock_acquired = False
@@ -2308,6 +2309,7 @@ class TakoTerminalApp(App[None]):
             inbound_message=self._on_runtime_inbound,
             outbound_message=self._on_runtime_outbound,
             job_runner=self._on_runtime_job_runner,
+            update_applied=self._on_runtime_update_applied,
             emit_console=False,
             log_file=self.paths.logs_dir / "runtime.log",
         )
@@ -2493,12 +2495,13 @@ class TakoTerminalApp(App[None]):
         self.last_auto_update_error = ""
         if result.changed:
             append_daily_note(daily_root(), date.today(), "Auto-update applied; restarting terminal app.")
-            await self._restart_after_auto_update()
+            await self._restart_after_auto_update(reason="auto-update applied")
 
-    async def _restart_after_auto_update(self) -> None:
-        self._write_system("auto-update applied. restarting takobot now.")
-        self._add_activity("update", "restarting after auto-update")
-        self._record_event("runtime.restart", "Restarting after auto-update.", source="update")
+    async def _restart_after_auto_update(self, *, reason: str = "auto-update applied") -> None:
+        reason_line = " ".join((reason or "").split()).strip() or "update applied"
+        self._write_system(f"{reason_line}. restarting takobot now.")
+        self._add_activity("update", f"restarting after {reason_line}")
+        self._record_event("runtime.restart", f"Restarting after {reason_line}.", source="update")
         await asyncio.sleep(0.2)
         argv_tail = [arg for arg in sys.argv[1:] if arg]
         if not argv_tail:
@@ -3858,7 +3861,7 @@ class TakoTerminalApp(App[None]):
                 metadata={"changed": result.changed, "apply": apply_update},
             )
             if apply_update and result.ok and result.changed:
-                await self._restart_after_auto_update()
+                await self._restart_after_auto_update(reason="local update applied")
             return
 
         if cmd == "extensions":
@@ -5155,6 +5158,28 @@ class TakoTerminalApp(App[None]):
         pending = self._enqueue_local_input(safe_action)
         self._add_activity("jobs", f"xmtp job trigger {job_id} queued ({pending} pending)")
 
+    def _on_runtime_update_applied(self, summary: str) -> None:
+        if self.runtime_update_restart_task is not None and not self.runtime_update_restart_task.done():
+            return
+        detail = " ".join((summary or "").split()).strip() or "update applied"
+        self._write_system("xmtp update applied. scheduling terminal restart.")
+        self._add_activity("update", f"xmtp update applied: {detail}")
+        self._record_event(
+            "runtime.self_update.xmtp",
+            "XMTP update applied; restart requested.",
+            source="update",
+            metadata={"summary": detail},
+        )
+
+        async def _restart_later() -> None:
+            await asyncio.sleep(0.35)
+            await self._restart_after_auto_update(reason="xmtp update applied")
+
+        self.runtime_update_restart_task = asyncio.create_task(
+            _restart_later(),
+            name="tako-xmtp-update-restart",
+        )
+
     async def _shutdown_background_tasks(self) -> None:
         if self.shutdown_complete:
             return
@@ -5175,8 +5200,10 @@ class TakoTerminalApp(App[None]):
         await self._stop_local_heartbeat()
         await _cancel_task(self.type1_task)
         await _cancel_task(self.type2_task)
+        await _cancel_task(self.runtime_update_restart_task)
         self.type1_task = None
         self.type2_task = None
+        self.runtime_update_restart_task = None
 
         if self.lock_context is not None and self.lock_acquired:
             with contextlib.suppress(Exception):

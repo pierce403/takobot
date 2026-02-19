@@ -150,6 +150,7 @@
   - Auto-update policy is configurable in `tako.toml` under `[updates].auto_apply` (default `true`).
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.
   - Terminal update controls expose setting state and toggles: `update auto status|on|off`.
+  - XMTP `update` can request in-process terminal restart through runtime hooks when Tako is running in paired TUI mode; daemon-only mode still emits manual restart guidance.
   - Streams in-progress inference output into a scrollable "bubble stream" panel above the input box (Cursor/Claude style).
   - Pi inference streaming uses `pi --mode json` so TUI can surface live thinking deltas, tool execution progress, and pi lifecycle status while turns are running.
   - Persists chat sessions as JSONL transcripts under `.tako/state/conversations/` and injects recent history windows into inference prompts.
@@ -348,6 +349,7 @@
   - Stores `operator_inbox_id` under `.tako/operator.json` (runtime-only; ignored by git).
   - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs a new operator.
   - Operator can run `update` over XMTP to perform a guarded fast-forward self-update.
+  - When XMTP update applies changes in paired TUI mode, Tako requests a terminal restart after sending the operator response.
   - Operator can run `web <url>` and `run <command>` over XMTP.
   - Plain-text XMTP messages are handled as chat (inference-backed when available) while command-style messages route to command handlers.
 - **Test Criteria**:

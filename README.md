@@ -28,6 +28,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
 - XMTP control-channel handling with command router (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
+- XMTP `update` now requests a terminal-app restart automatically when updates are applied in a paired TUI-hosted runtime (daemon-only mode still reports manual restart guidance)
 - Natural-language scheduling for recurring jobs (`every day at 3pm ...`) with persisted job state at `.tako/state/cron/jobs.json`
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`), plus standard autonomous web tools in `tools/`: `web_search` and `web_fetch`
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history

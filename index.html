@@ -857,6 +857,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 <code>update</code>, <code>web</code>, <code>run</code>, <code>reimprint</code>.
               </li>
               <li><code>jobs</code> supports natural-language schedules (for example <code>every day at 3pm run doctor</code>) and persists schedules under <code>.tako/state/cron/jobs.json</code>.</li>
+              <li>When `update` is applied over XMTP in paired TUI mode, Tako requests terminal restart automatically after sending the update result.</li>
               <li><code>run</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
               <li>Identity rename handling is inference-classified instead of phrase-gated; if no replacement name is provided, Tako asks for the exact target name.</li>

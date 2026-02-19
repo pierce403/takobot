@@ -16,6 +16,7 @@ from takobot.cli import (
     _chat_prompt,
     _close_xmtp_client,
     _looks_like_command,
+    _notify_update_applied,
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
 )
@@ -202,6 +203,26 @@ class TestCliXmtpResilience(unittest.TestCase):
         combined = "\n".join(message for _level, message in runtime_logs)
         self.assertIn("pi chat user: hello there", combined)
         self.assertIn("pi chat assistant: assistant reply", combined)
+
+    def test_notify_update_applied_supports_sync_callback(self) -> None:
+        calls: list[str] = []
+
+        def _capture(summary: str) -> None:
+            calls.append(summary)
+
+        changed = asyncio.run(_notify_update_applied(RuntimeHooks(update_applied=_capture, emit_console=False), "updated"))
+        self.assertTrue(changed)
+        self.assertEqual(["updated"], calls)
+
+    def test_notify_update_applied_supports_async_callback(self) -> None:
+        calls: list[str] = []
+
+        async def _capture(summary: str) -> None:
+            calls.append(summary)
+
+        changed = asyncio.run(_notify_update_applied(RuntimeHooks(update_applied=_capture, emit_console=False), "updated"))
+        self.assertTrue(changed)
+        self.assertEqual(["updated"], calls)
 
 
 if __name__ == "__main__":

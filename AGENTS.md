@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-19 — XMTP update now requests TUI restart after apply
+
+- What happened: operator `update` over XMTP applied package changes but still replied with manual restart copy, so paired TUI sessions could remain on stale code until manual restart.
+- Fix: added runtime hook wiring for XMTP `update` apply flow so daemon command handling can request terminal restart after reply delivery when hosted inside paired TUI runtime; daemon-only mode still reports manual restart guidance.
+- Prevention: keep XMTP command flows aware of hosting mode via explicit hooks and cover callback invocation paths with CLI resilience tests.
+
 ### 2026-02-19 — Name updates now use inference intent (not hardcoded phrase gates)
 
 - What happened: operator rename handling depended on hardcoded name-change phrase recognition before inference, so broad requests could hit generic clarification even when intent was clear.

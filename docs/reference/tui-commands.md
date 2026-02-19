@@ -61,3 +61,4 @@ Primary commands:
 
 Plain-text non-command messages are treated as chat, except operator schedule requests like `every day at 3pm ...`, which are interpreted as job creation.
 `jobs run` over XMTP requires the terminal app runtime queue (daemon-only mode cannot execute immediate local-run triggers).
+XMTP `update` requests terminal-app restart automatically when Tako is running in paired TUI mode; daemon-only `takobot run` still reports manual restart instructions.

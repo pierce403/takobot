@@ -143,6 +143,7 @@ class RuntimeHooks:
     inbound_message: Callable[[str, str], None] | None = None
     outbound_message: Callable[[str, str], None] | None = None
     job_runner: Callable[[str, str], object] | None = None
+    update_applied: Callable[[str], object] | None = None
     emit_console: bool = True
     log_file: Path | None = None
 
@@ -178,6 +179,25 @@ def _hooks_with_log_file(hooks: RuntimeHooks | None, log_file: Path) -> RuntimeH
     if hooks.log_file is not None:
         return hooks
     return replace(hooks, log_file=log_file)
+
+
+async def _notify_update_applied(hooks: RuntimeHooks | None, summary: str) -> bool:
+    if hooks is None or hooks.update_applied is None:
+        return False
+    callback = hooks.update_applied
+    try:
+        maybe_result = callback(summary)
+        if inspect.isawaitable(maybe_result):
+            await maybe_result
+    except Exception as exc:  # noqa: BLE001
+        _emit_runtime_log(
+            f"update restart hook failed: {_summarize_stream_error(exc)}",
+            level="warn",
+            stderr=True,
+            hooks=hooks,
+        )
+        return False
+    return True
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1497,12 +1517,19 @@ async def _handle_incoming_message(
             await convo.send(f"self-update failed: {_summarize_stream_error(exc)}")
             return
         report_lines = [result.summary, *result.details]
+        restart_requested = False
         if result.changed:
-            report_lines.append("Restart Tako to load updated code.")
+            if apply_update and hooks is not None and hooks.update_applied is not None:
+                report_lines.append("update applied. requesting terminal app restart now.")
+                restart_requested = True
+            else:
+                report_lines.append("Restart Tako to load updated code.")
             append_daily_note(daily_root(), date.today(), "Operator applied self-update over XMTP.")
         elif apply_update:
             append_daily_note(daily_root(), date.today(), f"Operator ran self-update: {result.summary}")
         await convo.send("\n".join(report_lines))
+        if restart_requested and result.ok:
+            await _notify_update_applied(hooks, result.summary)
         return
     if cmd == "web":
         target = rest.strip()

@@ -242,8 +242,10 @@ class TestXmtpProfile(unittest.TestCase):
 
             self_message = client.self_dm.sent[0][0]
             peer_message = client.peer_dm.sent[0][0]
-            self.assertTrue(self_message.startswith("tako:profile:"))
-            self.assertTrue(peer_message.startswith("tako:profile:"))
+            self.assertTrue(self_message.startswith("{"))
+            self.assertTrue(peer_message.startswith("{"))
+            self.assertFalse(self_message.startswith("tako:profile:"))
+            self.assertFalse(peer_message.startswith("tako:profile:"))
 
             parsed = parse_profile_message(peer_message)
             self.assertIsNotNone(parsed)
@@ -253,6 +255,14 @@ class TestXmtpProfile(unittest.TestCase):
 
     def test_parse_profile_message_returns_none_for_non_profile_text(self) -> None:
         self.assertIsNone(parse_profile_message("hello world"))
+        self.assertIsNone(parse_profile_message('{"hello":"world"}'))
+
+    def test_parse_profile_message_accepts_legacy_prefixed_payload(self) -> None:
+        legacy = 'tako:profile:{"type":"profile","v":1,"display_name":"InkTako"}'
+        parsed = parse_profile_message(legacy)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual("InkTako", parsed.name)
 
 
 if __name__ == "__main__":

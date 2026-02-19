@@ -21,8 +21,7 @@ XMTP_PROFILE_AVATAR_FILE = "xmtp-avatar.svg"
 XMTP_PROFILE_NAME_MAX_CHARS = 40
 XMTP_PROFILE_BROADCAST_STATE_VERSION = 1
 XMTP_PROFILE_BROADCAST_STATE_FILE = "xmtp-profile-broadcast.json"
-XMTP_PROFILE_MESSAGE_PREFIX = "tako:profile:"
-XMTP_PROFILE_TEXT_CONTENT_TYPE = "xmtp.org/text:1.0"
+_LEGACY_XMTP_PROFILE_MESSAGE_PREFIX = "tako:profile:"
 
 _AVATAR_BACKGROUNDS: tuple[tuple[str, str], ...] = (
     ("#ECFEFF", "#A5F3FC"),
@@ -185,6 +184,7 @@ def _trim_profile_avatar_url(value: str | None) -> str:
 def build_profile_message(name: str, avatar_url: str) -> str:
     payload: dict[str, Any] = {
         "type": "profile",
+        "source": "takobot",
         "v": 1,
         "display_name": canonical_profile_name(name),
         "ts": datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat(),
@@ -192,22 +192,48 @@ def build_profile_message(name: str, avatar_url: str) -> str:
     trimmed_avatar = _trim_profile_avatar_url(avatar_url)
     if trimmed_avatar:
         payload["avatar_url"] = trimmed_avatar
-    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-    return f"{XMTP_PROFILE_MESSAGE_PREFIX}{encoded}"
+    return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def _parse_profile_payload(text: str) -> tuple[dict[str, Any] | None, str]:
+    stripped = text.strip()
+    if not stripped:
+        return None, stripped
+
+    raw_json = stripped
+    legacy_prefix = False
+    if stripped.startswith(_LEGACY_XMTP_PROFILE_MESSAGE_PREFIX):
+        raw_json = stripped[len(_LEGACY_XMTP_PROFILE_MESSAGE_PREFIX) :].strip()
+        legacy_prefix = True
+
+    try:
+        payload = json.loads(raw_json)
+    except Exception:
+        return None, stripped
+    if not isinstance(payload, dict):
+        return None, stripped
+    if legacy_prefix:
+        return payload, stripped
+
+    source = str(payload.get("source") or payload.get("agent") or "").strip().lower()
+    if source in {"takobot", "tako"}:
+        return payload, stripped
+
+    payload_type = str(payload.get("type") or "").strip().lower()
+    if payload_type not in {"profile", "tako_profile", "takobot_profile"}:
+        return None, stripped
+    for key in ("display_name", "name", "avatar_url", "avatar"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return payload, stripped
+    return None, stripped
 
 
 def parse_profile_message(text: str) -> XmtpProfileMessage | None:
     if not isinstance(text, str):
         return None
-    stripped = text.strip()
-    if not stripped.startswith(XMTP_PROFILE_MESSAGE_PREFIX):
-        return None
-    raw_json = stripped[len(XMTP_PROFILE_MESSAGE_PREFIX) :].strip()
-    try:
-        payload = json.loads(raw_json)
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
+    payload, stripped = _parse_profile_payload(text)
+    if payload is None:
         return None
     raw_name = payload.get("display_name")
     if not isinstance(raw_name, str):

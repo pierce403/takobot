@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — `run`/`exec` now use workspace root and include workspace pi bins on PATH
+
+- What happened: operator `exec` commands were forced to `code/` and could not resolve `pi`/`pi-ai` binaries, causing misleading "command not found" errors even when inference runtime was installed.
+- Fix: `run`/`exec` now execute from workspace root, and command PATH prepends workspace-local pi runtime bins (`.tako/pi/node/node_modules/.bin`) plus latest workspace nvm node bin when present.
+- Prevention: keep command-surface cwd semantics aligned with operator expectations, and test command PATH prefix behavior so local runtime CLIs remain reachable.
+
 ### 2026-02-23 — Paired startup now sends operator "back online" XMTP status ping
 
 - What happened: when Tako restarted in paired mode, operators had to infer liveness manually from silence unless they sent a prompt first.

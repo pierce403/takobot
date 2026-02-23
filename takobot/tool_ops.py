@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html.parser import HTMLParser
+import os
 from pathlib import Path
 import subprocess
+from typing import Sequence
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -89,6 +91,7 @@ def run_local_command(
     timeout_s: float = COMMAND_TIMEOUT_S,
     output_limit: int = COMMAND_OUTPUT_LIMIT,
     cwd: str | Path | None = None,
+    path_prefixes: Sequence[str | Path] | None = None,
 ) -> CommandResult:
     cmd = command.strip()
     if not cmd:
@@ -98,6 +101,19 @@ def run_local_command(
 
     try:
         run_cwd = str(cwd) if cwd is not None else None
+        env = os.environ.copy()
+        if path_prefixes:
+            prefixes: list[str] = []
+            for item in path_prefixes:
+                candidate = str(item).strip()
+                if not candidate:
+                    continue
+                if not Path(candidate).exists():
+                    continue
+                prefixes.append(candidate)
+            if prefixes:
+                current_path = env.get("PATH", "")
+                env["PATH"] = os.pathsep.join(prefixes + ([current_path] if current_path else []))
         proc = subprocess.run(
             ["bash", "-lc", cmd],
             capture_output=True,
@@ -105,6 +121,7 @@ def run_local_command(
             timeout=timeout_s,
             check=False,
             cwd=run_cwd,
+            env=env,
         )
     except Exception as exc:  # noqa: BLE001
         return CommandResult(False, cmd, -1, "", _short(str(exc), 220))
@@ -125,6 +142,21 @@ def run_local_command(
     return CommandResult(proc.returncode == 0, cmd, int(proc.returncode), output, "")
 
 
+def workspace_command_path_prefixes(workspace_root: str | Path) -> tuple[str, ...]:
+    root = Path(workspace_root)
+    prefixes: list[str] = []
+
+    pi_bin = root / ".tako" / "pi" / "node" / "node_modules" / ".bin"
+    if pi_bin.exists():
+        prefixes.append(str(pi_bin))
+
+    nvm_bin = _latest_workspace_node_bin(root / ".tako" / "nvm" / "versions" / "node")
+    if nvm_bin is not None:
+        prefixes.append(str(nvm_bin))
+
+    return tuple(prefixes)
+
+
 def _normalize_text(value: str) -> str:
     # Preserve paragraph breaks but collapse noisy spacing.
     lines = [" ".join(line.split()) for line in value.replace("\r", "\n").split("\n")]
@@ -139,6 +171,45 @@ def _short(text: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
+
+
+def _latest_workspace_node_bin(versions_dir: Path) -> Path | None:
+    if not versions_dir.exists() or not versions_dir.is_dir():
+        return None
+    candidates: list[tuple[tuple[int, int, int], Path]] = []
+    for child in versions_dir.iterdir():
+        if not child.is_dir():
+            continue
+        key = _node_version_sort_key(child.name)
+        if key is None:
+            continue
+        bin_dir = child / "bin"
+        node_bin = bin_dir / ("node.exe" if os.name == "nt" else "node")
+        if not node_bin.exists():
+            continue
+        candidates.append((key, bin_dir))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[-1][1]
+
+
+def _node_version_sort_key(raw: str) -> tuple[int, int, int] | None:
+    value = str(raw).strip()
+    if value.startswith("v"):
+        value = value[1:]
+    if not value:
+        return None
+    parts = value.split(".")
+    numbers: list[int] = []
+    for part in parts[:3]:
+        token = part.strip()
+        if not token.isdigit():
+            return None
+        numbers.append(int(token))
+    while len(numbers) < 3:
+        numbers.append(0)
+    return numbers[0], numbers[1], numbers[2]
 
 
 class _HTMLTextParser(HTMLParser):

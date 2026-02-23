@@ -35,7 +35,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - XMTP `update` now requests a terminal-app restart automatically when updates are applied in a paired TUI-hosted runtime (daemon-only mode still reports manual restart guidance)
 - Natural-language scheduling for recurring jobs (`every day at 3pm ...`) with persisted job state at `.tako/state/cron/jobs.json`
 - Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>` or `exec <command>`), plus standard autonomous web tools in `tools/`: `web_search` and `web_fetch`
-- Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
+- Code work isolation: workspace includes a git-ignored `code/` directory for repo clones and sandboxes, while `run`/`exec` execute from workspace root by default
 - Built-in starter skills are auto-seeded into `skills/` and auto-enabled: OpenClaw top skills, `skill-creator`, `tool-creator`, MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators
 - Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel

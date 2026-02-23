@@ -144,8 +144,8 @@
   - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports synthesized insight + mission impact phrased according to current life stage and mood.
   - Purpose info questions (for example `what is your purpose?`) now return the current purpose text instead of entering the purpose-update path.
   - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
-  - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
-  - Local `exec` command is an alias for `run` (same `code/` execution context).
+  - Local `run` command executes from workspace root and prepends workspace-local pi runtime bins to PATH when available.
+  - Local `exec` command is an alias for `run` (same workspace-root execution context).
   - Local `jobs` command manages recurring schedules (`jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`), and plain-text operator schedule requests can auto-create jobs.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.
@@ -219,7 +219,7 @@
   - [x] Plain-text chat includes recent same-session history in model prompts (local + XMTP), not only the current message.
   - [x] Local TUI and XMTP plain-text chat both include `SOUL.md`/`SKILLS.md`/`TOOLS.md` excerpts, capability inventories, `MEMORY.md` frontmatter, and focus/RAG context blocks in the model prompt.
   - [x] XMTP replies emit typing indicator events when the runtime SDK supports typing indicators.
-  - [x] XMTP/operator `run` command executes in `code/` and reports `cwd` in responses.
+  - [x] XMTP/operator `run` command executes in workspace root and reports `cwd` in responses.
   - [x] Local `web` command writes a daily-log note for each successful fetch.
   - [x] `config` command explains `tako.toml` sections/options and live values.
   - [x] Starter skills are auto-seeded (including `agent-cli-inferencing`) and extension-registered as enabled.

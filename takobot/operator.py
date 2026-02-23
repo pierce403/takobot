@@ -51,6 +51,7 @@ def imprint_operator(
             "update",
             "web",
             "run",
+            "exec",
             "reimprint",
         ],
     }

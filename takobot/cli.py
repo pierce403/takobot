@@ -85,7 +85,7 @@ from .soul import (
     update_identity,
     update_mission_objectives,
 )
-from .tool_ops import fetch_webpage, run_local_command
+from .tool_ops import fetch_webpage, run_local_command, workspace_command_path_prefixes
 from .xmtp import (
     close_client,
     create_client,
@@ -1624,8 +1624,9 @@ async def _handle_incoming_message(
         if not command:
             await convo.send("Usage: `run <shell command>` (alias: `exec <shell command>`)")
             return
-        workdir = ensure_code_dir(repo_root())
-        result = await asyncio.to_thread(run_local_command, command, cwd=workdir)
+        workdir = repo_root()
+        path_prefixes = workspace_command_path_prefixes(workdir)
+        result = await asyncio.to_thread(run_local_command, command, cwd=workdir, path_prefixes=path_prefixes)
         append_daily_note(
             daily_root(),
             date.today(),
@@ -2265,8 +2266,8 @@ def _help_text() -> str:
         "- inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>\n"
         "- update (or `update check`)\n"
         "- web <https://...>\n"
-        "- run <shell command> (runs in `code/`)\n"
-        "- exec <shell command> (alias for `run`, runs in `code/`)\n"
+        "- run <shell command> (runs in workspace root)\n"
+        "- exec <shell command> (alias for `run`, runs in workspace root)\n"
         "- reimprint (operator-only)\n"
         "- plain text chat (inference-backed when available)\n"
     )

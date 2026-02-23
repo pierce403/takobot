@@ -127,7 +127,7 @@ from .soul import (
     update_identity,
     update_mission_objectives,
 )
-from .tool_ops import fetch_webpage, run_local_command
+from .tool_ops import fetch_webpage, run_local_command, workspace_command_path_prefixes
 from .runtime import EventBus, Runtime, RuntimeHeartbeatTick
 from .xmtp import close_client, create_client, hint_for_xmtp_error, probe_xmtp_import, sync_identity_profile
 from .productivity import open_loops as prod_open_loops
@@ -203,8 +203,8 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/update", "Apply update or run check"),
     ("/upgrade", "Alias for /update"),
     ("/web", "Fetch webpage"),
-    ("/run", "Run shell command in code/"),
-    ("/exec", "Alias for /run shell command in code/"),
+    ("/run", "Run shell command in workspace root"),
+    ("/exec", "Alias for /run shell command in workspace root"),
     ("/install", "Install skill or tool"),
     ("/review", "Review pending installs"),
     ("/enable", "Enable extension"),
@@ -2887,7 +2887,7 @@ class TakoTerminalApp(App[None]):
                 "jobs controls: `jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`\n"
                 "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/explore`, `/jobs`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
-                "run/exec command cwd: `code/` (git-ignored workspace for cloned repos)"
+                "run/exec command cwd: workspace root (`.`)"
             )
             return
 
@@ -4262,13 +4262,19 @@ class TakoTerminalApp(App[None]):
             if not command:
                 self._write_tako("usage: `run <shell command>` (alias: `exec <shell command>`)")
                 return
-            workdir = self.code_dir or ensure_code_dir(repo_root())
+            workdir = repo_root()
+            path_prefixes = workspace_command_path_prefixes(workdir)
             self._note_live_work(f"running command: {command}")
             self._add_activity(f"tool:{tool_label}", f"executing `{command}`")
             previous_indicator = self.indicator
             self._set_indicator("acting")
             try:
-                result = await asyncio.to_thread(run_local_command, command, cwd=workdir)
+                result = await asyncio.to_thread(
+                    run_local_command,
+                    command,
+                    cwd=workdir,
+                    path_prefixes=path_prefixes,
+                )
             finally:
                 if self.indicator == "acting":
                     self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")

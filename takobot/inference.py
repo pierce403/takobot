@@ -1629,7 +1629,14 @@ async def _stream_with_provider(
     env = _provider_env(runtime, provider)
 
     if provider == "pi":
-        return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event, thinking=thinking)
+        try:
+            return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event, thinking=thinking)
+        except Exception as stream_exc:  # noqa: BLE001
+            if on_event:
+                on_event("status", f"pi stream fallback: {_summarize_error_text(str(stream_exc))}")
+            text = await asyncio.to_thread(_run_pi, runtime, prompt, env=env, timeout_s=timeout_s, thinking=thinking)
+            await _simulate_stream(text, on_event=on_event)
+            return text
     if provider == "ollama":
         text = await asyncio.to_thread(_run_ollama, runtime, prompt, env=env, timeout_s=timeout_s)
         await _simulate_stream(text, on_event=on_event)
@@ -1657,15 +1664,18 @@ async def _stream_pi(
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
+    help_text = _pi_help_text(cli)
     prepared_prompt, prompt_notes = _prepare_prompt_for_pi(prompt)
-    cmd = [
-        cli,
-        "--mode",
-        "json",
-        "--no-session",
-        *_pi_cli_thinking_args(cli, thinking),
-        prepared_prompt,
-    ]
+    cmd = [cli]
+    supports_mode = _pi_help_supports(help_text, "--mode")
+    if supports_mode:
+        if help_text and "json" not in help_text:
+            raise RuntimeError("pi CLI stream mode=json unavailable")
+        cmd.extend(["--mode", "json"])
+    if _pi_help_supports(help_text, "--no-session"):
+        cmd.append("--no-session")
+    cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
+    cmd.append(prepared_prompt)
 
     stderr_lines: list[str] = []
     text_chunks: list[str] = []
@@ -2296,11 +2306,37 @@ def _clean_thinking_setting(value: Any) -> str:
     return ""
 
 
-def _pi_cli_thinking_args(cli: str, thinking: str) -> list[str]:
+def _pi_help_text(cli: str) -> str:
+    return _safe_help_text(cli).lower()
+
+
+def _pi_help_supports(help_text: str, flag: str, *, default_when_unknown: bool = True) -> bool:
+    if not help_text:
+        return default_when_unknown
+    return flag in help_text
+
+
+def _pi_compat_thinking_level(help_text: str, level: str) -> str:
+    if not level:
+        return ""
+    if not help_text:
+        return level
+    if level == "minimal" and "minimal" not in help_text and "low" in help_text:
+        return "low"
+    if level == "xhigh" and "xhigh" not in help_text and "high" in help_text:
+        return "high"
+    return level
+
+
+def _pi_cli_thinking_args(cli: str, thinking: str, *, help_text: str | None = None) -> list[str]:
     level = _clean_thinking_setting(thinking)
     if not level:
         return []
-    help_text = _safe_help_text(cli).lower()
+    if help_text is None:
+        help_text = _pi_help_text(cli)
+    level = _pi_compat_thinking_level(help_text, level)
+    if not level:
+        return []
     if "--thinking-level" in help_text:
         return ["--thinking-level", level]
     if "--thinking" in help_text:
@@ -2513,25 +2549,40 @@ def _run_pi(
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
+    help_text = _pi_help_text(cli)
     prepared_prompt, _prompt_notes = _prepare_prompt_for_pi(prompt)
-    cmd = [
-        cli,
-        "--print",
-        "--mode",
-        "text",
-        "--no-session",
-        *_pi_cli_thinking_args(cli, thinking),
-        prepared_prompt,
-    ]
-    try:
-        proc = subprocess.run(
-            cmd,
+    cmd = [cli]
+    if _pi_help_supports(help_text, "--print"):
+        cmd.append("--print")
+    if _pi_help_supports(help_text, "--mode"):
+        cmd.extend(["--mode", "text"])
+    if _pi_help_supports(help_text, "--no-session"):
+        cmd.append("--no-session")
+    cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
+    cmd.append(prepared_prompt)
+
+    def run_once(command: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command,
             check=False,
             capture_output=True,
             text=True,
             env=env,
             timeout=timeout_s,
         )
+
+    def should_retry_with_minimal(proc: subprocess.CompletedProcess[str]) -> bool:
+        merged = f"{proc.stderr or ''}\n{proc.stdout or ''}".lower()
+        if "unrecognized" in merged or "unknown option" in merged or "no such option" in merged:
+            return True
+        if "invalid choice" in merged or "invalid value" in merged:
+            return True
+        if proc.returncode != 0 and not (proc.stderr or "").strip() and not (proc.stdout or "").strip():
+            return True
+        return False
+
+    try:
+        proc = run_once(cmd)
     except subprocess.TimeoutExpired as exc:
         stdout_text = exc.stdout if isinstance(exc.stdout, str) else ""
         stderr_text = exc.stderr if isinstance(exc.stderr, str) else ""
@@ -2552,8 +2603,50 @@ def _run_pi(
             timeout_s=timeout_s,
             phase="sync",
         )
+
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
+
+    if should_retry_with_minimal(proc):
+        retry_cmd = [cli]
+        retry_cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
+        retry_cmd.append(prepared_prompt)
+        if retry_cmd != cmd:
+            try:
+                retry_proc = run_once(retry_cmd)
+            except subprocess.TimeoutExpired as exc:
+                stdout_text = exc.stdout if isinstance(exc.stdout, str) else ""
+                stderr_text = exc.stderr if isinstance(exc.stderr, str) else ""
+                _raise_inference_command_failure(
+                    provider="pi",
+                    command=retry_cmd,
+                    detail=f"pi inference timed out after {timeout_s:.0f}s",
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    timeout_s=timeout_s,
+                    phase="sync",
+                )
+            except Exception as exc:  # noqa: BLE001
+                _raise_inference_command_failure(
+                    provider="pi",
+                    command=retry_cmd,
+                    detail=f"pi subprocess spawn failed: {exc}",
+                    timeout_s=timeout_s,
+                    phase="sync",
+                )
+            if retry_proc.returncode == 0 and retry_proc.stdout.strip():
+                return retry_proc.stdout.strip()
+            detail = retry_proc.stderr.strip() or retry_proc.stdout.strip() or f"exit={retry_proc.returncode}"
+            _raise_inference_command_failure(
+                provider="pi",
+                command=retry_cmd,
+                detail=detail,
+                stdout_text=retry_proc.stdout,
+                stderr_text=retry_proc.stderr,
+                timeout_s=timeout_s,
+                phase="sync",
+            )
+
     detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
     _raise_inference_command_failure(
         provider="pi",

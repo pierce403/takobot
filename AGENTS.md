@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Pi chat now falls back from stream mode to sync mode on CLI incompatibilities
+
+- What happened: some bot workspaces had pi CLI variants that exited early in stream-json mode (`--mode json` / thinking flag mismatches), causing Type1 chat turns to fail with provider-exhausted errors.
+- Fix: pi streaming now falls back to sync pi execution when stream invocation fails, and thinking-level argument mapping now downgrades unsupported levels (`minimal`→`low`, `xhigh`→`high`) when the CLI help indicates older accepted values.
+- Prevention: keep pi invocation compatibility tested across stream/sync paths, include retry paths for optional-flag incompatibilities, and preserve stderr/stdout tail logging for failed command attempts.
+
 ### 2026-02-23 — Convos profile fallback now writes group appData metadata (not chat messages)
 
 - What happened: fallback profile updates were being emitted as text/JSON chat content, which surfaced in conversation history and did not apply as Convos profile metadata.

@@ -11,6 +11,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
+- Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts

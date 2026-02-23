@@ -106,6 +106,7 @@
   - Emits bounded proactive briefings when there is signal (new world items/task unblocks/repeated errors), capped per day with cooldown state in `.tako/state/briefing_state.json`.
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
+  - Pi stream inference now auto-falls back to sync pi execution when stream-mode flags are unsupported by the installed CLI (for example stream-json/thinking flag incompatibilities).
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
   - XMTP runtime startup/rebuild and pairing/name-update flows run profile verify+repair: when profile read APIs exist, Tako checks whether name/avatar match identity and only applies updates on mismatch; when SDK profile write APIs are missing, Tako upserts Convos-compatible profile metadata in conversation `group.appData` (`ConversationCustomMetadata` protobuf `profiles`) instead of sending chat-message JSON. Deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and detailed sync/broadcast state is recorded at `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`.

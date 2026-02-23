@@ -40,6 +40,7 @@ from .inference import (
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_runtime_lines,
+    inference_reauth_guidance_lines,
     inference_error_log_path,
     prepare_pi_login_plan,
     run_inference_prompt_with_fallback,
@@ -450,6 +451,11 @@ def _doctor_inference_diagnostics(runtime: InferenceRuntime, paths) -> tuple[lis
         lines.append(f"- inference recent error: {item}")
     if recent:
         problems.append("recent inference runtime errors were detected in the event log.")
+        recovery_lines = inference_reauth_guidance_lines(" | ".join(recent), local_terminal=True)
+        if recovery_lines:
+            for item in recovery_lines:
+                lines.append(f"- inference auth recovery: {item}")
+            problems.append("openai oauth refresh failure detected: run `inference login force` in the terminal.")
 
     return lines, problems
 
@@ -1470,6 +1476,7 @@ async def _handle_incoming_message(
                 "- inference refresh\n"
                 "- inference auth\n"
                 "- inference login\n"
+                "- inference login force\n"
                 "- inference provider <auto|pi>\n"
                 "- inference key list\n"
                 "- inference key set <ENV_VAR> <value>\n"
@@ -1485,19 +1492,22 @@ async def _handle_incoming_message(
         if action in {"auth", "tokens"}:
             await convo.send("\n".join(format_inference_auth_inventory()))
             return
-        if action in {"login", "auth login"}:
+        if action in {"login", "auth login", "login force", "login --force", "reauth", "reauth openai", "openai reauth"}:
+            force_login = action in {"login force", "login --force", "reauth", "reauth openai", "openai reauth"}
             plan = prepare_pi_login_plan(inference_runtime)
             lines = ["pi login workflow:"]
             for note in plan.notes:
                 lines.append(f"- prep: {note}")
-            if plan.auth_ready:
+            if plan.auth_ready and not force_login:
                 _replace_inference_runtime(inference_runtime, discover_inference_runtime())
                 lines.append("- auth is ready in workspace state; refreshed inference runtime.")
             elif plan.commands:
                 lines.append("- interactive login requires terminal operator input.")
+                if force_login:
+                    lines.append("- force mode requested: local terminal should run `inference login force`.")
                 lines.append(
                     "- run this in the local terminal app: "
-                    "`inference login` then follow `inference login answer <text>` prompts"
+                    "`inference login force` then follow `inference login answer <text>` prompts"
                 )
                 lines.append(f"- first command candidate: `{' '.join(plan.commands[0])}`")
             else:
@@ -2116,6 +2126,7 @@ def _help_text() -> str:
         "- inference (status)\n"
         "- inference auth\n"
         "- inference login\n"
+        "- inference login force\n"
         "- inference provider <auto|pi>\n"
         "- inference key list|set <ENV_VAR> <value>|clear <ENV_VAR>\n"
         "- update (or `update check`)\n"
@@ -2456,6 +2467,7 @@ def _fallback_chat_reply(
 ) -> str:
     cleaned_error = " ".join((last_error or "").split()).strip()
     cleaned_log = " ".join((error_log_path or "").split()).strip()
+    recovery_lines = inference_reauth_guidance_lines(cleaned_error, local_terminal=False)
     if is_operator:
         message = (
             "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. "
@@ -2463,6 +2475,8 @@ def _fallback_chat_reply(
         )
         if cleaned_error:
             message += f" Last inference error: {cleaned_error}."
+        if recovery_lines:
+            message += " " + " ".join(recovery_lines)
         if cleaned_log:
             message += f" Detailed command logs: {cleaned_log}."
         return message

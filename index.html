@@ -784,7 +784,8 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Installs pi runtime by default under <code>.tako/pi/node</code>; if Node/npm are missing or system Node is below pi requirements (<code>&lt;20</code>), bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
               <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, and pi OAuth inventory.</li>
-              <li>Supports assisted pi login in-app: <code>inference login</code> relays prompts and accepts operator responses via <code>inference login answer &lt;text&gt;</code>.</li>
+              <li>Supports assisted pi login in-app: <code>inference login</code> relays prompts and accepts operator responses via <code>inference login answer &lt;text&gt;</code>; <code>inference login force</code> forces a fresh re-auth even when stale auth is detected as present.</li>
+              <li>When inference fails with OpenAI refresh-token errors, fallback replies include non-inference recovery steps (<code>inference login force</code>, <code>inference login answer &lt;text&gt;</code>, <code>inference refresh</code>, <code>inference auth</code>).</li>
               <li>Pins inference subprocess temp output and <code>TMPDIR/TMP/TEMP</code> to <code>.tako/tmp/</code> (workspace-local only).</li>
               <li>Applies pi prompt guards before invocation: wraps oversized lines and trims over-budget prompts to avoid splitter chunk-limit failures.</li>
               <li>

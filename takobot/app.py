@@ -61,6 +61,7 @@ from .inference import (
     format_inference_auth_inventory,
     format_pi_model_plan_lines,
     format_runtime_lines,
+    inference_reauth_guidance_lines,
     inference_error_log_path,
     prepare_pi_login_plan,
     persist_inference_runtime,
@@ -2614,7 +2615,7 @@ class TakoTerminalApp(App[None]):
     def _pi_login_active(self) -> bool:
         return self.pi_login_task is not None and not self.pi_login_task.done()
 
-    async def _start_pi_login(self) -> None:
+    async def _start_pi_login(self, *, force: bool = False) -> None:
         if self._pi_login_active():
             self._write_tako("pi login is already running. use `inference login answer <text>` or `inference login cancel`.")
             return
@@ -2623,10 +2624,12 @@ class TakoTerminalApp(App[None]):
         for note in plan.notes:
             self._write_system(f"pi login prep: {note}")
 
-        if plan.auth_ready:
+        if plan.auth_ready and not force:
             self._initialize_inference_runtime()
             self._write_tako("pi auth is already ready (workspace auth refreshed from available sources).")
             return
+        if plan.auth_ready and force:
+            self._write_system("pi login force: bypassing existing auth-ready check.")
 
         if not plan.commands:
             reason = plan.reason or "pi login cannot start because no pi CLI command is available."
@@ -2875,7 +2878,7 @@ class TakoTerminalApp(App[None]):
         if cmd in {"help", "h", "?"}:
             self._write_tako(
                 "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, explore, jobs, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
-                "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
+                "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference login force`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
                 "stage controls: `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
                 "explore controls: `explore` or `explore <topic>`\n"
@@ -3657,6 +3660,7 @@ class TakoTerminalApp(App[None]):
                     "- inference refresh\n"
                     "- inference auth\n"
                     "- inference login\n"
+                    "- inference login force\n"
                     "- inference login status\n"
                     "- inference login answer <text>\n"
                     "- inference login cancel\n"
@@ -3678,8 +3682,9 @@ class TakoTerminalApp(App[None]):
                 self._write_tako("\n".join(format_inference_auth_inventory()))
                 return
 
-            if action in {"login", "auth login"}:
-                await self._start_pi_login()
+            if action in {"login", "auth login", "login force", "login --force", "reauth", "reauth openai", "openai reauth"}:
+                force_login = action in {"login force", "login --force", "reauth", "reauth openai", "openai reauth"}
+                await self._start_pi_login(force=force_login)
                 return
 
             if action.startswith("login answer "):
@@ -6255,6 +6260,8 @@ def _local_chat_unavailable_message(
     last_error: str = "",
     error_log_path: str = "",
 ) -> str:
+    cleaned_error = " ".join((last_error or "").split()).strip()
+    recovery_lines = inference_reauth_guidance_lines(cleaned_error, local_terminal=True)
     if operator_paired:
         control_surfaces = (
             "Chat remains available here and over XMTP. This terminal has full operator control for local "
@@ -6264,16 +6271,20 @@ def _local_chat_unavailable_message(
         control_surfaces = "Chat remains available in this terminal. Use `pair` if you also want XMTP operator control."
 
     hints = _inference_setup_hints(runtime) if runtime is not None else []
-    next_step = hints[0] if hints else "run `inference refresh` to rescan runtime/auth status."
+    if recovery_lines:
+        next_step = "run `inference login force` to refresh OpenAI auth."
+    else:
+        next_step = hints[0] if hints else "run `inference refresh` to rescan runtime/auth status."
     message = (
         "Inference is unavailable right now, so this reply is diagnostic status only. "
         f"{control_surfaces} "
         f"Next step: {next_step} "
         "Run `doctor` to auto-repair runtime/auth."
     )
-    cleaned_error = " ".join((last_error or "").split()).strip()
     if cleaned_error:
         message += f" Last inference error: {cleaned_error}."
+    if recovery_lines:
+        message += " " + " ".join(recovery_lines)
     cleaned_log_path = " ".join((error_log_path or "").split()).strip()
     if cleaned_log_path:
         message += f" Detailed command errors are logged at: {cleaned_log_path}."

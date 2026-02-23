@@ -10,6 +10,7 @@ from unittest.mock import patch
 from takobot.conversation import ConversationStore
 from takobot.cli import (
     _ConversationWithTyping,
+    _fallback_chat_reply,
     RuntimeHooks,
     _chat_reply,
     _canonical_identity_name,
@@ -119,6 +120,19 @@ class TestCliXmtpResilience(unittest.TestCase):
         self.assertTrue(_looks_like_command("jobs"))
         self.assertTrue(_looks_like_command("jobs add every day at 3pm run doctor"))
         self.assertFalse(_looks_like_command("tell me about octopus habitats"))
+
+    def test_operator_fallback_reply_includes_openai_reauth_guidance(self) -> None:
+        reply = _fallback_chat_reply(
+            is_operator=True,
+            operator_paired=True,
+            last_error=(
+                "inference provider fallback exhausted: pi: token refresh failed: 401 "
+                "refresh token has already been used (openai-codex)"
+            ),
+            error_log_path="/tmp/error.log",
+        )
+        self.assertIn("inference login force", reply)
+        self.assertIn("local terminal", reply)
 
     def test_close_xmtp_client_supports_async_and_sync(self) -> None:
         async_client = _DummyAsyncClosable()

@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Inference fallback now includes non-inference OpenAI reauth guidance
+
+- What happened: when OpenAI/Codex OAuth refresh tokens expired or were already consumed, fallback chat copy stayed generic and `inference login` could short-circuit on stale "auth-ready" state, leaving operators without a clear offline recovery path.
+- Fix: added refresh-failure detection in inference fallback messaging and surfaced explicit recovery steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`); added `inference login force` handling so local TUI can force interactive reauth even when auth files exist.
+- Prevention: keep auth-failure pattern detection in tests, keep operator recovery steps deterministic in fallback replies, and avoid treating "auth file exists" as equivalent to "token is valid".
+
 ### 2026-02-23 — Pi chat now falls back from stream mode to sync mode on CLI incompatibilities
 
 - What happened: some bot workspaces had pi CLI variants that exited early in stream-json mode (`--mode json` / thinking flag mismatches), causing Type1 chat turns to fail with provider-exhausted errors.

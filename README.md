@@ -7,10 +7,11 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
-- Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`) and auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
+- Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`), `inference login force` can re-auth even when a stale token profile already exists, and startup auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
+- Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`)
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
 - Inference execution gate so first model call starts on the first interactive chat turn

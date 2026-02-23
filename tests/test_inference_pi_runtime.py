@@ -17,6 +17,8 @@ from takobot.inference import (
     _pi_cli_thinking_args,
     _stream_with_provider,
     _stream_pi,
+    inference_reauth_guidance_lines,
+    looks_like_openai_oauth_refresh_failure,
     _codex_oauth_credential_from_auth,
     _ensure_workspace_pi_auth,
     _detect_ollama,
@@ -272,6 +274,21 @@ class TestInferencePiRuntime(unittest.TestCase):
         with patch("takobot.inference._safe_help_text", return_value="usage: pi --thinking-level {low,medium,high}"):
             args = _pi_cli_thinking_args("pi", "minimal")
         self.assertEqual(["--thinking-level", "low"], args)
+
+    def test_detects_openai_oauth_refresh_failure_signals(self) -> None:
+        error_text = (
+            "pi inference failed: [openai-codex] Token refresh failed: 401 "
+            '{"error":{"message":"Your refresh token has already been used"}}'
+        )
+        self.assertTrue(looks_like_openai_oauth_refresh_failure(error_text))
+        guidance = inference_reauth_guidance_lines(error_text, local_terminal=True)
+        self.assertGreaterEqual(len(guidance), 3)
+        self.assertIn("inference login force", " ".join(guidance))
+
+    def test_reauth_guidance_is_empty_for_non_auth_errors(self) -> None:
+        error_text = "pi inference failed: exit=1 unknown option --mode"
+        self.assertFalse(looks_like_openai_oauth_refresh_failure(error_text))
+        self.assertEqual((), inference_reauth_guidance_lines(error_text, local_terminal=True))
 
     def test_detect_pi_requires_node_runtime_for_ready(self) -> None:
         with TemporaryDirectory() as tmp:

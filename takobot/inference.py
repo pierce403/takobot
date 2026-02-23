@@ -283,6 +283,46 @@ def enumerate_pi_oauth_tokens() -> list[str]:
     return results
 
 
+def looks_like_openai_oauth_refresh_failure(error_text: str) -> bool:
+    lowered = " ".join((error_text or "").split()).strip().lower()
+    if not lowered:
+        return False
+    token_signals = (
+        "token refresh failed",
+        "refresh token has already been used",
+        "invalid_grant",
+        "refresh token",
+    )
+    auth_signals = (
+        "openai-codex",
+        "openai",
+        "oauth",
+        "401",
+    )
+    return any(token in lowered for token in token_signals) and any(signal in lowered for signal in auth_signals)
+
+
+def inference_reauth_guidance_lines(
+    last_error: str,
+    *,
+    local_terminal: bool,
+) -> tuple[str, ...]:
+    if not looks_like_openai_oauth_refresh_failure(last_error):
+        return ()
+    if local_terminal:
+        return (
+            "OpenAI auth recovery: run `inference login force` to re-auth now.",
+            "If prompted, reply with `inference login answer <text>` until complete.",
+            "Then run `inference refresh` and `inference auth` to verify token state.",
+            "Fallback if needed: set a key directly with `inference key set OPENAI_API_KEY <key>`.",
+        )
+    return (
+        "OpenAI auth recovery requires terminal input.",
+        "Run `inference login force` in the local terminal and complete prompts with `inference login answer <text>`.",
+        "After completion, run `inference refresh` and `inference auth`.",
+    )
+
+
 @dataclass(frozen=True)
 class InferenceProviderStatus:
     provider: str

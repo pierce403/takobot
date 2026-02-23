@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Convos profile fallback now writes group appData metadata (not chat messages)
+
+- What happened: fallback profile updates were being emitted as text/JSON chat content, which surfaced in conversation history and did not apply as Convos profile metadata.
+- Fix: replaced message-content fallback with Convos-compatible `group.appData` upsert flow (base64url decode, optional Convos compression decode, `ConversationCustomMetadata` profile upsert by `inboxId` bytes, re-encode, `updateAppData`).
+- Prevention: keep profile fallback metadata-only (never chat-message JSON), preserve Convos compression compatibility, and test profile upsert behavior against group appData paths.
+
 ### 2026-02-19 — XMTP profile fallback now uses DM metadata messages for SDKs without profile writes
 
 - What happened: some runtime environments still lacked XMTP profile metadata write methods, so display name/avatar updates could remain invisible to clients expecting profile data even after local sync attempts.

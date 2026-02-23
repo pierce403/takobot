@@ -36,7 +36,7 @@ What bootstrap does:
 - Inference uses focus-aware memory recall: emotional focus level controls `ragrep` retrieval breadth from `memory/` (narrow when focused, broad when diffuse).
 - Pairing is terminal-first outbound XMTP.
 - After pairing, XMTP provides remote control for identity/config/tools/permissions/routines.
-- Pairing/runtime now verifies XMTP profile metadata against identity when possible, repairs mismatches when profile update APIs are available, and publishes fallback profile metadata JSON messages (`{"type":"profile",...}`) to self/known DMs for compatible clients. It also creates local deterministic avatar/sync caches (`.tako/state/xmtp-avatar.svg`, `.tako/state/xmtp-profile.json`, `.tako/state/xmtp-profile-broadcast.json`).
+- Pairing/runtime now verifies XMTP profile metadata against identity when possible, repairs mismatches when profile update APIs are available, and otherwise upserts Convos-compatible profile metadata in `group.appData` (protobuf `ConversationCustomMetadata` profile entries) instead of posting chat-message JSON. It also creates local deterministic avatar/sync caches (`.tako/state/xmtp-avatar.svg`, `.tako/state/xmtp-profile.json`, `.tako/state/xmtp-profile-broadcast.json`).
 - Recurring jobs can be scheduled from natural language (for example `every day at 3pm run doctor`) and are stored in `.tako/state/cron/jobs.json`.
 - Local terminal remains full operator control (including config changes), and chat stays available as a cockpit.
 - First-run templates include `resources/model-guide.md` for model family and thinking-level tuning.

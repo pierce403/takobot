@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+import takobot.xmtp as xmtp_mod
 from takobot.xmtp import (
     build_profile_avatar_svg,
     parse_profile_message,
@@ -54,38 +55,31 @@ class _FakeIdentifier:
         self.value = value
 
 
-class _FakeDmConversation:
-    def __init__(self, peer_inbox_id: str) -> None:
-        self.peer_inbox_id = peer_inbox_id
-        self.sent: list[tuple[str, object | None]] = []
+class _FakeGroupConversation:
+    def __init__(self, conversation_id: bytes, *, app_data: str = "") -> None:
+        self.conversation_id = conversation_id
+        self.app_data = app_data
+        self.updates: list[str] = []
 
-    async def send(self, content: str, content_type: object | None = None) -> None:
-        self.sent.append((content, content_type))
+    async def update_app_data(self, encoded: str) -> None:
+        self.app_data = encoded
+        self.updates.append(encoded)
 
 
 class _FakeConversations:
-    def __init__(self, dms: list[_FakeDmConversation], self_dm: _FakeDmConversation) -> None:
-        self._dms = dms
-        self._self_dm = self_dm
+    def __init__(self, groups: list[_FakeGroupConversation]) -> None:
+        self._groups = groups
 
-    async def list_dms(self) -> list[_FakeDmConversation]:
-        return list(self._dms)
-
-    async def new_dm(self, _address: str) -> _FakeDmConversation:
-        return self._self_dm
+    async def list_groups(self) -> list[_FakeGroupConversation]:
+        return list(self._groups)
 
 
 class _ClientWithBroadcastFallback:
     def __init__(self) -> None:
         self.inbox_id = "inbox-self"
         self.account_identifier = _FakeIdentifier("0x1111111111111111111111111111111111111111")
-        self.self_dm = _FakeDmConversation("inbox-self")
-        self.peer_dm = _FakeDmConversation("inbox-peer")
-        self.conversations = _FakeConversations([self.peer_dm], self.self_dm)
-        self.codecs: list[object] = []
-
-    def register_codec(self, codec: object) -> None:
-        self.codecs.append(codec)
+        self.group = _FakeGroupConversation(b"\x01profile")
+        self.conversations = _FakeConversations([self.group])
 
 
 def _avatar_data_uri(name: str) -> str:
@@ -222,7 +216,7 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertEqual(1, len(client.avatar_updates))
             self.assertTrue(client.avatar_updates[0].startswith("data:image/svg+xml;base64,"))
 
-    def test_sync_profile_broadcasts_profile_message_to_self_and_peer_dm(self) -> None:
+    def test_sync_profile_upserts_profile_metadata_into_group_app_data(self) -> None:
         client = _ClientWithBroadcastFallback()
         with TemporaryDirectory() as tmp:
             state_dir = Path(tmp) / "state"
@@ -237,25 +231,25 @@ class TestXmtpProfile(unittest.TestCase):
 
             self.assertTrue(result.fallback_self_sent)
             self.assertEqual(1, result.fallback_peer_sent_count)
-            self.assertEqual(1, len(client.self_dm.sent))
-            self.assertEqual(1, len(client.peer_dm.sent))
-
-            self_message = client.self_dm.sent[0][0]
-            peer_message = client.peer_dm.sent[0][0]
-            self.assertTrue(self_message.startswith("{"))
-            self.assertTrue(peer_message.startswith("{"))
-            self.assertFalse(self_message.startswith("tako:profile:"))
-            self.assertFalse(peer_message.startswith("tako:profile:"))
-
-            parsed = parse_profile_message(peer_message)
-            self.assertIsNotNone(parsed)
-            assert parsed is not None
-            self.assertEqual("InkTako", parsed.name)
-            self.assertTrue((parsed.avatar_url or "").startswith("data:image/svg+xml;base64,"))
+            self.assertEqual(1, len(client.group.updates))
+            raw_blob, decode_error = xmtp_mod._decode_convos_app_data(client.group.app_data)
+            self.assertIsNone(decode_error)
+            proto_classes = xmtp_mod._convos_proto_classes()
+            self.assertIsNotNone(proto_classes)
+            assert proto_classes is not None
+            metadata_cls, _profile_cls = proto_classes
+            metadata = metadata_cls()
+            metadata.ParseFromString(raw_blob)
+            self.assertEqual(1, len(metadata.profiles))
+            profile = metadata.profiles[0]
+            self.assertEqual(xmtp_mod._inbox_id_to_bytes(client.inbox_id), bytes(profile.inboxId))
+            self.assertEqual("InkTako", profile.name)
+            self.assertTrue(profile.image.startswith("data:image/svg+xml;base64,"))
 
     def test_parse_profile_message_returns_none_for_non_profile_text(self) -> None:
         self.assertIsNone(parse_profile_message("hello world"))
         self.assertIsNone(parse_profile_message('{"hello":"world"}'))
+        self.assertIsNone(parse_profile_message('cv:profile:{"hello":"world"}'))
 
     def test_parse_profile_message_accepts_legacy_prefixed_payload(self) -> None:
         legacy = 'tako:profile:{"type":"profile","v":1,"display_name":"InkTako"}'
@@ -263,6 +257,14 @@ class TestXmtpProfile(unittest.TestCase):
         self.assertIsNotNone(parsed)
         assert parsed is not None
         self.assertEqual("InkTako", parsed.name)
+
+    def test_parse_profile_message_accepts_cv_prefixed_payload(self) -> None:
+        modern = 'cv:profile:{"type":"profile","v":1,"displayName":"InkTako","avatarUrl":"https://example.com/ink.png","ts":1700000000000}'
+        parsed = parse_profile_message(modern)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual("InkTako", parsed.name)
+        self.assertEqual("https://example.com/ink.png", parsed.avatar_url)
 
 
 if __name__ == "__main__":

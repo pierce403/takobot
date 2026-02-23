@@ -13,6 +13,7 @@ import re
 import socket
 from pathlib import Path
 from typing import Any
+import zlib
 
 
 XMTP_PROFILE_STATE_VERSION = 2
@@ -21,6 +22,7 @@ XMTP_PROFILE_AVATAR_FILE = "xmtp-avatar.svg"
 XMTP_PROFILE_NAME_MAX_CHARS = 40
 XMTP_PROFILE_BROADCAST_STATE_VERSION = 1
 XMTP_PROFILE_BROADCAST_STATE_FILE = "xmtp-profile-broadcast.json"
+XMTP_PROFILE_TEXT_FALLBACK_PREFIX = "cv:profile:"
 _LEGACY_XMTP_PROFILE_MESSAGE_PREFIX = "tako:profile:"
 
 _AVATAR_BACKGROUNDS: tuple[tuple[str, str], ...] = (
@@ -49,6 +51,9 @@ _AVATAR_ACCENT_COLORS: tuple[str, ...] = (
     "#FB7185",
     "#94A3B8",
 )
+
+_CONVOS_PROTO_CACHE: tuple[Any, Any] | None = None
+_CONVOS_PROTO_UNAVAILABLE = False
 
 
 @dataclass(frozen=True)
@@ -181,18 +186,49 @@ def _trim_profile_avatar_url(value: str | None) -> str:
     return avatar[:4096]
 
 
-def build_profile_message(name: str, avatar_url: str) -> str:
+def _build_profile_payload(
+    name: str,
+    avatar_url: str,
+    *,
+    include_timestamp: bool = True,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "profile",
-        "source": "takobot",
         "v": 1,
-        "display_name": canonical_profile_name(name),
-        "ts": datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat(),
+        "displayName": canonical_profile_name(name),
     }
     trimmed_avatar = _trim_profile_avatar_url(avatar_url)
     if trimmed_avatar:
-        payload["avatar_url"] = trimmed_avatar
+        payload["avatarUrl"] = trimmed_avatar
+    if include_timestamp:
+        payload["ts"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    return payload
+
+
+def _encode_profile_payload(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def _payload_sha256(name: str, avatar_url: str) -> str:
+    payload = _build_profile_payload(name, avatar_url, include_timestamp=False)
+    return hashlib.sha256(_encode_profile_payload(payload).encode("utf-8")).hexdigest()
+
+
+def _is_profile_payload(payload: dict[str, Any]) -> bool:
+    payload_type = str(payload.get("type") or "").strip().lower()
+    if payload_type not in {"profile", "tako_profile", "takobot_profile"}:
+        return False
+    version = payload.get("v")
+    if isinstance(version, str) and version.strip():
+        if version.strip() not in {"1", "1.0"}:
+            return False
+    if isinstance(version, (int, float)) and int(version) != 1:
+        return False
+    for key in ("displayName", "display_name", "name", "avatarUrl", "avatar_url", "avatar"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
 
 
 def _parse_profile_payload(text: str) -> tuple[dict[str, Any] | None, str]:
@@ -200,11 +236,13 @@ def _parse_profile_payload(text: str) -> tuple[dict[str, Any] | None, str]:
     if not stripped:
         return None, stripped
 
-    raw_json = stripped
-    legacy_prefix = False
-    if stripped.startswith(_LEGACY_XMTP_PROFILE_MESSAGE_PREFIX):
+    raw_json = ""
+    if stripped.startswith(XMTP_PROFILE_TEXT_FALLBACK_PREFIX):
+        raw_json = stripped[len(XMTP_PROFILE_TEXT_FALLBACK_PREFIX) :].strip()
+    elif stripped.startswith(_LEGACY_XMTP_PROFILE_MESSAGE_PREFIX):
         raw_json = stripped[len(_LEGACY_XMTP_PROFILE_MESSAGE_PREFIX) :].strip()
-        legacy_prefix = True
+    else:
+        return None, stripped
 
     try:
         payload = json.loads(raw_json)
@@ -212,20 +250,8 @@ def _parse_profile_payload(text: str) -> tuple[dict[str, Any] | None, str]:
         return None, stripped
     if not isinstance(payload, dict):
         return None, stripped
-    if legacy_prefix:
+    if _is_profile_payload(payload):
         return payload, stripped
-
-    source = str(payload.get("source") or payload.get("agent") or "").strip().lower()
-    if source in {"takobot", "tako"}:
-        return payload, stripped
-
-    payload_type = str(payload.get("type") or "").strip().lower()
-    if payload_type not in {"profile", "tako_profile", "takobot_profile"}:
-        return None, stripped
-    for key in ("display_name", "name", "avatar_url", "avatar"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return payload, stripped
     return None, stripped
 
 
@@ -235,11 +261,15 @@ def parse_profile_message(text: str) -> XmtpProfileMessage | None:
     payload, stripped = _parse_profile_payload(text)
     if payload is None:
         return None
-    raw_name = payload.get("display_name")
+    raw_name = payload.get("displayName")
+    if not isinstance(raw_name, str):
+        raw_name = payload.get("display_name")
     if not isinstance(raw_name, str):
         raw_name = payload.get("name")
     parsed_name = canonical_profile_name(raw_name) if isinstance(raw_name, str) and raw_name.strip() else None
-    raw_avatar = payload.get("avatar_url")
+    raw_avatar = payload.get("avatarUrl")
+    if not isinstance(raw_avatar, str):
+        raw_avatar = payload.get("avatar_url")
     if not isinstance(raw_avatar, str):
         raw_avatar = payload.get("avatar")
     parsed_avatar = _trim_profile_avatar_url(raw_avatar if isinstance(raw_avatar, str) else "")
@@ -589,154 +619,354 @@ def _write_profile_broadcast_state(
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _client_eth_address(client: object) -> str:
-    for candidate in (
-        getattr(client, "account_identifier", None),
-        getattr(client, "_identifier", None),
-    ):
-        if candidate is None:
-            continue
-        for attr in ("value", "identifier"):
-            value = getattr(candidate, attr, None)
-            if isinstance(value, str):
-                trimmed = value.strip()
-                if trimmed.startswith(("0x", "0X")) and len(trimmed) == 42:
-                    return trimmed
+def _inbox_id_to_bytes(inbox_id: str) -> bytes:
+    value = (inbox_id or "").strip()
+    if not value:
+        return b""
+    if value.startswith(("0x", "0X")):
+        value = value[2:]
+    if value and len(value) % 2 == 0:
+        with contextlib.suppress(Exception):
+            return bytes.fromhex(value)
+    return value.encode("utf-8")
+
+
+def _client_inbox_id_bytes(client: object) -> bytes:
+    for attr in ("inbox_id_bytes", "inboxIdBytes"):
+        candidate = getattr(client, attr, None)
+        if isinstance(candidate, (bytes, bytearray)):
+            return bytes(candidate)
+        if isinstance(candidate, str):
+            converted = _inbox_id_to_bytes(candidate)
+            if converted:
+                return converted
+    inbox_id = _coerce_nonempty_string(getattr(client, "inbox_id", None))
+    if inbox_id is None:
+        inbox_id = _coerce_nonempty_string(getattr(client, "inboxId", None))
+    if inbox_id is None:
+        return b""
+    return _inbox_id_to_bytes(inbox_id)
+
+
+def _conversation_state_key(conversation: object) -> str:
+    peer = _coerce_nonempty_string(getattr(conversation, "peer_inbox_id", None))
+    if peer:
+        return f"peer:{peer.lower()}"
+
+    for attr in ("conversation_id", "group_id", "id"):
+        value = getattr(conversation, attr, None)
+        if isinstance(value, (bytes, bytearray)):
+            return f"conversation:{bytes(value).hex()}"
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text:
+                return f"conversation:{text}"
     return ""
 
 
-async def _list_dm_conversations(client: object) -> list[object]:
+def _conversation_targets(conversation: object) -> list[object]:
+    targets: list[object] = []
+    seen: set[int] = set()
+    for candidate in (
+        conversation,
+        getattr(conversation, "group", None),
+        getattr(conversation, "_group", None),
+    ):
+        if candidate is None:
+            continue
+        ident = id(candidate)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        targets.append(candidate)
+    return targets
+
+
+def _conversation_supports_app_data(conversation: object) -> bool:
+    for target in _conversation_targets(conversation):
+        for attr in ("app_data", "appData", "get_app_data", "getAppData", "update_app_data", "updateAppData"):
+            if getattr(target, attr, None) is not None:
+                return True
+    return False
+
+
+async def _list_group_conversations(client: object) -> list[object]:
     conversations = getattr(client, "conversations", None)
     if conversations is None:
         return []
-    list_dms = getattr(conversations, "list_dms", None)
-    if callable(list_dms):
+
+    for attr in ("list_groups", "listGroups", "list_group_conversations"):
+        list_groups = getattr(conversations, attr, None)
+        if not callable(list_groups):
+            continue
         try:
-            result = list_dms()
+            result = list_groups()
             if inspect.isawaitable(result):
                 result = await result
-            if isinstance(result, list):
-                return result
         except Exception:
-            return []
+            continue
+        if isinstance(result, list):
+            return [item for item in result if _conversation_supports_app_data(item)]
     return []
 
 
-async def _open_self_dm(client: object) -> object | None:
-    inbox_id = _coerce_nonempty_string(getattr(client, "inbox_id", None))
-    if inbox_id:
-        for dm in await _list_dm_conversations(client):
-            peer = _coerce_nonempty_string(getattr(dm, "peer_inbox_id", None))
-            if peer and peer.lower() == inbox_id.lower():
-                return dm
+async def _read_group_app_data(conversation: object) -> tuple[str | None, str | None]:
+    found = False
+    for target in _conversation_targets(conversation):
+        for attr in ("app_data", "appData", "get_app_data", "getAppData"):
+            member = getattr(target, attr, None)
+            if member is None:
+                continue
+            found = True
+            try:
+                value = member() if callable(member) else member
+                if inspect.isawaitable(value):
+                    value = await value
+            except Exception as exc:  # noqa: BLE001
+                return None, f"read appData failed via {target.__class__.__name__}.{attr}: {exc.__class__.__name__}: {exc}"
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="ignore")
+            if value is None:
+                return "", None
+            if isinstance(value, str):
+                return value, None
+    if found:
+        return "", None
+    return None, "group appData read API unavailable"
 
-    address = _client_eth_address(client)
-    if not address:
-        return None
-    conversations = getattr(client, "conversations", None)
-    if conversations is None:
-        return None
-    new_dm = getattr(conversations, "new_dm", None)
-    if not callable(new_dm):
+
+async def _update_group_app_data(conversation: object, encoded: str) -> tuple[bool, str | None]:
+    errors: list[str] = []
+    for target in _conversation_targets(conversation):
+        for attr in ("update_app_data", "updateAppData", "set_app_data", "setAppData"):
+            method = getattr(target, attr, None)
+            if not callable(method):
+                continue
+            for args, kwargs in (
+                ((encoded,), {}),
+                ((), {"app_data": encoded}),
+                ((), {"appData": encoded}),
+                ((), {"value": encoded}),
+            ):
+                try:
+                    result = method(*args, **kwargs)
+                    if inspect.isawaitable(result):
+                        await result
+                    return True, None
+                except TypeError:
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{target.__class__.__name__}.{attr}: {exc.__class__.__name__}: {exc}")
+                    break
+    if errors:
+        return False, errors[0]
+    return False, "group appData update API unavailable"
+
+
+def _base64url_decode(value: str) -> bytes:
+    padded = value + ("=" * (-len(value) % 4))
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _base64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _decode_convos_app_data(encoded: str) -> tuple[bytes, str | None]:
+    text = (encoded or "").strip()
+    if not text:
+        return b"", None
+    try:
+        raw = _base64url_decode(text)
+    except Exception as exc:  # noqa: BLE001
+        return b"", f"base64url decode failed: {exc.__class__.__name__}: {exc}"
+    if not raw:
+        return b"", None
+    if raw[0] != 0x1F:
+        return raw, None
+    if len(raw) < 5:
+        return b"", "convos marker present but payload is too short"
+    expected_size = int.from_bytes(raw[1:5], byteorder="big", signed=False)
+    try:
+        decompressed = zlib.decompress(raw[5:])
+    except Exception as exc:  # noqa: BLE001
+        return b"", f"convos zlib decompress failed: {exc.__class__.__name__}: {exc}"
+    if expected_size > 0 and expected_size != len(decompressed):
+        return b"", f"convos decompressed size mismatch: expected={expected_size} got={len(decompressed)}"
+    return decompressed, None
+
+
+def _encode_convos_app_data(payload: bytes) -> str:
+    if not payload:
+        return ""
+    compressed = zlib.compress(payload)
+    marker_payload = bytes([0x1F]) + len(payload).to_bytes(4, byteorder="big", signed=False) + compressed
+    encoded_source = marker_payload if len(marker_payload) < len(payload) else payload
+    return _base64url_encode(encoded_source)
+
+
+def _convos_proto_classes() -> tuple[Any, Any] | None:
+    global _CONVOS_PROTO_CACHE, _CONVOS_PROTO_UNAVAILABLE
+    if _CONVOS_PROTO_CACHE is not None:
+        return _CONVOS_PROTO_CACHE
+    if _CONVOS_PROTO_UNAVAILABLE:
         return None
     try:
-        dm = new_dm(address)
-        if inspect.isawaitable(dm):
-            dm = await dm
-        return dm
+        from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
     except Exception:
+        _CONVOS_PROTO_UNAVAILABLE = True
         return None
-
-
-def _profile_text_content_type() -> Any | None:
-    try:
-        from xmtp_content_type_primitives import ContentTypeId
-    except Exception:
-        return None
-    return ContentTypeId(
-        authority_id="xmtp.org",
-        type_id="text",
-        version_major=1,
-        version_minor=0,
-    )
-
-
-def _register_silent_text_codec(client: object) -> Any | None:
-    register = getattr(client, "register_codec", None)
-    if not callable(register):
-        return None
-    content_type = _profile_text_content_type()
-    if content_type is None:
-        return None
-    try:
-        from xmtp_content_type_primitives import BaseContentCodec, EncodedContent
-        from xmtp_bindings import xmtpv3
-    except Exception:
-        return None
-
-    class _SilentTextCodec(BaseContentCodec[str]):
-        @property
-        def content_type(self):  # type: ignore[override]
-            return content_type
-
-        def encode(self, content: str, registry=None):  # type: ignore[override]
-            encoded = xmtpv3.encode_text(content)
-            return EncodedContent(
-                type_id=content_type,
-                parameters={"encoding": "UTF-8"},
-                content=encoded,
-            )
-
-        def decode(self, content, registry=None):  # type: ignore[override]
-            payload = getattr(content, "content", b"")
-            if not isinstance(payload, (bytes, bytearray)):
-                raise TypeError("profile codec payload must be bytes")
-            return xmtpv3.decode_text(bytes(payload))
-
-        def fallback(self, content: str):  # type: ignore[override]
-            return None
-
-        def should_push(self, content: str):  # type: ignore[override]
-            return False
 
     try:
-        register(_SilentTextCodec())
+        file_proto = descriptor_pb2.FileDescriptorProto()
+        file_proto.name = "converge_cv_profile_metadata.proto"
+        file_proto.package = "converge.cv"
+        file_proto.syntax = "proto3"
+
+        profile = file_proto.message_type.add()
+        profile.name = "ConversationProfile"
+
+        field = profile.field.add()
+        field.name = "inboxId"
+        field.number = 1
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_BYTES
+
+        field = profile.field.add()
+        field.name = "name"
+        field.number = 2
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
+
+        field = profile.field.add()
+        field.name = "image"
+        field.number = 3
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
+
+        field = profile.field.add()
+        field.name = "encryptedImage"
+        field.number = 4
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_BYTES
+
+        metadata = file_proto.message_type.add()
+        metadata.name = "ConversationCustomMetadata"
+
+        field = metadata.field.add()
+        field.name = "tag"
+        field.number = 1
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
+
+        field = metadata.field.add()
+        field.name = "profiles"
+        field.number = 2
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+        field.type_name = ".converge.cv.ConversationProfile"
+
+        field = metadata.field.add()
+        field.name = "expiresAtUnix"
+        field.number = 3
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_SFIXED64
+
+        pool = descriptor_pool.DescriptorPool()
+        pool.Add(file_proto)
+        metadata_descriptor = pool.FindMessageTypeByName("converge.cv.ConversationCustomMetadata")
+        profile_descriptor = pool.FindMessageTypeByName("converge.cv.ConversationProfile")
+
+        get_message_class = getattr(message_factory, "GetMessageClass", None)
+        if callable(get_message_class):
+            metadata_cls = get_message_class(metadata_descriptor)
+            profile_cls = get_message_class(profile_descriptor)
+        else:
+            factory = message_factory.MessageFactory(pool)
+            metadata_cls = factory.GetPrototype(metadata_descriptor)
+            profile_cls = factory.GetPrototype(profile_descriptor)
     except Exception:
+        _CONVOS_PROTO_UNAVAILABLE = True
         return None
-    return content_type
+
+    _CONVOS_PROTO_CACHE = (metadata_cls, profile_cls)
+    return _CONVOS_PROTO_CACHE
 
 
-async def _send_profile_message(
+def _convos_profile_name(name: str) -> str:
+    trimmed = " ".join((name or "").split()).strip()
+    if not trimmed:
+        return "Tako"
+    return trimmed[:50].strip() or "Tako"
+
+
+def _upsert_profile_metadata_blob(
+    metadata_blob: bytes,
+    *,
+    inbox_id: bytes,
+    display_name: str,
+    avatar_url: str,
+) -> tuple[bytes | None, str | None]:
+    classes = _convos_proto_classes()
+    if classes is None:
+        return None, "protobuf runtime unavailable for Convos metadata"
+    metadata_cls, _profile_cls = classes
+
+    metadata = metadata_cls()
+    if metadata_blob:
+        try:
+            metadata.ParseFromString(metadata_blob)
+        except Exception as exc:  # noqa: BLE001
+            return None, f"ConversationCustomMetadata parse failed: {exc.__class__.__name__}: {exc}"
+
+    profile = None
+    for item in getattr(metadata, "profiles", []):
+        if bytes(getattr(item, "inboxId", b"")) == inbox_id:
+            profile = item
+            break
+    if profile is None:
+        profile = metadata.profiles.add()
+
+    profile.inboxId = inbox_id
+    profile.name = _convos_profile_name(display_name)
+
+    trimmed_avatar = _trim_profile_avatar_url(avatar_url)
+    if trimmed_avatar:
+        profile.image = trimmed_avatar
+        with contextlib.suppress(Exception):
+            profile.ClearField("encryptedImage")
+
+    try:
+        return metadata.SerializeToString(), None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"ConversationCustomMetadata serialize failed: {exc.__class__.__name__}: {exc}"
+
+
+async def _upsert_profile_metadata_for_conversation(
     conversation: object,
     *,
-    message: str,
-    content_type: Any | None,
+    inbox_id: bytes,
+    display_name: str,
+    avatar_url: str,
 ) -> tuple[bool, str | None]:
-    send = getattr(conversation, "send", None)
-    if not callable(send):
-        return False, "conversation.send missing"
-
-    if content_type is not None:
-        for args, kwargs in (
-            ((message, content_type), {}),
-            ((message,), {"content_type": content_type}),
-        ):
-            try:
-                result = send(*args, **kwargs)
-                if inspect.isawaitable(result):
-                    await result
-                return True, None
-            except TypeError:
-                continue
-            except Exception as exc:  # noqa: BLE001
-                return False, f"{exc.__class__.__name__}: {exc}"
-    try:
-        result = send(message)
-        if inspect.isawaitable(result):
-            await result
+    encoded_app_data, read_error = await _read_group_app_data(conversation)
+    if read_error:
+        return False, read_error
+    raw_blob, decode_error = _decode_convos_app_data(encoded_app_data or "")
+    if decode_error:
+        return False, decode_error
+    updated_blob, upsert_error = _upsert_profile_metadata_blob(
+        raw_blob,
+        inbox_id=inbox_id,
+        display_name=display_name,
+        avatar_url=avatar_url,
+    )
+    if updated_blob is None:
+        return False, upsert_error
+    updated_encoded = _encode_convos_app_data(updated_blob)
+    if (encoded_app_data or "").strip() == updated_encoded:
         return True, None
-    except Exception as exc:  # noqa: BLE001
-        return False, f"{exc.__class__.__name__}: {exc}"
+    return await _update_group_app_data(conversation, updated_encoded)
 
 
 async def publish_profile_message(
@@ -749,8 +979,7 @@ async def publish_profile_message(
     include_known_dm_peers: bool = True,
     target_conversation: object | None = None,
 ) -> XmtpProfileBroadcastResult:
-    message = build_profile_message(identity_name, avatar_url)
-    payload_sha256 = hashlib.sha256(message.encode("utf-8")).hexdigest()
+    payload_sha256 = _payload_sha256(identity_name, avatar_url)
     state_path = state_dir / XMTP_PROFILE_BROADCAST_STATE_FILE
     previous_hash, self_sent_at, peer_sent = _read_profile_broadcast_state(state_path)
     if previous_hash != payload_sha256:
@@ -760,44 +989,44 @@ async def publish_profile_message(
     self_sent = False
     peer_sent_count = 0
     errors: list[str] = []
-    content_type = _register_silent_text_codec(client)
+    inbox_id = _client_inbox_id_bytes(client)
+    if not inbox_id:
+        errors.append("client inbox_id unavailable for Convos appData profile upsert")
     now_stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
 
-    if include_self_dm and not self_sent_at:
-        dm = await _open_self_dm(client)
-        if dm is not None:
-            ok, error = await _send_profile_message(dm, message=message, content_type=content_type)
-            if ok:
-                self_sent = True
-                self_sent_at = now_stamp
-            elif error:
-                errors.append(f"self-dm: {error}")
+    async def upsert(conversation: object, *, label: str) -> None:
+        nonlocal peer_sent_count
+        key = _conversation_state_key(conversation)
+        if not key:
+            errors.append(f"{label}: missing stable conversation key")
+            return
+        if key in peer_sent:
+            return
+        if not inbox_id:
+            return
+        ok, error = await _upsert_profile_metadata_for_conversation(
+            conversation,
+            inbox_id=inbox_id,
+            display_name=identity_name,
+            avatar_url=avatar_url,
+        )
+        if ok:
+            peer_sent[key] = now_stamp
+            peer_sent_count += 1
+            return
+        if error:
+            errors.append(f"{label}: {error}")
 
-    target_peer = _coerce_nonempty_string(getattr(target_conversation, "peer_inbox_id", None))
-    if target_conversation is not None and target_peer:
-        peer_key = target_peer.lower()
-        if peer_key not in peer_sent:
-            ok, error = await _send_profile_message(target_conversation, message=message, content_type=content_type)
-            if ok:
-                peer_sent[peer_key] = now_stamp
-                peer_sent_count += 1
-            elif error:
-                errors.append(f"peer:{peer_key}: {error}")
+    if target_conversation is not None:
+        await upsert(target_conversation, label="target-conversation")
 
     if include_known_dm_peers:
-        for dm in await _list_dm_conversations(client):
-            peer = _coerce_nonempty_string(getattr(dm, "peer_inbox_id", None))
-            if not peer:
-                continue
-            peer_key = peer.lower()
-            if peer_key in peer_sent:
-                continue
-            ok, error = await _send_profile_message(dm, message=message, content_type=content_type)
-            if ok:
-                peer_sent[peer_key] = now_stamp
-                peer_sent_count += 1
-            elif error:
-                errors.append(f"peer:{peer_key}: {error}")
+        for group in await _list_group_conversations(client):
+            await upsert(group, label="group")
+
+    if include_self_dm and not self_sent_at and peer_sent_count > 0:
+        self_sent = True
+        self_sent_at = now_stamp
 
     _write_profile_broadcast_state(
         state_path,

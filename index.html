@@ -785,6 +785,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
               <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, and pi OAuth inventory.</li>
               <li>Supports assisted pi login in-app: <code>inference login</code> relays prompts and accepts operator responses via <code>inference login answer &lt;text&gt;</code>; <code>inference login force</code> forces a fresh re-auth even when stale auth is detected as present.</li>
+              <li>Workspace pi auth sync refreshes from newer local <code>~/.pi</code> auth profiles and does not overwrite an existing workspace <code>openai-codex</code> OAuth entry with Codex-imported tokens.</li>
               <li>When inference fails with OpenAI refresh-token errors, fallback replies include non-inference recovery steps (<code>inference login force</code>, <code>inference login answer &lt;text&gt;</code>, <code>inference refresh</code>, <code>inference auth</code>), and XMTP chat attempts auto-repair first.</li>
               <li>Pins inference subprocess temp output and <code>TMPDIR/TMP/TEMP</code> to <code>.tako/tmp/</code> (workspace-local only).</li>
               <li>Applies pi prompt guards before invocation: wraps oversized lines and trims over-budget prompts to avoid splitter chunk-limit failures.</li>

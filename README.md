@@ -8,6 +8,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
 - Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`), `inference login force` can re-auth even when a stale token profile already exists, and startup auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
+- Workspace pi auth sync now refreshes from newer local `~/.pi` auth profiles and no longer overwrites an existing workspace `openai-codex` OAuth entry with Codex-imported tokens.
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`

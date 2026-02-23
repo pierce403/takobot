@@ -2885,23 +2885,46 @@ def _ensure_workspace_pi_auth(agent_dir: Path) -> list[str]:
     notes: list[str] = []
     target = agent_dir / "auth.json"
     home = Path.home()
-    if not target.exists():
-        candidates = (
-            home / ".pi" / "agent" / "auth.json",
-            home / ".pi" / "auth.json",
-        )
-        for candidate in candidates:
-            if not candidate.exists():
-                continue
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(candidate.read_text(encoding="utf-8"), encoding="utf-8")
-                with contextlib.suppress(Exception):
-                    os.chmod(target, 0o600)
-                notes.append(f"synced workspace pi auth from `{_tilde_path(candidate)}`")
-                break
-            except Exception:
-                continue
+    candidates = (
+        home / ".pi" / "agent" / "auth.json",
+        home / ".pi" / "auth.json",
+    )
+    target_exists = target.exists()
+    target_payload = _read_json(target)
+    target_has_auth = _has_pi_auth(target_payload)
+    target_mtime_ns = _safe_mtime_ns(target)
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        candidate_payload = _read_json(candidate)
+        if not _has_pi_auth(candidate_payload):
+            continue
+        candidate_mtime_ns = _safe_mtime_ns(candidate)
+        should_sync = False
+        reason = ""
+        if not target_exists:
+            should_sync = True
+            reason = f"synced workspace pi auth from `{_tilde_path(candidate)}`"
+        elif not target_has_auth:
+            should_sync = True
+            reason = f"repaired workspace pi auth from `{_tilde_path(candidate)}`"
+        elif candidate_mtime_ns > target_mtime_ns:
+            should_sync = True
+            reason = f"refreshed workspace pi auth from newer `{_tilde_path(candidate)}`"
+        if not should_sync:
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(candidate.read_text(encoding="utf-8"), encoding="utf-8")
+            with contextlib.suppress(Exception):
+                os.chmod(target, 0o600)
+            notes.append(reason)
+            target_exists = True
+            target_has_auth = True
+            target_mtime_ns = max(target_mtime_ns, candidate_mtime_ns)
+            break
+        except Exception:
+            continue
 
     sync_note = _sync_codex_oauth_into_pi_auth(target, home=home)
     if sync_note:
@@ -2919,6 +2942,11 @@ def _sync_codex_oauth_into_pi_auth(target: Path, *, home: Path) -> str:
     existing_doc: dict[str, Any] = existing_payload if isinstance(existing_payload, dict) else {}
     existing_entry = existing_doc.get("openai-codex")
     existing_oauth = existing_entry if isinstance(existing_entry, dict) else None
+
+    # Do not overwrite an existing workspace openai-codex OAuth entry with local Codex
+    # import data; workspace/PI login flow should remain the source of truth once present.
+    if existing_oauth is not None and _pi_oauth_entry_complete(existing_oauth):
+        return ""
 
     changed = existing_oauth is None
     if existing_oauth is not None:
@@ -3077,6 +3105,19 @@ def _coerce_epoch_ms(value: Any) -> int:
     if stamp < 10_000_000_000:
         return int(stamp * 1000)
     return int(stamp)
+
+
+def _safe_mtime_ns(path: Path) -> int:
+    try:
+        return int(path.stat().st_mtime_ns)
+    except Exception:
+        return 0
+
+
+def _pi_oauth_entry_complete(entry: dict[str, Any]) -> bool:
+    access = str(entry.get("access") or "").strip()
+    refresh = str(entry.get("refresh") or "").strip()
+    return bool(access and refresh)
 
 
 def _has_pi_auth(payload: dict[str, Any] | list[Any] | None) -> bool:

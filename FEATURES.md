@@ -130,6 +130,7 @@
   - Runtime and `doctor`-detected problems are converted into committed follow-up tasks under `tasks/` (deduped by issue key).
   - `doctor` auto-runs inference repair (workspace pi runtime/auth sync) before offline diagnostics (CLI version/help probes + recent inference-error scan from `.tako/state/events.jsonl`).
   - If local Codex OAuth tokens exist (`~/.codex/auth.json`), startup/refresh syncs them into `.tako/pi/agent/auth.json` as `openai-codex` for pi inference readiness.
+  - Workspace pi auth sync now refreshes from newer `~/.pi` auth profiles when available, and Codex OAuth import no longer overwrites an existing workspace `openai-codex` OAuth entry.
   - TUI shows an animated mind-state indicator while Tako is thinking/responding (status bar, sidebar panels, stream header, octopus panel).
   - Default chat prompts encode explicit world-curiosity guidance so Tako asks follow-ups and seeks evidence when uncertain.
   - Chat prompts include a bounded `SOUL.md` excerpt (`soul_identity_boundaries=`) so identity/boundary policy is always in-model for both local TUI and XMTP chat turns.

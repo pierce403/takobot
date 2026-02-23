@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Workspace pi auth sync now prefers fresh `~/.pi` and stops clobbering existing openai-codex entries
+
+- What happened: operators could complete pi/OpenAI auth in CLI, but Takobot could keep using stale workspace credentials because workspace auth only copied from `~/.pi` when missing, and Codex OAuth import could overwrite an existing workspace `openai-codex` token set.
+- Fix: workspace pi auth sync now refreshes from newer `~/.pi` auth files, and Codex OAuth import only fills missing/incomplete `openai-codex` data instead of overwriting an existing complete workspace entry.
+- Prevention: keep workspace auth as source of truth once populated, treat newer `~/.pi` auth as a refresh signal, and cover both flows with runtime auth-sync unit tests.
+
 ### 2026-02-23 — Added `exec` alias and proactive inference auto-repair in XMTP chat fallback
 
 - What happened: operator workflows over XMTP were relying on `run` only, and daemon chat fallback could return immediately when inference runtime was not ready without first attempting repair in that turn.

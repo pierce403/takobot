@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -461,6 +462,95 @@ class TestInferencePiRuntime(unittest.TestCase):
             self.assertEqual("acct_123", codex_entry.get("accountId"))
             self.assertGreater(int(codex_entry.get("expires", 0)), 0)
             self.assertTrue(any("Codex OAuth session" in note for note in notes))
+
+    def test_workspace_pi_auth_refreshes_from_newer_home_profile(self) -> None:
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            source = home / ".pi" / "agent" / "auth.json"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(
+                json.dumps(
+                    {
+                        "openai-codex": {
+                            "type": "oauth",
+                            "access": "fresh-access",
+                            "refresh": "fresh-refresh",
+                            "expires": 1737000000000,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            agent_dir = Path(tmp) / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            target = agent_dir / "auth.json"
+            target.write_text(
+                json.dumps(
+                    {
+                        "openai-codex": {
+                            "type": "oauth",
+                            "access": "stale-access",
+                            "refresh": "stale-refresh",
+                            "expires": 1736000000000,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            now = int(datetime.now(tz=timezone.utc).timestamp())
+            os.utime(target, (now - 120, now - 120))
+            os.utime(source, (now, now))
+
+            with patch("takobot.inference.Path.home", return_value=home):
+                notes = _ensure_workspace_pi_auth(agent_dir)
+
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual("fresh-refresh", payload["openai-codex"]["refresh"])
+            self.assertTrue(any("refreshed workspace pi auth from newer" in note for note in notes))
+
+    def test_workspace_pi_auth_keeps_existing_openai_entry_when_codex_import_differs(self) -> None:
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "tokens": {
+                            "access_token": "codex-access-token",
+                            "refresh_token": "codex-refresh-token",
+                            "account_id": "acct_codex",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            agent_dir = Path(tmp) / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            target = agent_dir / "auth.json"
+            target.write_text(
+                json.dumps(
+                    {
+                        "openai-codex": {
+                            "type": "oauth",
+                            "access": "workspace-access",
+                            "refresh": "workspace-refresh",
+                            "expires": 1737000000000,
+                            "accountId": "acct_workspace",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("takobot.inference.Path.home", return_value=home):
+                notes = _ensure_workspace_pi_auth(agent_dir)
+
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual("workspace-refresh", payload["openai-codex"]["refresh"])
+            self.assertFalse(any("Codex OAuth session" in note for note in notes))
 
     def test_auto_repair_runtime_returns_split_actions(self) -> None:
         with patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value="step one | step two"):

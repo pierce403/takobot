@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Pi legacy `tools/` migration prompts are auto-remediated before inference
+
+- What happened: pi runtime started pausing with `Press any key to continue...` when deprecated custom `tools/` directories were present (global or project-local), which blocked non-interactive Takobot inference.
+- Fix: capability sync now targets `extensions/` (with workspace legacy `tools/` fallback), removes legacy `tools/` symlink mappings, and migrates project `.pi/tools` custom entries into `.pi/extensions` before inference runs.
+- Prevention: keep pi capability sync aligned with upstream extension-system migrations and cover legacy tools-remediation behavior with inference runtime unit tests.
+
 ### 2026-02-23 — Pi inference now fast-fails interactive prompts in non-interactive runs
 
 - What happened: some pi runtime states emitted interactive CLI prompts (for example `Press any key to continue...`) during non-interactive inference calls, causing stream turns to stall until timeout and then fail over noisily.

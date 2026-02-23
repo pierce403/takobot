@@ -829,6 +829,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
               <li>If pi stream mode fails (for example unsupported stream-json or thinking flags), inference now auto-falls back to sync pi execution instead of failing the turn immediately.</li>
               <li>Pi inference subprocesses are forced non-interactive (<code>stdin=DEVNULL</code>, <code>CI=1</code>), and interactive prompts (for example <code>Press any key to continue...</code>) now fail fast instead of hanging until timeout.</li>
+              <li>Pi capability sync now remediates deprecated legacy <code>tools/</code> mappings into <code>extensions/</code> locations (global agent + project <code>.pi/</code>) so migration prompts do not block inference.</li>
               <li>Uses XMTP typing indicators for outbound replies when supported by the installed XMTP SDK/runtime.</li>
               <li>When paired, startup sends the operator a XMTP "back online" ping with a quick status snapshot (version/stage/inference/jobs/tasks/address).</li>
               <li>On XMTP startup/rebuild/pairing/name updates, Tako verifies profile metadata against identity when read APIs are available, repairs mismatches when update APIs are available, and when writes are unavailable upserts Convos-compatible profile metadata in conversation <code>group.appData</code> (protobuf <code>ConversationCustomMetadata</code>) rather than sending chat-message JSON; deterministic avatar/cache files are written at <code>.tako/state/xmtp-avatar.svg</code>, <code>.tako/state/xmtp-profile.json</code>, and <code>.tako/state/xmtp-profile-broadcast.json</code>.</li>
@@ -869,7 +870,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>
               <li><code>doctor</code> auto-runs inference repair first (workspace pi runtime/auth), then runs offline diagnostics (provider CLI probes + recent inference error scan) without needing inference.</li>
               <li>Starter skills include OpenClaw top-download capabilities, prioritized <code>skill-creator</code> + <code>tool-creator</code> + <code>mcporter-mcp</code>, and an <code>agent-cli-inferencing</code> guide that nudges toward <code>@mariozechner/pi-ai</code>.</li>
-              <li>Pi chat inference runs with tools/skills/extensions enabled and can use workspace <code>skills/</code> + <code>tools/</code> directly.</li>
+              <li>Pi chat inference runs with tools/skills/extensions enabled and uses workspace <code>skills/</code> plus <code>extensions/</code> (legacy <code>tools/</code> fallback) in pi runtime context.</li>
               <li>Workspace ships standard web tool names under <code>tools/</code>: <code>web_search</code> (discovery) and <code>web_fetch</code> (source extraction, optional Playwright rendering).</li>
               <li>Plain-text XMTP messages are treated as chat (inference-backed when available); command-style messages route to command handlers.</li>
               <li>Terminal remains a local cockpit for status/logs/safe mode, plain-text chat, and local operator configuration commands.</li>

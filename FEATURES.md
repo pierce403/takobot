@@ -108,6 +108,7 @@
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
   - Pi stream inference now auto-falls back to sync pi execution when stream-mode flags are unsupported by the installed CLI (for example stream-json/thinking flag incompatibilities).
   - Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`); if CLI output asks for interactive input (for example `Press any key to continue...`), stream mode fails fast and skips sync fallback retry loops.
+  - Pi capability sync now remediates deprecated legacy `tools/` mappings by moving/retargeting custom entries into `extensions/` locations (global agent + project `.pi/`) before inference.
   - Inference fallback copy now detects OpenAI refresh-token failures and gives explicit non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`).
   - XMTP chat now attempts automatic inference runtime repair before returning fallback-only replies.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
@@ -152,7 +153,7 @@
   - Local `config` command explains `tako.toml` options and current values.
   - Runtime auto-seeds an OpenClaw-informed starter skill pack into `skills/` (auto-enabled), including `skill-creator`, `tool-creator`, `mcporter-mcp`, and `agent-cli-inferencing` (pi-ai nudge).
   - Runtime auto-enables installed extensions so operator-approved tools/skills are immediately available.
-  - Pi inference runs with tools/extensions/skills enabled and uses workspace `skills/` + `tools/` via the pi agent context.
+  - Pi inference runs with tools/extensions/skills enabled and uses workspace `skills/` plus `extensions/` (legacy `tools/` fallback) via the pi agent context.
   - `workspace.name` in `tako.toml` is treated as the bot identity name and kept synced on rename flows.
   - Auto-update policy is configurable in `tako.toml` under `[updates].auto_apply` (default `true`).
   - When auto-update is enabled and a package update is detected, app mode applies the update and restarts itself.

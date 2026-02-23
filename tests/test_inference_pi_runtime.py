@@ -27,6 +27,7 @@ from takobot.inference import (
     _pi_node_available,
     _provider_env,
     _run_pi,
+    _sync_workspace_agent_capabilities,
     _workspace_node_bin_dir,
     auto_repair_inference_runtime,
     discover_inference_runtime,
@@ -150,6 +151,49 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertEqual(str(nvm_dir), env["NVM_DIR"])
         self.assertEqual(str(agent_dir), env["PI_CODING_AGENT_DIR"])
         self.assertEqual("1", env["CI"])
+
+    def test_sync_workspace_agent_capabilities_moves_legacy_tools_symlink_to_extensions(self) -> None:
+        if os.name == "nt":
+            self.skipTest("legacy tools symlink migration test is not reliable on Windows")
+
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "skills").mkdir(parents=True, exist_ok=True)
+            (workspace / "tools").mkdir(parents=True, exist_ok=True)
+            (workspace / "tools" / "sample.py").write_text("print('ok')\n", encoding="utf-8")
+
+            agent_dir = Path(tmp) / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            (agent_dir / "tools").symlink_to(workspace / "tools", target_is_directory=True)
+
+            with patch("takobot.inference.repo_root", return_value=workspace):
+                _sync_workspace_agent_capabilities(agent_dir)
+
+            self.assertTrue((agent_dir / "skills").exists())
+            self.assertFalse((agent_dir / "tools").exists())
+            self.assertTrue((agent_dir / "extensions").exists())
+            self.assertEqual((workspace / "tools").resolve(), (agent_dir / "extensions").resolve())
+
+    def test_sync_workspace_agent_capabilities_moves_project_pi_tools_entries(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "skills").mkdir(parents=True, exist_ok=True)
+            project_tools = workspace / ".pi" / "tools"
+            project_tools.mkdir(parents=True, exist_ok=True)
+            (project_tools / "legacy-ext.ts").write_text("export default {};\n", encoding="utf-8")
+            (project_tools / "rg").write_text("", encoding="utf-8")
+
+            agent_dir = Path(tmp) / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+
+            with patch("takobot.inference.repo_root", return_value=workspace):
+                _sync_workspace_agent_capabilities(agent_dir)
+
+            self.assertTrue((workspace / ".pi" / "extensions" / "legacy-ext.ts").exists())
+            self.assertFalse((project_tools / "legacy-ext.ts").exists())
+            self.assertTrue((project_tools / "rg").exists())
 
     def test_run_pi_does_not_disable_tools_or_skills(self) -> None:
         runtime = InferenceRuntime(

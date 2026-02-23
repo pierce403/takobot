@@ -72,6 +72,7 @@ _INTERACTIVE_PROMPT_SIGNALS = (
     "press enter to continue",
     "press return to continue",
 )
+_PI_MANAGED_LEGACY_TOOL_NAMES = {"fd", "rg", "fd.exe", "rg.exe"}
 
 StreamEventHook = Callable[[str, str], None]
 
@@ -2807,7 +2808,20 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
 def _sync_workspace_agent_capabilities(agent_dir: Path) -> None:
     workspace = repo_root()
     _sync_agent_link(agent_dir / "skills", workspace / "skills")
-    _sync_agent_link(agent_dir / "tools", workspace / "tools")
+    extensions_source = workspace / "extensions"
+    legacy_tools_source = workspace / "tools"
+    if not extensions_source.exists() and legacy_tools_source.exists():
+        extensions_source = legacy_tools_source
+    _sync_agent_link(agent_dir / "extensions", extensions_source)
+
+    _migrate_legacy_tools_dir(
+        agent_dir / "tools",
+        extensions_dir=agent_dir / "extensions",
+    )
+    _migrate_legacy_tools_dir(
+        workspace / ".pi" / "tools",
+        extensions_dir=workspace / ".pi" / "extensions",
+    )
 
 
 def _sync_agent_link(target: Path, source: Path) -> None:
@@ -2841,6 +2855,58 @@ def _sync_agent_link(target: Path, source: Path) -> None:
             shutil.copy2(source, target)
     except Exception:
         return
+
+
+def _migrate_legacy_tools_dir(tools_dir: Path, *, extensions_dir: Path) -> None:
+    if not tools_dir.exists() and not tools_dir.is_symlink():
+        return
+
+    # Legacy tools symlinks are the main source of interactive migration prompts.
+    # Move the link target to extensions and remove tools symlink.
+    if tools_dir.is_symlink():
+        target: Path | None = None
+        with contextlib.suppress(Exception):
+            target = tools_dir.resolve()
+        if target is not None and target.exists() and not (extensions_dir.exists() or extensions_dir.is_symlink()):
+            _sync_agent_link(extensions_dir, target)
+        with contextlib.suppress(Exception):
+            tools_dir.unlink()
+        return
+
+    if not tools_dir.is_dir():
+        return
+
+    legacy_entries = _legacy_custom_tool_entries(tools_dir)
+    if not legacy_entries:
+        return
+
+    with contextlib.suppress(Exception):
+        extensions_dir.mkdir(parents=True, exist_ok=True)
+    if not extensions_dir.exists():
+        return
+
+    for name in legacy_entries:
+        source = tools_dir / name
+        target = extensions_dir / name
+        if target.exists() or target.is_symlink():
+            continue
+        with contextlib.suppress(Exception):
+            shutil.move(str(source), str(target))
+
+
+def _legacy_custom_tool_entries(tools_dir: Path) -> list[str]:
+    if not tools_dir.exists() or not tools_dir.is_dir():
+        return []
+    names: list[str] = []
+    with contextlib.suppress(Exception):
+        for child in tools_dir.iterdir():
+            name = child.name.strip()
+            if not name or name.startswith("."):
+                continue
+            if name.lower() in _PI_MANAGED_LEGACY_TOOL_NAMES:
+                continue
+            names.append(name)
+    return names
 
 
 def _workspace_tmp_dir() -> Path:

@@ -9,12 +9,13 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi auth bridging: when available, Takobot adopts local-system API keys (environment and common CLI auth files) for pi runtime usage
 - Assisted pi login workflow: `inference login` can relay pi login prompts back to the operator (`inference login answer <text>`), `inference login force` can re-auth even when a stale token profile already exists, and startup auto-syncs Codex OAuth from `~/.codex/auth.json` into `.tako/pi/agent/auth.json`
 - Workspace pi auth sync now refreshes from newer local `~/.pi` auth profiles and no longer overwrites an existing workspace `openai-codex` OAuth entry with Codex-imported tokens.
-- Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
+- Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` plus `extensions/` (with legacy `tools/` fallback mapping) into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
 - Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`), and XMTP chat paths attempt automatic inference runtime repair before fallback.
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`), and interactive prompts like `Press any key to continue...` are detected as fast-fail errors instead of hanging until timeout.
+- Pi capability sync now remediates deprecated legacy `tools/` mappings into `extensions/` locations (global + project `.pi/`) so migration warnings do not block inference.
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts

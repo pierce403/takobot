@@ -111,6 +111,7 @@
   - XMTP chat now attempts automatic inference runtime repair before returning fallback-only replies.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
+  - When paired, startup sends the operator a brief XMTP "back online" status summary (version, stage, inference readiness, jobs/tasks counts, address).
   - XMTP runtime startup/rebuild and pairing/name-update flows run profile verify+repair: when profile read APIs exist, Tako checks whether name/avatar match identity and only applies updates on mismatch; when SDK profile write APIs are missing, Tako upserts Convos-compatible profile metadata in conversation `group.appData` (`ConversationCustomMetadata` protobuf `profiles`) instead of sending chat-message JSON. Deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and detailed sync/broadcast state is recorded at `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Mirrors outbound XMTP replies into the local TUI transcript/activity feed.

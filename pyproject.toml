@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "takobot"
-version = "0.1.74"
+version = "0.1.75"
 description = "Takobot: your highly autonomous and incredibly curious octopus friend"
 readme = "README.md"
 requires-python = ">=3.11"

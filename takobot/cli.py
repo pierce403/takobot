@@ -686,6 +686,31 @@ async def _run_daemon(
     if operator_inbox_id:
         clear_pending(paths.state_dir / "pairing.json")
         _emit_runtime_log("status: paired", hooks=hooks)
+        stage = "unknown"
+        with contextlib.suppress(Exception):
+            cfg, _warn = load_tako_toml(root / "tako.toml")
+            stage = str(cfg.life.stage).strip() or "unknown"
+        jobs_count = 0
+        with contextlib.suppress(Exception):
+            jobs_count = len(list_jobs(paths.state_dir))
+        open_tasks_count = 0
+        with contextlib.suppress(Exception):
+            open_tasks_count = len(prod_tasks.list_tasks(root))
+        startup_message = _startup_presence_message(
+            identity_name=git_identity_name,
+            env=env,
+            address=address,
+            stage=stage,
+            inference_runtime=inference_runtime,
+            jobs_count=jobs_count,
+            open_tasks_count=open_tasks_count,
+        )
+        await _send_operator_startup_presence(
+            client,
+            operator_cfg=operator_cfg,
+            message=startup_message,
+            hooks=hooks,
+        )
     else:
         _emit_runtime_log("status: unpaired", hooks=hooks)
         _emit_runtime_log("pairing: launch `takobot` for terminal-first pairing", hooks=hooks)
@@ -2109,6 +2134,85 @@ def _replace_inference_runtime(target: InferenceRuntime, source: InferenceRuntim
     target.selected_key_source = source.selected_key_source
     target._api_keys = source._api_keys
     target._provider_env_overrides = source._provider_env_overrides
+
+
+def _startup_presence_message(
+    *,
+    identity_name: str,
+    env: str,
+    address: str,
+    stage: str,
+    inference_runtime: InferenceRuntime,
+    jobs_count: int,
+    open_tasks_count: int,
+) -> str:
+    display_name = _canonical_identity_name(identity_name)
+    provider = inference_runtime.selected_provider or "none"
+    provider_status = inference_runtime.statuses.get(provider) if provider != "none" else None
+    if provider_status is not None:
+        inference_line = (
+            f"{provider} ready={'yes' if provider_status.ready else 'no'} "
+            f"auth={provider_status.auth_kind}"
+        )
+    else:
+        inference_line = "none ready=no auth=none"
+    return (
+        f"{display_name} is back online.\n"
+        "quick state:\n"
+        f"- version: {__version__}\n"
+        f"- env: {env}\n"
+        f"- stage: {stage}\n"
+        f"- inference: {inference_line}\n"
+        f"- jobs: {max(0, int(jobs_count))}\n"
+        f"- open tasks: {max(0, int(open_tasks_count))}\n"
+        f"- address: {address}\n"
+        "Reply `status` for full runtime details."
+    )
+
+
+async def _send_operator_startup_presence(
+    client,
+    *,
+    operator_cfg: dict[str, object] | None,
+    message: str,
+    hooks: RuntimeHooks | None,
+) -> bool:
+    operator_inbox_id = get_operator_inbox_id(operator_cfg if isinstance(operator_cfg, dict) else None)
+    if not operator_inbox_id:
+        return False
+    text = " ".join((message or "").splitlines()).strip()
+    if not text:
+        return False
+
+    recipients: list[tuple[str, str]] = []
+    operator_address_raw = ""
+    if isinstance(operator_cfg, dict):
+        raw = operator_cfg.get("operator_address")
+        if isinstance(raw, str):
+            operator_address_raw = raw.strip()
+    if operator_address_raw:
+        recipients.append(("address", operator_address_raw))
+    recipients.append(("inbox_id", operator_inbox_id))
+
+    seen: set[str] = set()
+    for label, recipient in recipients:
+        if not recipient or recipient in seen:
+            continue
+        seen.add(recipient)
+        try:
+            raw_convo = await client.conversations.new_dm(recipient)
+            convo = _ConversationWithTyping(raw_convo, hooks=hooks)
+            await convo.send(message)
+            _emit_runtime_log(f"startup presence sent to operator via {label}", hooks=hooks)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            _emit_runtime_log(
+                f"startup presence send via {label} failed: {_summarize_stream_error(exc)}",
+                level="warn",
+                stderr=True,
+                hooks=hooks,
+            )
+    return False
 
 
 async def _attempt_inference_auto_recovery(

@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Paired startup now sends operator "back online" XMTP status ping
+
+- What happened: when Tako restarted in paired mode, operators had to infer liveness manually from silence unless they sent a prompt first.
+- Fix: daemon startup now sends a best-effort operator DM on XMTP with quick runtime state (version, stage, inference readiness, jobs/tasks counts, and wallet address), with address-first then inbox-id fallback recipient resolution.
+- Prevention: keep operator liveness signaling explicit on paired startup and cover message composition/send fallback behavior with CLI resilience tests.
+
 ### 2026-02-23 — Workspace pi auth sync now prefers fresh `~/.pi` and stops clobbering existing openai-codex entries
 
 - What happened: operators could complete pi/OpenAI auth in CLI, but Takobot could keep using stale workspace credentials because workspace auth only copied from `~/.pi` when missing, and Codex OAuth import could overwrite an existing workspace `openai-codex` token set.

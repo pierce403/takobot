@@ -20,6 +20,8 @@ from takobot.cli import (
     _notify_update_applied,
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
+    _send_operator_startup_presence,
+    _startup_presence_message,
 )
 from takobot.inference import InferenceProviderStatus, InferenceRuntime
 
@@ -51,6 +53,21 @@ class _DummyConversation:
         else:
             self.sent.append((content, content_type))
         return {"ok": True}
+
+
+class _DummyConversationFactory:
+    def __init__(self, *, fail_for: set[str] | None = None) -> None:
+        self.fail_for = set(fail_for or set())
+        self.recipients: list[str] = []
+        self.created: list[_DummyConversation] = []
+
+    async def new_dm(self, recipient: str):
+        self.recipients.append(recipient)
+        if recipient in self.fail_for:
+            raise RuntimeError(f"cannot open dm for {recipient}")
+        convo = _DummyConversation()
+        self.created.append(convo)
+        return convo
 
 
 class TestCliXmtpResilience(unittest.TestCase):
@@ -274,6 +291,40 @@ class TestCliXmtpResilience(unittest.TestCase):
                     )
                 )
         self.assertEqual("recovered reply", reply)
+
+    def test_startup_presence_message_contains_state_summary(self) -> None:
+        message = _startup_presence_message(
+            identity_name="ProTako",
+            env="production",
+            address="0xabc123",
+            stage="adult",
+            inference_runtime=self._pi_runtime(),
+            jobs_count=3,
+            open_tasks_count=5,
+        )
+        self.assertIn("ProTako is back online.", message)
+        self.assertIn("version:", message)
+        self.assertIn("stage: adult", message)
+        self.assertIn("inference: pi ready=yes", message)
+        self.assertIn("jobs: 3", message)
+        self.assertIn("open tasks: 5", message)
+
+    def test_send_operator_startup_presence_prefers_address_then_falls_back_to_inbox(self) -> None:
+        factory = _DummyConversationFactory(fail_for={"0xoperator"})
+        client = SimpleNamespace(conversations=factory)
+        with patch("takobot.cli.set_typing_indicator", return_value=False):
+            sent = asyncio.run(
+                _send_operator_startup_presence(
+                    client,
+                    operator_cfg={"operator_inbox_id": "inbox-123", "operator_address": "0xoperator"},
+                    message="Takobot is back online.",
+                    hooks=RuntimeHooks(emit_console=False),
+                )
+            )
+        self.assertTrue(sent)
+        self.assertEqual(["0xoperator", "inbox-123"], factory.recipients)
+        self.assertEqual(1, len(factory.created))
+        self.assertEqual(["Takobot is back online."], factory.created[0].sent)
 
     def test_notify_update_applied_supports_sync_callback(self) -> None:
         calls: list[str] = []

@@ -11,7 +11,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi chat inference keeps tools/skills/extensions enabled and links workspace `skills/` + `tools/` into the pi agent runtime context
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
-- Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`)
+- Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`), and XMTP chat paths attempt automatic inference runtime repair before fallback.
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
 - Inference execution gate so first model call starts on the first interactive chat turn
@@ -29,10 +29,10 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Runtime problem capture: detected warnings/errors are converted into committed `tasks/` items for follow-up
 - Animated "mind" indicator in the TUI (status/sidebar/stream/octopus panel) while Tako is thinking or responding
 - Auto-update setting (`tako.toml` → `[updates].auto_apply = true` by default) with in-app apply + self-restart when a new package release is detected
-- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) plus plain-text chat replies
+- XMTP control-channel handling with command router (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `exec`, `reimprint`) plus plain-text chat replies
 - XMTP `update` now requests a terminal-app restart automatically when updates are applied in a paired TUI-hosted runtime (daemon-only mode still reports manual restart guidance)
 - Natural-language scheduling for recurring jobs (`every day at 3pm ...`) with persisted job state at `.tako/state/cron/jobs.json`
-- Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>`), plus standard autonomous web tools in `tools/`: `web_search` and `web_fetch`
+- Built-in operator tools for webpage reads (`web <url>`) and local shell commands (`run <command>` or `exec <command>`), plus standard autonomous web tools in `tools/`: `web_search` and `web_fetch`
 - Code work isolation: shell command execution runs in `code/` (git-ignored) so repo clones and code sandboxes stay out of workspace history
 - Built-in starter skills are auto-seeded into `skills/` and auto-enabled: OpenClaw top skills, `skill-creator`, `tool-creator`, MCP-focused `mcporter-mcp`, and an `agent-cli-inferencing` guide that nudges toward `@mariozechner/pi-ai`
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators
@@ -94,7 +94,7 @@ Pairing flow:
   - XMTP handle yes/no (pair now or continue local-only)
 - Identity naming accepts freeform input and uses inference to extract a clean name (for example, “your name can be SILLYTAKO”).
 - Rename handling in running chat is inference-classified (not phrase-gated): if you request a rename without giving the target name, Tako asks for the exact replacement.
-- After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `reimprint`) while the terminal keeps full local operator control.
+- After pairing, XMTP adds remote operator control for identity/config/tools/routines (`help`, `status`, `doctor`, `config`, `jobs`, `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`, `update`, `web`, `run`, `exec`, `reimprint`) while the terminal keeps full local operator control.
 
 Productivity (GTD + PARA):
 

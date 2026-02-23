@@ -131,6 +131,7 @@ CHAT_INFERENCE_TIMEOUT_S = 75.0
 CHAT_REPLY_MAX_CHARS = 700
 CHAT_CONTEXT_USER_TURNS = 12
 CHAT_CONTEXT_MAX_CHARS = 8_000
+INFERENCE_RECOVERY_COOLDOWN_S = 20.0
 UPDATE_CHECK_INITIAL_DELAY_S = 20.0
 UPDATE_CHECK_INTERVAL_S = 6 * 60 * 60
 XMTP_TYPING_LEAD_S = 0.35
@@ -139,6 +140,8 @@ XMTP_SEND_RETRY_BASE_S = 0.4
 XMTP_POLL_ERROR_REBUILD_THRESHOLD = 4
 XMTP_STREAM_CRASH_REBUILD_THRESHOLD = 2
 XMTP_CLIENT_REBUILD_COOLDOWN_S = 30.0
+
+_inference_recovery_last_attempt_at = 0.0
 
 
 @dataclass(frozen=True)
@@ -1590,23 +1593,24 @@ async def _handle_incoming_message(
         title_line = f"title: {result.title}\n" if result.title else ""
         await convo.send(f"web: {result.url}\n{title_line}{result.text}")
         return
-    if cmd == "run":
+    if cmd in {"run", "exec"}:
+        tool_label = "exec" if cmd == "exec" else "run"
         command = rest.strip()
         if not command:
-            await convo.send("Usage: `run <shell command>`")
+            await convo.send("Usage: `run <shell command>` (alias: `exec <shell command>`)")
             return
         workdir = ensure_code_dir(repo_root())
         result = await asyncio.to_thread(run_local_command, command, cwd=workdir)
         append_daily_note(
             daily_root(),
             date.today(),
-            f"Operator ran local command via XMTP in `{workdir}`: `{command}` (exit={result.exit_code})",
+            f"Operator {tool_label} local command via XMTP in `{workdir}`: `{command}` (exit={result.exit_code})",
         )
         if not result.ok and result.error:
             await convo.send(f"command failed before execution: {result.error}")
             return
         await convo.send(
-            f"run: {result.command}\n"
+            f"{tool_label}: {result.command}\n"
             f"cwd: {workdir}\n"
             f"exit_code: {result.exit_code}\n"
             f"{result.output}"
@@ -2107,6 +2111,32 @@ def _replace_inference_runtime(target: InferenceRuntime, source: InferenceRuntim
     target._provider_env_overrides = source._provider_env_overrides
 
 
+async def _attempt_inference_auto_recovery(
+    inference_runtime: InferenceRuntime,
+    *,
+    hooks: RuntimeHooks | None,
+    force: bool = False,
+) -> bool:
+    global _inference_recovery_last_attempt_at
+
+    now = time.monotonic()
+    if not force and (now - _inference_recovery_last_attempt_at) < INFERENCE_RECOVERY_COOLDOWN_S:
+        return False
+
+    _inference_recovery_last_attempt_at = now
+    _emit_runtime_log("inference auto-repair: starting", level="info", hooks=hooks)
+    repair_notes = await asyncio.to_thread(auto_repair_inference_runtime)
+    for note in repair_notes[:4]:
+        _emit_runtime_log(f"inference auto-repair: {note}", level="info", hooks=hooks)
+    _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+    _emit_runtime_log(
+        f"inference auto-repair: ready={'yes' if inference_runtime.ready else 'no'}",
+        level="info",
+        hooks=hooks,
+    )
+    return True
+
+
 def _help_text() -> str:
     return (
         "takobot commands:\n"
@@ -2132,6 +2162,7 @@ def _help_text() -> str:
         "- update (or `update check`)\n"
         "- web <https://...>\n"
         "- run <shell command> (runs in `code/`)\n"
+        "- exec <shell command> (alias for `run`, runs in `code/`)\n"
         "- reimprint (operator-only)\n"
         "- plain text chat (inference-backed when available)\n"
     )
@@ -2173,7 +2204,7 @@ def _looks_like_command(text: str) -> bool:
         return True
     if cmd == "update":
         return tail_lower in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
-    if cmd in {"web", "run"}:
+    if cmd in {"web", "run", "exec"}:
         return tail != ""
     if cmd == "reimprint":
         return True
@@ -2220,7 +2251,14 @@ async def _chat_reply(
         error_log_path=str(inference_error_log_path()),
     )
     if not inference_runtime.ready:
-        return fallback
+        repair_attempted = await _attempt_inference_auto_recovery(inference_runtime, hooks=hooks)
+        if not inference_runtime.ready:
+            return _fallback_chat_reply(
+                is_operator=is_operator,
+                operator_paired=operator_paired,
+                error_log_path=str(inference_error_log_path()),
+                auto_repair_attempted=repair_attempted,
+            )
 
     workspace_root = repo_root()
     identity_name = _preferred_git_identity_name(workspace_root)
@@ -2300,16 +2338,14 @@ async def _chat_reply(
     except Exception as exc:  # noqa: BLE001
         first_error = _summarize_stream_error(exc)
         _emit_runtime_log(f"inference chat failed: {first_error}", level="warn", hooks=hooks)
-        repair_notes = await asyncio.to_thread(auto_repair_inference_runtime)
-        for note in repair_notes[:4]:
-            _emit_runtime_log(f"inference repair: {note}", level="info", hooks=hooks)
-        _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+        repair_attempted = await _attempt_inference_auto_recovery(inference_runtime, hooks=hooks, force=True)
         if not inference_runtime.ready:
             return _fallback_chat_reply(
                 is_operator=is_operator,
                 operator_paired=operator_paired,
                 last_error=first_error,
                 error_log_path=str(inference_error_log_path()),
+                auto_repair_attempted=repair_attempted,
             )
         try:
             provider, reply = await _infer_once()
@@ -2321,6 +2357,7 @@ async def _chat_reply(
                 operator_paired=operator_paired,
                 last_error=retry_error,
                 error_log_path=str(inference_error_log_path()),
+                auto_repair_attempted=repair_attempted,
             )
 
     cleaned = _clean_chat_reply(reply)
@@ -2464,15 +2501,18 @@ def _fallback_chat_reply(
     operator_paired: bool,
     last_error: str = "",
     error_log_path: str = "",
+    auto_repair_attempted: bool = False,
 ) -> str:
     cleaned_error = " ".join((last_error or "").split()).strip()
     cleaned_log = " ".join((error_log_path or "").split()).strip()
     recovery_lines = inference_reauth_guidance_lines(cleaned_error, local_terminal=False)
     if is_operator:
         message = (
-            "I can chat here. Commands: help, status, doctor, update, web, run, reimprint. "
+            "I can chat here. Commands: help, status, doctor, update, web, run, exec, reimprint. "
             "Inference is unavailable right now, so I'm replying in fallback mode."
         )
+        if auto_repair_attempted:
+            message += " I already attempted automatic inference recovery in this runtime."
         if cleaned_error:
             message += f" Last inference error: {cleaned_error}."
         if recovery_lines:

@@ -56,6 +56,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertTrue(_looks_like_local_command("jobs list"))
         self.assertTrue(_looks_like_local_command("upgrade check"))
         self.assertTrue(_looks_like_local_command("dose o 0.4"))
+        self.assertTrue(_looks_like_local_command("exec printf 'ok'"))
         self.assertTrue(_looks_like_local_command("explore"))
         self.assertTrue(_looks_like_local_command("explore ocean biodiversity"))
         self.assertTrue(_looks_like_local_command("/"))
@@ -68,6 +69,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("/jobs", commands)
         self.assertIn("/upgrade", commands)
         self.assertIn("/stats", commands)
+        self.assertIn("/exec", commands)
         self.assertIn("/explore", commands)
 
         dose_items = _slash_command_matches("dose")

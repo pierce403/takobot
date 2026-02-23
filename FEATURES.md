@@ -108,6 +108,7 @@
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
   - Pi stream inference now auto-falls back to sync pi execution when stream-mode flags are unsupported by the installed CLI (for example stream-json/thinking flag incompatibilities).
   - Inference fallback copy now detects OpenAI refresh-token failures and gives explicit non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`).
+  - XMTP chat now attempts automatic inference runtime repair before returning fallback-only replies.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Runs XMTP daemon loop as a background task when paired.
   - XMTP runtime startup/rebuild and pairing/name-update flows run profile verify+repair: when profile read APIs exist, Tako checks whether name/avatar match identity and only applies updates on mismatch; when SDK profile write APIs are missing, Tako upserts Convos-compatible profile metadata in conversation `group.appData` (`ConversationCustomMetadata` protobuf `profiles`) instead of sending chat-message JSON. Deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and detailed sync/broadcast state is recorded at `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`.
@@ -142,6 +143,7 @@
   - Purpose info questions (for example `what is your purpose?`) now return the current purpose text instead of entering the purpose-update path.
   - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
   - Local `run` command executes inside workspace `code/` (git-ignored) for isolated repo clones and code work.
+  - Local `exec` command is an alias for `run` (same `code/` execution context).
   - Local `jobs` command manages recurring schedules (`jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`), and plain-text operator schedule requests can auto-create jobs.
   - Local `web` command appends a daily-log note for traceability of fetched sources.
   - Local `config` command explains `tako.toml` options and current values.
@@ -352,13 +354,13 @@
   - Re-imprinting requires an explicit operator command over XMTP (`reimprint CONFIRM`), then terminal onboarding pairs a new operator.
   - Operator can run `update` over XMTP to perform a guarded fast-forward self-update.
   - When XMTP update applies changes in paired TUI mode, Tako requests a terminal restart after sending the operator response.
-  - Operator can run `web <url>` and `run <command>` over XMTP.
+  - Operator can run `web <url>` and `run <command>`/`exec <command>` over XMTP.
   - Plain-text XMTP messages are handled as chat (inference-backed when available) while command-style messages route to command handlers.
 - **Test Criteria**:
   - [x] `takobot` app mode can complete first pairing without requiring inbound XMTP stream health.
   - [x] Once paired, only the operator inbox can run `status` / `doctor`.
   - [x] Operator can run `update` / `update check` over XMTP and receive result details.
-  - [x] Operator can run `web` / `run` over XMTP and receive output.
+  - [x] Operator can run `web` / `run` / `exec` over XMTP and receive output.
   - [x] Operator plain-text XMTP messages no longer return `Unknown command`; they receive chat replies.
 
 ### Daily logs (`memory/dailies/YYYY-MM-DD.md`)

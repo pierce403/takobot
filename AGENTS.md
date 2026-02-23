@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Added `exec` alias and proactive inference auto-repair in XMTP chat fallback
+
+- What happened: operator workflows over XMTP were relying on `run` only, and daemon chat fallback could return immediately when inference runtime was not ready without first attempting repair in that turn.
+- Fix: added `exec` as a first-class alias of `run` across local TUI + XMTP command detection/help/docs, and updated XMTP chat reply flow to attempt bounded auto-repair (`auto_repair_inference_runtime` + runtime rediscovery) before sending fallback-only responses.
+- Prevention: keep command-surface aliases aligned across app/daemon/docs/tests, and always attempt local runtime repair before asking operator for manual inference reauth.
+
 ### 2026-02-23 — Inference fallback now includes non-inference OpenAI reauth guidance
 
 - What happened: when OpenAI/Codex OAuth refresh tokens expired or were already consumed, fallback chat copy stayed generic and `inference login` could short-circuit on stale "auth-ready" state, leaving operators without a clear offline recovery path.

@@ -204,6 +204,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/upgrade", "Alias for /update"),
     ("/web", "Fetch webpage"),
     ("/run", "Run shell command in code/"),
+    ("/exec", "Alias for /run shell command in code/"),
     ("/install", "Install skill or tool"),
     ("/review", "Review pending installs"),
     ("/enable", "Enable extension"),
@@ -224,6 +225,7 @@ LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
     "doctor",
     "done",
     "dose",
+    "exec",
     "explore",
     "draft",
     "enable",
@@ -2877,7 +2879,7 @@ class TakoTerminalApp(App[None]):
             return
         if cmd in {"help", "h", "?"}:
             self._write_tako(
-                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, explore, jobs, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
+                "local cockpit commands: help, status, stats, health, config, stage, mission, models, dose, explore, jobs, task, tasks, done, morning, outcomes, compress, weekly, promote, inference, doctor, pair, setup, update, upgrade, web, run, exec, install, review pending, enable, draft, extensions, reimprint, copy last, copy transcript, activity, safe on, safe off, stop, resume, quit\n"
                 "inference controls: `inference refresh`, `inference auth`, `inference login`, `inference login force`, `inference provider <auto|pi>`, `inference key list|set|clear`\n"
                 "stage controls: `stage`, `stage show`, `stage set <hatchling|child|teen|adult>`\n"
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
@@ -2885,7 +2887,7 @@ class TakoTerminalApp(App[None]):
                 "jobs controls: `jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`\n"
                 "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/explore`, `/jobs`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
-                "run command cwd: `code/` (git-ignored workspace for cloned repos)"
+                "run/exec command cwd: `code/` (git-ignored workspace for cloned repos)"
             )
             return
 
@@ -4254,14 +4256,15 @@ class TakoTerminalApp(App[None]):
             self._add_activity("tool:web", f"fetched {result.url}")
             return
 
-        if cmd == "run":
+        if cmd in {"run", "exec"}:
+            tool_label = "exec" if cmd == "exec" else "run"
             command = rest.strip()
             if not command:
-                self._write_tako("usage: `run <shell command>`")
+                self._write_tako("usage: `run <shell command>` (alias: `exec <shell command>`)")
                 return
             workdir = self.code_dir or ensure_code_dir(repo_root())
             self._note_live_work(f"running command: {command}")
-            self._add_activity("tool:run", f"executing `{command}`")
+            self._add_activity(f"tool:{tool_label}", f"executing `{command}`")
             previous_indicator = self.indicator
             self._set_indicator("acting")
             try:
@@ -4270,16 +4273,16 @@ class TakoTerminalApp(App[None]):
                 if self.indicator == "acting":
                     self._set_indicator(previous_indicator if previous_indicator != "acting" else "idle")
             if result.error:
-                self._add_activity("tool:run", f"failed: {result.error}")
-                self._write_tako(f"run failed: {result.error}")
+                self._add_activity(f"tool:{tool_label}", f"failed: {result.error}")
+                self._write_tako(f"{tool_label} failed: {result.error}")
                 return
             self._write_tako(
-                f"run: {result.command}\n"
+                f"{tool_label}: {result.command}\n"
                 f"cwd: {workdir}\n"
                 f"exit_code: {result.exit_code}\n"
                 f"{result.output}"
             )
-            self._add_activity("tool:run", f"finished exit={result.exit_code}")
+            self._add_activity(f"tool:{tool_label}", f"finished exit={result.exit_code}")
             return
 
         if cmd == "copy":
@@ -6087,7 +6090,7 @@ def _looks_like_local_command(text: str) -> bool:
         return tail in {"", "check", "status", "dry-run", "dryrun", "help", "?"}
     if cmd == "reimprint":
         return True
-    if cmd in {"web", "run"}:
+    if cmd in {"web", "run", "exec"}:
         return tail != ""
     if cmd == "copy":
         return tail in {"last", "transcript"}

@@ -785,7 +785,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
               <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, and pi OAuth inventory.</li>
               <li>Supports assisted pi login in-app: <code>inference login</code> relays prompts and accepts operator responses via <code>inference login answer &lt;text&gt;</code>; <code>inference login force</code> forces a fresh re-auth even when stale auth is detected as present.</li>
-              <li>When inference fails with OpenAI refresh-token errors, fallback replies include non-inference recovery steps (<code>inference login force</code>, <code>inference login answer &lt;text&gt;</code>, <code>inference refresh</code>, <code>inference auth</code>).</li>
+              <li>When inference fails with OpenAI refresh-token errors, fallback replies include non-inference recovery steps (<code>inference login force</code>, <code>inference login answer &lt;text&gt;</code>, <code>inference refresh</code>, <code>inference auth</code>), and XMTP chat attempts auto-repair first.</li>
               <li>Pins inference subprocess temp output and <code>TMPDIR/TMP/TEMP</code> to <code>.tako/tmp/</code> (workspace-local only).</li>
               <li>Applies pi prompt guards before invocation: wraps oversized lines and trims over-budget prompts to avoid splitter chunk-limit failures.</li>
               <li>
@@ -856,11 +856,11 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 <code>jobs</code>,
                 <code>task</code>/<code>tasks</code>/<code>done</code>,
                 <code>morning</code>/<code>outcomes</code>/<code>compress</code>/<code>weekly</code>/<code>promote</code>,
-                <code>update</code>, <code>web</code>, <code>run</code>, <code>reimprint</code>.
+                <code>update</code>, <code>web</code>, <code>run</code>, <code>exec</code>, <code>reimprint</code>.
               </li>
               <li><code>jobs</code> supports natural-language schedules (for example <code>every day at 3pm run doctor</code>) and persists schedules under <code>.tako/state/cron/jobs.json</code>.</li>
               <li>When `update` is applied over XMTP in paired TUI mode, Tako requests terminal restart automatically after sending the update result.</li>
-              <li><code>run</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
+              <li><code>run</code>/<code>exec</code> command execution uses <code>code/</code> as working directory (git-ignored).</li>
               <li><code>workspace.name</code> in <code>tako.toml</code> is treated as Tako’s identity name and syncs with rename flows.</li>
               <li>Identity rename handling is inference-classified instead of phrase-gated; if no replacement name is provided, Tako asks for the exact target name.</li>
               <li>Use <code>config</code> to get an inline explanation of current <code>tako.toml</code> options/values.</li>

@@ -77,6 +77,29 @@ class TestCliXmtpResilience(unittest.TestCase):
             _api_keys={},
         )
 
+    @staticmethod
+    def _pi_runtime_not_ready() -> InferenceRuntime:
+        status = InferenceProviderStatus(
+            provider="pi",
+            cli_name="pi",
+            cli_path="/usr/bin/pi",
+            cli_installed=True,
+            auth_kind="oauth_or_profile",
+            key_env_var=None,
+            key_source="file:~/.pi/agent/auth.json",
+            key_present=False,
+            ready=False,
+            note="auth missing",
+        )
+        return InferenceRuntime(
+            statuses={"pi": status},
+            selected_provider="pi",
+            selected_auth_kind=status.auth_kind,
+            selected_key_env_var=status.key_env_var,
+            selected_key_source=status.key_source,
+            _api_keys={},
+        )
+
     def test_cli_canonical_identity_name_defaults(self) -> None:
         self.assertEqual("Tako", _canonical_identity_name(""))
         self.assertEqual("ProTako", _canonical_identity_name(" ProTako "))
@@ -116,9 +139,10 @@ class TestCliXmtpResilience(unittest.TestCase):
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("deadline exceeded while sending message")))
         self.assertFalse(_is_retryable_xmtp_error(RuntimeError("invalid inbox id")))
 
-    def test_command_detection_includes_jobs(self) -> None:
+    def test_command_detection_includes_jobs_and_exec(self) -> None:
         self.assertTrue(_looks_like_command("jobs"))
         self.assertTrue(_looks_like_command("jobs add every day at 3pm run doctor"))
+        self.assertTrue(_looks_like_command("exec printf 'ok'"))
         self.assertFalse(_looks_like_command("tell me about octopus habitats"))
 
     def test_operator_fallback_reply_includes_openai_reauth_guidance(self) -> None:
@@ -133,6 +157,15 @@ class TestCliXmtpResilience(unittest.TestCase):
         )
         self.assertIn("inference login force", reply)
         self.assertIn("local terminal", reply)
+        self.assertIn("exec", reply)
+
+    def test_operator_fallback_reply_mentions_auto_repair_attempt(self) -> None:
+        reply = _fallback_chat_reply(
+            is_operator=True,
+            operator_paired=True,
+            auto_repair_attempted=True,
+        )
+        self.assertIn("already attempted automatic inference recovery", reply)
 
     def test_close_xmtp_client_supports_async_and_sync(self) -> None:
         async_client = _DummyAsyncClosable()
@@ -217,6 +250,30 @@ class TestCliXmtpResilience(unittest.TestCase):
         combined = "\n".join(message for _level, message in runtime_logs)
         self.assertIn("pi chat user: hello there", combined)
         self.assertIn("pi chat assistant: assistant reply", combined)
+
+    def test_chat_reply_attempts_auto_repair_when_runtime_not_ready(self) -> None:
+        runtime = self._pi_runtime_not_ready()
+        recovered_runtime = self._pi_runtime()
+        with TemporaryDirectory() as tmp:
+            conversations = ConversationStore(Path(tmp))
+            with (
+                patch("takobot.cli.auto_repair_inference_runtime", return_value=["auth synced from workspace"]),
+                patch("takobot.cli.discover_inference_runtime", return_value=recovered_runtime),
+                patch("takobot.cli.run_inference_prompt_with_fallback", return_value=("pi", "recovered reply")),
+            ):
+                reply = asyncio.run(
+                    _chat_reply(
+                        "hello there",
+                        runtime,
+                        paths=SimpleNamespace(state_dir=Path(tmp) / ".tako" / "state"),
+                        conversations=conversations,
+                        session_key="xmtp:test",
+                        is_operator=True,
+                        operator_paired=True,
+                        hooks=RuntimeHooks(emit_console=False),
+                    )
+                )
+        self.assertEqual("recovered reply", reply)
 
     def test_notify_update_applied_supports_sync_callback(self) -> None:
         calls: list[str] = []

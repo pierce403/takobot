@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-23 — Pi inference now fast-fails interactive prompts in non-interactive runs
+
+- What happened: some pi runtime states emitted interactive CLI prompts (for example `Press any key to continue...`) during non-interactive inference calls, causing stream turns to stall until timeout and then fail over noisily.
+- Fix: inference subprocesses now run with non-interactive stdin (`DEVNULL`) and `CI=1`; stream processing detects interactive prompt lines, terminates the subprocess immediately, and skips stream->sync fallback for this failure class.
+- Prevention: keep non-interactive subprocess guards centralized in inference runners and test interactive-prompt detection paths so regressions fail fast instead of timing out.
+
 ### 2026-02-23 — `run`/`exec` now use workspace root and include workspace pi bins on PATH
 
 - What happened: operator `exec` commands were forced to `code/` and could not resolve `pi`/`pi-ai` binaries, causing misleading "command not found" errors even when inference runtime was installed.

@@ -107,6 +107,7 @@
   - Escalates serious events into Type 2 tasks with depth-aware handling.
   - Type 2 invokes the required pi runtime for model reasoning and falls back to heuristics if pi is unavailable.
   - Pi stream inference now auto-falls back to sync pi execution when stream-mode flags are unsupported by the installed CLI (for example stream-json/thinking flag incompatibilities).
+  - Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`); if CLI output asks for interactive input (for example `Press any key to continue...`), stream mode fails fast and skips sync fallback retry loops.
   - Inference fallback copy now detects OpenAI refresh-token failures and gives explicit non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`).
   - XMTP chat now attempts automatic inference runtime repair before returning fallback-only replies.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).

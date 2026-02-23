@@ -67,6 +67,11 @@ PI_PROMPT_TRUNCATION_MARKER = "\n[... prompt truncated for pi runtime safety ...
 INFERENCE_LOG_MAX_COMMAND_CHARS = 1000
 INFERENCE_LOG_MAX_ARG_CHARS = 180
 _PI_HELP_TEXT_CACHE: dict[str, str] = {}
+_INTERACTIVE_PROMPT_SIGNALS = (
+    "press any key to continue",
+    "press enter to continue",
+    "press return to continue",
+)
 
 StreamEventHook = Callable[[str, str], None]
 
@@ -1495,6 +1500,7 @@ def _safe_help_text(command: str) -> str:
             capture_output=True,
             text=True,
             timeout=6.0,
+            stdin=subprocess.DEVNULL,
         )
     except Exception:
         _PI_HELP_TEXT_CACHE[command] = ""
@@ -1672,6 +1678,10 @@ async def _stream_with_provider(
         try:
             return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event, thinking=thinking)
         except Exception as stream_exc:  # noqa: BLE001
+            if _is_interactive_prompt_failure(str(stream_exc)):
+                if on_event:
+                    on_event("status", "pi stream blocked by interactive prompt; skipping sync fallback.")
+                raise
             if on_event:
                 on_event("status", f"pi stream fallback: {_summarize_error_text(str(stream_exc))}")
             text = await asyncio.to_thread(_run_pi, runtime, prompt, env=env, timeout_s=timeout_s, thinking=thinking)
@@ -2399,6 +2409,7 @@ async def _run_streaming_process(
 ) -> None:
     proc = await asyncio.create_subprocess_exec(
         *cmd,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
@@ -2409,18 +2420,25 @@ async def _run_streaming_process(
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
+    interactive_prompt_line = ""
 
     async def pump(stream: asyncio.StreamReader, handler: Callable[[str], None], sink: list[str]) -> None:
+        nonlocal interactive_prompt_line
         while True:
             raw = await stream.readline()
             if not raw:
                 return
-            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
             if line:
                 sink.append(line)
                 if len(sink) > 80:
                     sink.pop(0)
             handler(line)
+            if line and _looks_like_interactive_prompt_text(line):
+                interactive_prompt_line = line.strip()
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                return
 
     stdout_task = asyncio.create_task(pump(proc.stdout, on_stdout_line, stdout_lines))
     stderr_task = asyncio.create_task(pump(proc.stderr, on_stderr_line, stderr_lines))
@@ -2445,6 +2463,17 @@ async def _run_streaming_process(
                 proc.kill()
         with contextlib.suppress(Exception):
             await proc.wait()
+
+    if interactive_prompt_line:
+        _raise_inference_command_failure(
+            provider=provider,
+            command=cmd,
+            detail=f"inference subprocess blocked on interactive prompt: {interactive_prompt_line}",
+            stdout_text="\n".join(stdout_lines[-20:]),
+            stderr_text="\n".join(stderr_lines[-20:]),
+            timeout_s=timeout_s,
+            phase="stream",
+        )
 
     if proc.returncode != 0:
         _raise_inference_command_failure(
@@ -2609,6 +2638,7 @@ def _run_pi(
             text=True,
             env=env,
             timeout=timeout_s,
+            stdin=subprocess.DEVNULL,
         )
 
     def should_retry_with_minimal(proc: subprocess.CompletedProcess[str]) -> bool:
@@ -2644,6 +2674,18 @@ def _run_pi(
             phase="sync",
         )
 
+    prompt_line = _first_interactive_prompt_line(proc.stdout, proc.stderr)
+    if prompt_line:
+        _raise_inference_command_failure(
+            provider="pi",
+            command=cmd,
+            detail=f"pi requested interactive input during non-interactive inference: {prompt_line}",
+            stdout_text=proc.stdout,
+            stderr_text=proc.stderr,
+            timeout_s=timeout_s,
+            phase="sync",
+        )
+
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
 
@@ -2671,6 +2713,17 @@ def _run_pi(
                     provider="pi",
                     command=retry_cmd,
                     detail=f"pi subprocess spawn failed: {exc}",
+                    timeout_s=timeout_s,
+                    phase="sync",
+                )
+            retry_prompt_line = _first_interactive_prompt_line(retry_proc.stdout, retry_proc.stderr)
+            if retry_prompt_line:
+                _raise_inference_command_failure(
+                    provider="pi",
+                    command=retry_cmd,
+                    detail=f"pi requested interactive input during non-interactive inference: {retry_prompt_line}",
+                    stdout_text=retry_proc.stdout,
+                    stderr_text=retry_proc.stderr,
                     timeout_s=timeout_s,
                     phase="sync",
                 )
@@ -2742,6 +2795,7 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
         _sync_workspace_agent_capabilities(pi_agent_dir)
         _ensure_workspace_pi_auth(pi_agent_dir)
         env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
+        env.setdefault("CI", "1")
         node_bin_dir = _workspace_node_bin_dir()
         if node_bin_dir is not None:
             current_path = env.get("PATH", "")
@@ -2879,6 +2933,33 @@ def _node_major_from_version(raw: str) -> int | None:
     if not token.isdigit():
         return None
     return int(token)
+
+
+def _normalize_status_text(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _looks_like_interactive_prompt_text(value: str) -> bool:
+    normalized = _normalize_status_text(value)
+    if not normalized:
+        return False
+    return any(signal in normalized for signal in _INTERACTIVE_PROMPT_SIGNALS)
+
+
+def _first_interactive_prompt_line(*texts: str) -> str:
+    for text in texts:
+        for raw_line in str(text or "").splitlines():
+            candidate = raw_line.strip()
+            if candidate and _looks_like_interactive_prompt_text(candidate):
+                return candidate
+    return ""
+
+
+def _is_interactive_prompt_failure(value: str) -> bool:
+    normalized = _normalize_status_text(value)
+    if "interactive prompt" in normalized:
+        return True
+    return _looks_like_interactive_prompt_text(normalized)
 
 
 def _ensure_workspace_pi_auth(agent_dir: Path) -> list[str]:

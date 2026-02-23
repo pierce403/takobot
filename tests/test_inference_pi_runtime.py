@@ -149,6 +149,7 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertTrue(env["PATH"].startswith(str(node_bin) + os.pathsep))
         self.assertEqual(str(nvm_dir), env["NVM_DIR"])
         self.assertEqual(str(agent_dir), env["PI_CODING_AGENT_DIR"])
+        self.assertEqual("1", env["CI"])
 
     def test_run_pi_does_not_disable_tools_or_skills(self) -> None:
         runtime = InferenceRuntime(
@@ -270,6 +271,27 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertNotIn("--no-session", second_cmd)
         self.assertNotIn("--mode", second_cmd)
         self.assertNotIn("--print", second_cmd)
+
+    def test_run_pi_fails_fast_when_interactive_prompt_is_emitted(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        with (
+            patch("takobot.inference._safe_help_text", return_value=""),
+            patch(
+                "takobot.inference.subprocess.run",
+                return_value=SimpleNamespace(returncode=1, stdout="Press any key to continue...\n", stderr=""),
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_pi(runtime, "hello world", env={}, timeout_s=10.0)
+
+        self.assertIn("interactive input", str(ctx.exception))
 
     def test_pi_cli_thinking_args_maps_minimal_to_low_when_unavailable(self) -> None:
         with patch("takobot.inference._safe_help_text", return_value="usage: pi --thinking-level {low,medium,high}"):
@@ -805,6 +827,43 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertEqual("sync response", output)
         self.assertTrue(any(kind == "status" and "pi stream fallback" in payload for kind, payload in events))
         self.assertTrue(any(kind == "delta" for kind, _payload in events))
+
+    def test_stream_with_provider_pi_skips_sync_fallback_for_interactive_prompt_failure(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        events: list[tuple[str, str]] = []
+        with (
+            patch(
+                "takobot.inference._stream_pi",
+                side_effect=RuntimeError("pi requested interactive input: Press any key to continue..."),
+            ),
+            patch("takobot.inference._run_pi", return_value="should-not-run") as run_pi_mock,
+        ):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(
+                    _stream_with_provider(
+                        runtime,
+                        "pi",
+                        "hello",
+                        timeout_s=10.0,
+                        on_event=lambda kind, payload: events.append((kind, payload)),
+                        thinking="minimal",
+                    )
+                )
+
+        run_pi_mock.assert_not_called()
+        self.assertTrue(
+            any(
+                kind == "status" and "interactive prompt" in payload.lower()
+                for kind, payload in events
+            )
+        )
 
     def test_run_fallback_logs_unexpected_provider_exception(self) -> None:
         runtime = InferenceRuntime(

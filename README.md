@@ -14,6 +14,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
 - Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`), and XMTP chat paths attempt automatic inference runtime repair before fallback.
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
+- Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`), and interactive prompts like `Press any key to continue...` are detected as fast-fail errors instead of hanging until timeout.
 - Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts

@@ -9,11 +9,13 @@ from takobot.tool_ops import run_local_command, workspace_command_path_prefixes
 
 
 class TestToolOps(unittest.TestCase):
-    def test_workspace_command_path_prefixes_include_pi_and_latest_nvm(self) -> None:
+    def test_workspace_command_path_prefixes_include_pi_xmtp_and_latest_nvm(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             pi_bin = root / ".tako" / "pi" / "node" / "node_modules" / ".bin"
             pi_bin.mkdir(parents=True, exist_ok=True)
+            xmtp_bin = root / ".tako" / "xmtp" / "node" / "node_modules" / ".bin"
+            xmtp_bin.mkdir(parents=True, exist_ok=True)
 
             node_name = "node.exe" if os.name == "nt" else "node"
             old_bin = root / ".tako" / "nvm" / "versions" / "node" / "v20.10.0" / "bin"
@@ -26,7 +28,8 @@ class TestToolOps(unittest.TestCase):
             prefixes = workspace_command_path_prefixes(root)
 
         self.assertEqual(str(pi_bin), prefixes[0])
-        self.assertEqual(str(new_bin), prefixes[1])
+        self.assertEqual(str(xmtp_bin), prefixes[1])
+        self.assertEqual(str(new_bin), prefixes[2])
 
     def test_run_local_command_respects_path_prefixes(self) -> None:
         with TemporaryDirectory() as tmp:

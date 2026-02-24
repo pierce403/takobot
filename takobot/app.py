@@ -132,7 +132,7 @@ from .soul import (
 )
 from .tool_ops import fetch_webpage, run_local_command, workspace_command_path_prefixes
 from .runtime import EventBus, Runtime, RuntimeHeartbeatTick
-from .xmtp import close_client, create_client, hint_for_xmtp_error, probe_xmtp_import, sync_identity_profile
+from .xmtp import close_client, create_client, hint_for_xmtp_error, probe_xmtp_runtime, sync_identity_profile
 from .productivity import open_loops as prod_open_loops
 from .productivity import outcomes as prod_outcomes
 from .productivity import promote as prod_promote
@@ -1226,7 +1226,7 @@ class TakoTerminalApp(App[None]):
         disk = shutil.disk_usage(self.paths.root)
         disk_free_mb = int(disk.free / (1024 * 1024))
         dns_xmtp_ok = _dns_lookup_ok("grpc.production.xmtp.network")
-        xmtp_import_ok, xmtp_import_status = probe_xmtp_import()
+        xmtp_runtime_ok, xmtp_runtime_status = probe_xmtp_runtime()
         web3_import_ok = importlib.util.find_spec("web3") is not None
         textual_import_ok = importlib.util.find_spec("textual") is not None
         git_identity_ok, git_identity_detail, git_identity_auto_configured = ensure_local_git_identity(
@@ -1253,8 +1253,8 @@ class TakoTerminalApp(App[None]):
             "operator_preexisting": _yes_no(operator_preexisting),
             "xmtp_db_preexisting": _yes_no(xmtp_db_preexisting),
             "state_preexisting": _yes_no(state_preexisting),
-            "xmtp_import": _yes_no(xmtp_import_ok),
-            "xmtp_import_status": xmtp_import_status,
+            "xmtp_runtime": _yes_no(xmtp_runtime_ok),
+            "xmtp_runtime_status": xmtp_runtime_status,
             "web3_import": _yes_no(web3_import_ok),
             "textual_import": _yes_no(textual_import_ok),
             "git_identity_configured": _yes_no(git_identity_ok),
@@ -1281,8 +1281,8 @@ class TakoTerminalApp(App[None]):
             issues.append(("error", "Workspace directory is not writable."))
         if disk_free_mb < 256:
             issues.append(("warn", f"Low disk space under .tako: {disk_free_mb} MB free."))
-        if not xmtp_import_ok:
-            issues.append(("warn", f"xmtp import unavailable; {xmtp_import_status}"))
+        if not xmtp_runtime_ok:
+            issues.append(("warn", f"xmtp runtime unavailable; {xmtp_runtime_status}"))
         if not git_identity_ok:
             issues.append(("warn", f"git identity unavailable; {git_identity_detail}"))
         if not dns_xmtp_ok:
@@ -1300,7 +1300,7 @@ class TakoTerminalApp(App[None]):
             f"health check: {self.instance_kind} instance | "
             f"lock={self.health_summary['lock']} | "
             f"disk_free_mb={disk_free_mb} | "
-            f"xmtp_import={self.health_summary['xmtp_import']} | "
+            f"xmtp_runtime={self.health_summary['xmtp_runtime']} | "
             f"dns_xmtp={self.health_summary['dns_xmtp']} | "
             f"inference={self.health_summary.get('inference_selected', 'none')}/"
             f"{self.health_summary.get('inference_ready', 'no')} | "
@@ -1342,13 +1342,14 @@ class TakoTerminalApp(App[None]):
                     "or set repo-local values: `git config user.name \"Your Name\"` + `git config user.email \"you@example.com\"`",
                 ],
             )
-        if not xmtp_import_ok:
+        if not xmtp_runtime_ok:
             self._request_operator_configuration(
                 key="deps.xmtp",
-                reason="could you please install XMTP support so pairing/runtime messaging can run?",
+                reason="could you please verify XMTP runtime setup so pairing/runtime messaging can run?",
                 next_steps=[
-                    "run `.venv/bin/pip install --upgrade takobot xmtp`",
-                    "restart `takobot` and run `doctor`",
+                    "run `doctor` to get XMTP runtime diagnostics",
+                    "ensure Node >= 22 is available (system or `.tako/nvm`)",
+                    "restart `takobot`; runtime will auto-install `@xmtp/cli@0.2.0` under `.tako/xmtp/node`",
                 ],
             )
 
@@ -5644,10 +5645,11 @@ async def _resolve_operator_inbox_id(client, address: str, dm) -> str | None:
         return peer_inbox_id
 
     try:
-        from xmtp.identifiers import Identifier, IdentifierKind
-
-        identifier = Identifier(kind=IdentifierKind.ETHEREUM, value=address)
-        inbox_id = await client.get_inbox_id_by_identifier(identifier)
+        resolver = getattr(client, "resolve_inbox_id_for_address", None)
+        if not callable(resolver):
+            return None
+        maybe_inbox = resolver(address)
+        inbox_id = await maybe_inbox if asyncio.iscoroutine(maybe_inbox) else maybe_inbox
     except Exception:
         return None
     if isinstance(inbox_id, str) and inbox_id.strip():
@@ -6429,8 +6431,8 @@ def _type2_recommendation(event_type: str, message: str) -> str:
 
     if "another tako instance" in text or "instance lock" in text:
         return "Another Tako instance may be active here. Stop the duplicate process before continuing."
-    if "xmtp import unavailable" in text or "no module named 'xmtp'" in text:
-        return "XMTP dependency is missing. Install `takobot` (or `xmtp`) into `.venv`, then retry pairing/runtime startup."
+    if "xmtp runtime unavailable" in text or "@xmtp/cli" in text:
+        return "XMTP runtime is missing or unhealthy. Ensure Node >= 22, then run `doctor`; Takobot will auto-install `@xmtp/cli@0.2.0` under `.tako/xmtp/node`."
     if "user.name" in text or "user.email" in text or "author identity unknown" in text:
         return "Git identity setup failed. Takobot auto-configures repo-local identity from workspace name; if this persists, set `git config user.name ...` and `git config user.email ...`."
     if "dns lookup for xmtp" in text:

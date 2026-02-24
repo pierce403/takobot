@@ -11,7 +11,8 @@ ENGINE_PYPI_NAME="takobot"
 ENGINE_FALLBACK_REPO_URL="https://github.com/pierce403/takobot.git"
 PI_PACKAGE_VERSION="0.52.12"
 NVM_VERSION="v0.40.1"
-PI_MIN_NODE_MAJOR="20"
+NODE_RUNTIME_MIN_MAJOR="22"
+XMTP_CLI_VERSION="0.2.0"
 
 WORKDIR="$(pwd -P)"
 VENV_DIR="$WORKDIR/.venv"
@@ -152,9 +153,9 @@ install_pi_runtime() {
   elif [[ -z "$system_node" ]]; then
     need_local_node=1
     bootstrap_reason="node not found"
-  elif [[ -z "$system_node_major" || "$system_node_major" -lt "$PI_MIN_NODE_MAJOR" ]]; then
+  elif [[ -z "$system_node_major" || "$system_node_major" -lt "$NODE_RUNTIME_MIN_MAJOR" ]]; then
     need_local_node=1
-    bootstrap_reason="node ${system_node_major:-unknown} is below required >=$PI_MIN_NODE_MAJOR"
+    bootstrap_reason="node ${system_node_major:-unknown} is below required >=$NODE_RUNTIME_MIN_MAJOR"
   fi
 
   if [[ "$need_local_node" -eq 1 ]]; then
@@ -223,6 +224,54 @@ install_pi_runtime() {
   fi
 
   die "inference(pi): install failed"
+}
+
+install_xmtp_runtime() {
+  local npm_cache="$WORKDIR/.tako/npm-cache"
+  local prefix="$WORKDIR/.tako/xmtp/node"
+  local xmtp_bin="$prefix/node_modules/.bin/xmtp"
+  local xmtp_bin_win="$prefix/node_modules/.bin/xmtp.cmd"
+  mkdir -p "$npm_cache" "$prefix"
+
+  if ! command -v npm >/dev/null 2>&1; then
+    die "xmtp(cli): npm is unavailable after node bootstrap"
+  fi
+
+  local node_path node_major
+  node_path="$(command -v node || true)"
+  node_major=""
+  if [[ -n "$node_path" ]]; then
+    node_major="$(node_major_version "$node_path")"
+  fi
+  if [[ -z "$node_major" || "$node_major" -lt "$NODE_RUNTIME_MIN_MAJOR" ]]; then
+    die "xmtp(cli): node ${node_major:-unknown} is below required >=$NODE_RUNTIME_MIN_MAJOR"
+  fi
+
+  local xmtp_exec="$xmtp_bin"
+  if [[ ! -x "$xmtp_exec" && -x "$xmtp_bin_win" ]]; then
+    xmtp_exec="$xmtp_bin_win"
+  fi
+
+  if [[ -x "$xmtp_exec" ]]; then
+    local version_text
+    version_text="$("$xmtp_exec" --version 2>/dev/null || true)"
+    if printf "%s" "$version_text" | grep -q "@xmtp/cli/$XMTP_CLI_VERSION"; then
+      log "xmtp(cli): local runtime already present"
+      return 0
+    fi
+  fi
+
+  log "xmtp(cli): installing required local runtime (@xmtp/cli@$XMTP_CLI_VERSION)"
+  if npm --cache "$npm_cache" --prefix "$prefix" install --no-audit --no-fund --silent \
+    "@xmtp/cli@$XMTP_CLI_VERSION" >/dev/null 2>&1; then
+    if [[ -x "$xmtp_bin" || -x "$xmtp_bin_win" ]]; then
+      log "xmtp(cli): local runtime ready"
+      return 0
+    fi
+    die "xmtp(cli): install finished but binary is missing"
+  fi
+
+  die "xmtp(cli): install failed"
 }
 
 materialize_templates() {
@@ -354,6 +403,7 @@ main() {
   upgrade_pip
   install_engine
   install_pi_runtime
+  install_xmtp_runtime
   materialize_templates
   ensure_git
   launch

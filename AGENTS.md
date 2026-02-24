@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-24 — XMTP transport migrated from `xmtp-py` to workspace-managed `@xmtp/cli`
+
+- What happened: Python XMTP SDK flows (`xmtp-py`) were brittle across environments, required source-install fallbacks, and diverged from the intended workspace-local Node runtime model already used for pi.
+- Fix: removed Python XMTP dependency paths, added managed XMTP runtime bootstrap/probing at `.tako/xmtp/node` with exact pin `@xmtp/cli@0.2.0`, rewired transport to CLI-backed wrappers, and kept profile sync via a runtime Node helper (`@xmtp/node-sdk`) implementing both Converge 1:1 and Convos group `appData` metadata paths.
+- Prevention: keep XMTP runtime health/doctor checks aligned with managed Node baseline (`>=22`), avoid reintroducing Python XMTP SDK imports, and test CLI wrapper parsing/profile-helper integration as first-class runtime contracts.
+
 ### 2026-02-24 — Startup XMTP presence now includes explicit Converge profile confirmation
 
 - What happened: operators could receive a startup "back online" XMTP ping without an explicit statement that Converge-profile name/avatar sync had been verified/repaired/published at connection initialization.

@@ -37,8 +37,8 @@
   - Creates `.venv/` in the workspace directory.
   - Attempts `pip install --upgrade takobot`. If PyPI install fails and no engine is already present, clones source into `.tako/tmp/src/` and installs from there.
   - Installs local pi runtime under `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default.
-  - If Node/npm are missing or system Node is incompatible with pi (`<20`), bootstraps workspace-local `nvm` + Node under `.tako/nvm` and keeps npm cache under `.tako/npm-cache`.
-  - Engine packaging includes XMTP as a required dependency, so plain `pip install takobot` installs XMTP bindings by default.
+  - Installs local XMTP runtime under `.tako/xmtp/node` (`@xmtp/cli@0.2.0`) by default.
+  - If Node/npm are missing or system Node is below runtime baseline (`<22`), bootstraps workspace-local `nvm` + Node under `.tako/nvm` and keeps npm cache under `.tako/npm-cache`.
   - Materializes workspace templates from the installed engine (`takobot/templates/**`) without overwriting user files; logs template drift to today’s daily log.
   - Fresh workspace materialization now includes a local executable `tako.sh` launcher.
   - First-run templates include `resources/model-guide.md` so operators have a baseline model-family/thinking tuning reference.
@@ -46,7 +46,7 @@
   - Launches `.venv/bin/takobot` (TUI main loop) and rebinds stdin to `/dev/tty` when started via a pipe.
   - Falls back to `.venv/bin/takobot run` (stdout CLI daemon mode) when no interactive TTY is available.
 - **Test Criteria**:
-  - [x] Setup script bootstraps workspace-local nvm/node when npm is missing or system Node is incompatible with pi and keeps npm cache in `.tako/`.
+  - [x] Setup script bootstraps workspace-local nvm/node when npm is missing or system Node is below the managed baseline and keeps npm cache in `.tako/`.
   - [ ] In an empty dir with an interactive TTY, `curl -fsSL https://tako.bot/setup.sh | bash` creates `.venv/`, materializes workspace files, initializes git on `main`, and launches the TUI.
   - [ ] In a non-interactive environment, the same command falls back to stdout daemon mode instead of exiting with a TTY error.
   - [ ] Re-running `setup.sh` is idempotent and does not overwrite edited files.
@@ -117,7 +117,7 @@
   - Conversation prompt context now compacts verbose inference-unavailable fallback diagnostics into a short marker line, preventing repeated fallback/error copy from bloating subsequent inference prompts.
   - Runs XMTP daemon loop as a background task when paired.
   - When paired, startup sends the operator a brief XMTP "back online" status summary (version, stage, inference readiness, XMTP profile status, jobs/tasks counts, address), including a Converge 1:1 profile confirmation line (`converge.cv/profile:1.0` with name/avatar sync state).
-  - XMTP runtime startup/rebuild and pairing/name-update flows run profile verify+repair: when profile read APIs exist, Tako checks whether name/avatar match identity and only applies updates on mismatch; when SDK profile write APIs are missing, Tako publishes Converge DM profile metadata for 1:1 chats (`converge.cv/profile:1.0`) and upserts Convos-compatible profile metadata in group `appData` (`ConversationCustomMetadata` protobuf `profiles`) instead of sending chat-message JSON. Self-DM fallback now resolves by inbox lookup first and falls back to account-address DM creation (`new_dm(0x...)`) for SDKs that validate recipient format. Deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and detailed sync/broadcast state is recorded at `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`.
+  - XMTP runtime startup/rebuild and pairing/name-update flows now run through workspace-managed `@xmtp/cli`, with profile sync handled by a runtime Node helper (`@xmtp/node-sdk`): Tako publishes Converge DM profile metadata for 1:1 chats (`converge.cv/profile:1.0`) and upserts Convos-compatible profile metadata in group `appData` (`ConversationCustomMetadata` protobuf `profiles`) instead of sending chat-message JSON. Deterministic avatar is generated at `.tako/state/xmtp-avatar.svg`, and detailed sync/broadcast state is recorded at `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`.
   - Keeps terminal plain-text chat available in running mode, even when XMTP is connected/paired.
   - Mirrors outbound XMTP replies into the local TUI transcript/activity feed.
   - Keeps full local operator control in the terminal for identity/config/tools/permissions/routines, even when XMTP is paired.
@@ -149,7 +149,7 @@
   - Manual `explore <topic>` performs focused topic research (Wikipedia/HN/Reddit/DDG), writes structured notes to `memory/world/YYYY-MM-DD.md`, and reports synthesized insight + mission impact phrased according to current life stage and mood.
   - Purpose info questions (for example `what is your purpose?`) now return the current purpose text instead of entering the purpose-update path.
   - When manual `explore` finds no new world items, the TUI reports sensor scan counts and failures.
-  - Local `run` command executes from workspace root and prepends workspace-local pi runtime bins to PATH when available.
+  - Local `run` command executes from workspace root and prepends workspace-local pi/xmtp runtime bins to PATH when available.
   - Local `exec` command is an alias for `run` (same workspace-root execution context).
   - Local `jobs` command manages recurring schedules (`jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`), and plain-text operator schedule requests can auto-create jobs.
   - Local `web` command appends a daily-log note for traceability of fetched sources.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "takobot"
-version = "0.1.83"
+version = "0.1.84"
 description = "Takobot: your highly autonomous and incredibly curious octopus friend"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,6 @@ dependencies = [
   "textual",
   "protobuf",
   "web3",
-  "xmtp",
 ]
 authors = [{ name = "pierce403" }]
 keywords = ["agent", "tui", "xmtp", "gtd", "para"]

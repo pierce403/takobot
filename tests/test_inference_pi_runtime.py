@@ -101,7 +101,7 @@ class TestInferencePiRuntime(unittest.TestCase):
 
         self.assertIsNone(selected)
 
-    def test_pi_node_available_requires_node_20_plus(self) -> None:
+    def test_pi_node_available_requires_node_22_plus(self) -> None:
         with (
             patch("takobot.inference._workspace_node_bin_dir", return_value=None),
             patch("takobot.inference.shutil.which", return_value="/usr/bin/node"),
@@ -117,7 +117,7 @@ class TestInferencePiRuntime(unittest.TestCase):
             patch("takobot.inference.shutil.which", return_value="/usr/bin/node"),
             patch(
                 "takobot.inference.subprocess.run",
-                return_value=SimpleNamespace(returncode=0, stdout="v20.11.0\n", stderr=""),
+                return_value=SimpleNamespace(returncode=0, stdout="v22.11.0\n", stderr=""),
             ),
         ):
             self.assertTrue(_pi_node_available())

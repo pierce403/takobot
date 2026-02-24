@@ -8,15 +8,21 @@ import os
 import shlex
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import traceback
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import request as urllib_request
 from typing import Any, Callable, Mapping
 
+from .node_runtime import (
+    NODE_RUNTIME_MIN_MAJOR,
+    ensure_workspace_node_runtime,
+    latest_node_bin_dir as _shared_latest_node_bin_dir,
+    node_major_from_version as _shared_node_major_from_version,
+    node_path_meets_min_major as _shared_node_path_meets_min_major,
+    workspace_nvm_dir as _shared_workspace_nvm_dir,
+)
 from .paths import ensure_runtime_dirs, repo_root, runtime_paths
 
 
@@ -28,8 +34,7 @@ CODEX_AGENTIC_EXEC_ARGS = [
 ]
 INFERENCE_SETTINGS_FILENAME = "inference-settings.json"
 PI_PACKAGE_VERSION = "0.52.12"
-NVM_VERSION = "v0.40.1"
-PI_MIN_NODE_MAJOR = 20
+PI_MIN_NODE_MAJOR = NODE_RUNTIME_MIN_MAJOR
 KNOWN_INFERENCE_PROVIDERS = ("pi", "ollama", "codex", "claude", "gemini")
 PI_KEY_ENV_VARS = (
     "OPENAI_API_KEY",
@@ -837,37 +842,19 @@ def _ensure_workspace_pi_runtime_if_needed() -> str:
 
 def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
     paths = ensure_runtime_dirs(runtime_paths())
-    tmp_dir = paths.tmp_dir
     npm_cache = paths.root / "npm-cache"
     prefix = paths.root / "pi" / "node"
     npm_cache.mkdir(parents=True, exist_ok=True)
     prefix.mkdir(parents=True, exist_ok=True)
 
-    env = os.environ.copy()
-    tmp_value = str(tmp_dir)
-    env["TMPDIR"] = tmp_value
-    env["TMP"] = tmp_value
-    env["TEMP"] = tmp_value
-
-    node_bin_dir = _workspace_node_bin_dir()
-    system_node = shutil.which("node")
-    system_node_compatible = _node_path_meets_pi_runtime(system_node)
-    if node_bin_dir is None and not system_node_compatible:
-        ok, detail = _install_workspace_nvm_node_lts(tmp_dir=tmp_dir)
-        if not ok:
-            return False, detail
-        node_bin_dir = _workspace_node_bin_dir()
-
-    if node_bin_dir is not None:
-        current_path = env.get("PATH", "")
-        env["PATH"] = f"{node_bin_dir}{os.pathsep}{current_path}" if current_path else str(node_bin_dir)
-        env["NVM_DIR"] = str(_workspace_nvm_dir())
-
-    npm_exec = _workspace_npm_executable(node_bin_dir=node_bin_dir)
-    if not npm_exec and system_node_compatible:
-        npm_exec = shutil.which("npm")
-    if not npm_exec:
+    node_runtime = ensure_workspace_node_runtime(min_major=PI_MIN_NODE_MAJOR, require_npm=True)
+    if not node_runtime.ok:
+        return False, node_runtime.detail
+    if not node_runtime.npm_executable:
         return False, "npm is unavailable; cannot install workspace-local pi runtime"
+
+    env = node_runtime.env
+    npm_exec = node_runtime.npm_executable
 
     pi_bin = _workspace_pi_cli_path()
     if pi_bin.exists():
@@ -912,98 +899,6 @@ def _ensure_workspace_pi_runtime() -> tuple[bool, str]:
     if auth_notes:
         detail = f"{detail} | {' | '.join(auth_notes)}"
     return True, detail
-
-
-def _install_workspace_nvm_node_lts(*, tmp_dir: Path) -> tuple[bool, str]:
-    nvm_dir = _workspace_nvm_dir()
-    nvm_sh = nvm_dir / "nvm.sh"
-    if not nvm_sh.exists():
-        ok, detail = _download_workspace_nvm(tmp_dir=tmp_dir, nvm_dir=nvm_dir)
-        if not ok:
-            return False, detail
-
-    bash_path = shutil.which("bash")
-    if not bash_path:
-        return False, "bash is required to bootstrap workspace-local nvm/node"
-
-    env = os.environ.copy()
-    tmp_value = str(tmp_dir)
-    env["TMPDIR"] = tmp_value
-    env["TMP"] = tmp_value
-    env["TEMP"] = tmp_value
-
-    script = (
-        "set -euo pipefail; "
-        f"export NVM_DIR={shlex.quote(str(nvm_dir))}; "
-        "source \"$NVM_DIR/nvm.sh\"; "
-        "nvm install --lts >/dev/null; "
-        "nvm use --lts >/dev/null"
-    )
-    proc = subprocess.run(
-        [bash_path, "-lc", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=900,
-    )
-    if proc.returncode != 0:
-        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
-        return False, f"workspace-local nvm/node install failed: {_summarize_error_text(detail)}"
-
-    node_bin_dir = _workspace_node_bin_dir()
-    if node_bin_dir is None:
-        return False, "workspace-local nvm completed but node binary was not found under `.tako/nvm`"
-    return True, f"workspace-local node runtime ready ({node_bin_dir})"
-
-
-def _download_workspace_nvm(*, tmp_dir: Path, nvm_dir: Path) -> tuple[bool, str]:
-    archive_name = f"nvm-{NVM_VERSION.lstrip('v')}.tar.gz"
-    archive_path = tmp_dir / archive_name
-    unpack_dir = tmp_dir / f"nvm-{NVM_VERSION.lstrip('v')}"
-    url = f"https://github.com/nvm-sh/nvm/archive/refs/tags/{NVM_VERSION}.tar.gz"
-
-    with contextlib.suppress(Exception):
-        archive_path.unlink(missing_ok=True)
-    with contextlib.suppress(Exception):
-        if unpack_dir.exists():
-            shutil.rmtree(unpack_dir)
-
-    try:
-        with urllib_request.urlopen(url, timeout=60) as response:
-            archive_path.write_bytes(response.read())
-    except Exception as exc:  # noqa: BLE001
-        return False, f"failed to download nvm archive: {_summarize_error_text(str(exc))}"
-
-    try:
-        with tarfile.open(archive_path, "r:gz") as archive:
-            archive.extractall(tmp_dir)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"failed to unpack nvm archive: {_summarize_error_text(str(exc))}"
-
-    if not unpack_dir.exists():
-        return False, f"unpacked nvm directory missing: {unpack_dir}"
-
-    with contextlib.suppress(Exception):
-        if nvm_dir.exists():
-            shutil.rmtree(nvm_dir)
-    try:
-        shutil.move(str(unpack_dir), str(nvm_dir))
-    except Exception as exc:  # noqa: BLE001
-        return False, f"failed to place nvm under workspace runtime: {_summarize_error_text(str(exc))}"
-    return True, f"workspace-local nvm ready ({nvm_dir})"
-
-
-def _workspace_npm_executable(*, node_bin_dir: Path | None = None) -> str | None:
-    bin_dir = node_bin_dir or _workspace_node_bin_dir()
-    if bin_dir is None:
-        return None
-    names = ("npm.cmd", "npm") if os.name == "nt" else ("npm", "npm.cmd")
-    for name in names:
-        candidate = bin_dir / name
-        if candidate.exists():
-            return str(candidate)
-    return None
 
 
 def _detect_pi(home: Path, env: Mapping[str, str]) -> tuple[InferenceProviderStatus, str | None]:
@@ -2929,39 +2824,12 @@ def _workspace_pi_agent_dir() -> Path:
 
 
 def _workspace_nvm_dir() -> Path:
-    paths = ensure_runtime_dirs(runtime_paths())
-    return paths.root / "nvm"
+    return _shared_workspace_nvm_dir()
 
 
 def _workspace_node_bin_dir() -> Path | None:
     nvm_versions = _workspace_nvm_dir() / "versions" / "node"
-    if not nvm_versions.exists():
-        return None
-
-    node_name = "node.exe" if os.name == "nt" else "node"
-    candidates: list[tuple[tuple[int, ...], Path]] = []
-    for child in nvm_versions.iterdir():
-        if not child.is_dir():
-            continue
-        bin_dir = child / "bin"
-        node_bin = bin_dir / node_name
-        if not node_bin.exists():
-            continue
-        version = child.name.lstrip("v")
-        parts: list[int] = []
-        for token in version.split("."):
-            if token.isdigit():
-                parts.append(int(token))
-            else:
-                break
-        if not parts or parts[0] < PI_MIN_NODE_MAJOR:
-            continue
-        candidates.append((tuple(parts), bin_dir))
-
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item[0])
-    return candidates[-1][1]
+    return _shared_latest_node_bin_dir(versions_dir=nvm_versions, min_major=PI_MIN_NODE_MAJOR)
 
 
 def _pi_node_available() -> bool:
@@ -2972,33 +2840,11 @@ def _pi_node_available() -> bool:
 
 
 def _node_path_meets_pi_runtime(node_path: str | None) -> bool:
-    if not node_path:
-        return False
-    try:
-        proc = subprocess.run(
-            [node_path, "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=4.0,
-        )
-    except Exception:
-        return False
-    raw = (proc.stdout or proc.stderr or "").strip()
-    if not raw:
-        return False
-    major = _node_major_from_version(raw)
-    return major is not None and major >= PI_MIN_NODE_MAJOR
+    return _shared_node_path_meets_min_major(node_path, min_major=PI_MIN_NODE_MAJOR)
 
 
 def _node_major_from_version(raw: str) -> int | None:
-    cleaned = (raw or "").strip().lower()
-    if cleaned.startswith("v"):
-        cleaned = cleaned[1:]
-    token = cleaned.split(".", 1)[0].strip()
-    if not token.isdigit():
-        return None
-    return int(token)
+    return _shared_node_major_from_version(raw)
 
 
 def _normalize_status_text(value: str) -> str:

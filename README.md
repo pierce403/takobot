@@ -19,12 +19,12 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`), and interactive prompts like `Press any key to continue...` are detected as fast-fail errors instead of hanging until timeout.
 - Pi capability sync now remediates deprecated legacy `tools/` mappings into `extensions/` locations (global + project `.pi/`) so migration warnings do not block inference.
-- Default pi tooling install in workspace (`.tako/pi/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<20`)
+- Default Node tooling install in workspace (`.tako/pi/node` + `.tako/xmtp/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<22`)
 - Inference execution gate so first model call starts on the first interactive chat turn
 - OpenClaw-style conversation management: per-session JSONL transcripts under `.tako/state/conversations/` with bounded history windows injected into prompts
 - A background XMTP runtime with stream retries + polling fallback
 - When paired, startup sends an operator XMTP "back online" ping with a quick state summary (version/stage/inference/XMTP-profile/jobs/tasks/address), including a Converge profile confirmation line for `converge.cv/profile:1.0` name/avatar sync status
-- XMTP profile sync: on startup/pair/rebuild/name-change, Takobot verifies XMTP profile metadata when read APIs exist and repairs mismatches when write APIs exist; when direct profile writes are unavailable it publishes Converge DM profile metadata for 1:1 chats (`converge.cv/profile:1.0`) and upserts Convos-compatible profile metadata into group `appData` (`ConversationCustomMetadata` protobuf with `profiles[].inboxId/name/image`) instead of sending chat-message JSON, resolves self-DM profile fallback by inbox lookup then account-address DM creation for SDKs that validate `new_dm` recipients as `0x...` addresses, generates a deterministic avatar at `.tako/state/xmtp-avatar.svg`, and records sync/broadcast state in `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`
+- XMTP profile sync: on startup/pair/rebuild/name-change, Takobot uses a runtime Node helper (via `@xmtp/node-sdk`) to publish Converge 1:1 profile metadata (`converge.cv/profile:1.0`) and upsert Convos group `appData` profile metadata (`ConversationCustomMetadata.profiles`), generates a deterministic avatar at `.tako/state/xmtp-avatar.svg`, and records sync/broadcast state in `.tako/state/xmtp-profile.json` and `.tako/state/xmtp-profile-broadcast.json`
 - EventBus-driven cognition: in-memory event fanout + JSONL audit + Type 1 triage + Type 2 escalation
 - World Watch sensor loop: RSS/Atom polling plus child-stage curiosity crawling (Reddit/Hacker News/Wikipedia), deterministic world notebook writes, and bounded briefings
 - Boredom/autonomy loop: when runtime stays idle, DOSE indicators drift down and Tako triggers boredom-driven exploration (about hourly by default) to find novel signals
@@ -144,7 +144,8 @@ Runtime-only (ignored):
 
 - Creates a local Python virtual environment in `.venv/`.
 - Attempts to install or upgrade the engine with `pip install --upgrade takobot` (PyPI). If that fails and no engine is present, it clones source into `.tako/tmp/src/` and installs from there.
-- Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing or Node is below the pi requirement (`>=20`), bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
+- Installs local pi runtime in `.tako/pi/node` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) by default; if Node/npm are missing or Node is below the managed runtime baseline (`>=22`), bootstrap installs workspace-local `nvm` + Node under `.tako/nvm` first.
+- Installs local XMTP CLI runtime in `.tako/xmtp/node` (`@xmtp/cli@0.2.0`) using the same managed Node baseline and npm cache.
 - Materializes the workspace from engine templates (`takobot/templates/**`) without overwriting existing files (including workspace `tako.sh` launcher materialization).
 - Seeds a baseline model tuning guide at `resources/model-guide.md`.
 - Initializes git (if available) and commits the initial workspace.
@@ -200,7 +201,7 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - The daemon now retries XMTP stream subscriptions with backoff when transient group/identity stream errors occur.
 - When stream instability persists, the daemon falls back to polling message history and retries stream mode after polling stabilizes.
 - While running, Tako periodically checks for package updates. With `updates.auto_apply = true`, the TUI applies the update and restarts itself.
-- XMTP client initialization disables history sync by default for compatibility.
+- XMTP transport runs through workspace-managed `@xmtp/cli` with local DB at `.tako/xmtp-db/xmtp-production.db3`.
 - Runtime event log lives at `.tako/state/events.jsonl` as an audit stream; events are consumed in-memory via EventBus (no JSONL polling queue).
 - World Watch sensor state is stored in `.tako/state/rss_seen.json` and `.tako/state/curiosity_seen.json`; briefing cadence/state is stored in `.tako/state/briefing_state.json`.
 - Runtime inference metadata lives at `.tako/state/inference.json` (no raw secrets written by Tako).
@@ -219,4 +220,4 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Input box supports shell-style history recall (`↑` / `↓`) for previously submitted local messages.
 - Web reads are fetched with the built-in `web` tool and logged into the daily notes stream for traceability.
 - Semantic memory recall uses `ragrep` when installed (`ragrep` CLI); index state is runtime-only at `.tako/state/ragrep-memory.db`.
-- XMTP support is installed with `takobot` by default; if an existing environment is missing it, run `pip install --upgrade takobot xmtp` (native build tooling such as Rust may be required).
+- XMTP transport is runtime-managed via npm (`@xmtp/cli@0.2.0` under `.tako/xmtp/node`); if runtime health reports XMTP unavailable, run `doctor` and ensure Node `>=22` is available (system or `.tako/nvm`).

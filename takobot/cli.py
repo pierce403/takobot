@@ -94,7 +94,7 @@ from .xmtp import (
     ensure_profile_message_for_conversation,
     hint_for_xmtp_error,
     parse_profile_message,
-    probe_xmtp_import,
+    probe_xmtp_runtime,
     send_dm_sync,
     set_typing_indicator,
     sync_identity_profile,
@@ -392,10 +392,10 @@ def _doctor_report(root, paths, env: str) -> tuple[list[str], list[str]]:
     else:
         lines.append("- operator: not imprinted")
 
-    xmtp_ok, xmtp_status = probe_xmtp_import()
+    xmtp_ok, xmtp_status = probe_xmtp_runtime()
     lines.append(f"- xmtp: {xmtp_status}")
     if not xmtp_ok:
-        problems.append(f"xmtp import failed: {xmtp_status}")
+        problems.append(f"xmtp runtime unavailable: {xmtp_status}")
 
     try:
         import web3  # noqa: F401
@@ -1825,47 +1825,31 @@ def _mark_message_seen(item, seen_ids: set[bytes], seen_order: deque[bytes]) -> 
     return True
 
 
-def _fallback_history_options():
-    from xmtp.bindings import NativeBindings
-
-    return NativeBindings.FfiListMessagesOptions(
-        sent_before_ns=None,
-        sent_after_ns=None,
-        limit=MESSAGE_HISTORY_PER_CONVERSATION,
-        delivery_status=None,
-        direction=NativeBindings.FfiDirection.DESCENDING,
-        content_types=None,
-        exclude_content_types=None,
-        exclude_sender_inbox_ids=None,
-        sort_by=NativeBindings.FfiSortBy.INSERTED_AT,
-        inserted_after_ns=None,
-        inserted_before_ns=None,
-    )
-
-
 async def _collect_history_messages(client) -> list[object]:
-    options = _fallback_history_options()
     messages: list[object] = []
 
     with contextlib.suppress(Exception):
         await client.conversations.sync_all_conversations()
 
-    conversations = await client.conversations.list()
+    conversations: list[object] = []
+    with contextlib.suppress(Exception):
+        conversations = await client.conversations.list()
     for convo in conversations:
-        ffi_conversation = getattr(convo, "_ffi", None)
-        if ffi_conversation is None:
+        convo_id = getattr(convo, "id", None)
+        if not isinstance(convo_id, (bytes, bytearray)):
             continue
         try:
-            raw_messages = await ffi_conversation.find_messages(options)
+            raw_messages = await client.conversations.messages(
+                bytes(convo_id),
+                limit=MESSAGE_HISTORY_PER_CONVERSATION,
+            )
         except Exception:
             continue
 
         for raw in raw_messages:
-            try:
-                decoded = client._decode_message(raw)
-            except Exception:
+            if not hasattr(raw, "id") or not hasattr(raw, "conversation_id"):
                 continue
-            messages.append(decoded)
+            messages.append(raw)
 
     messages.sort(
         key=lambda item: getattr(

@@ -150,6 +150,10 @@ def workspace_command_path_prefixes(workspace_root: str | Path) -> tuple[str, ..
     if pi_bin.exists():
         prefixes.append(str(pi_bin))
 
+    xmtp_bin = root / ".tako" / "xmtp" / "node" / "node_modules" / ".bin"
+    if xmtp_bin.exists():
+        prefixes.append(str(xmtp_bin))
+
     nvm_bin = _latest_workspace_node_bin(root / ".tako" / "nvm" / "versions" / "node")
     if nvm_bin is not None:
         prefixes.append(str(nvm_bin))

@@ -762,7 +762,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <h2>What happens on first run</h2>
             <ul>
               <li>Creates a Python virtual environment in <code>.venv/</code>.</li>
-              <li>Attempts to install or upgrade the engine with <code>pip install --upgrade takobot</code> (PyPI, including XMTP dependency). If that fails and no engine is present, it falls back to a source clone install.</li>
+              <li>Attempts to install or upgrade the engine with <code>pip install --upgrade takobot</code> (PyPI). If that fails and no engine is present, it falls back to a source clone install.</li>
               <li>Materializes the workspace from engine templates (<code>takobot/templates/**</code>) without overwriting existing files (including local <code>tako.sh</code> launcher materialization), then initializes git on <code>main</code> if available.</li>
               <li>Ships a baseline model tuning reference at <code>resources/model-guide.md</code> for provider/model/thinking-level calibration.</li>
               <li>
@@ -781,7 +781,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               </li>
               <li>Loads auto-update policy from <code>tako.toml</code> (<code>[updates].auto_apply</code>, default <code>true</code>).</li>
               <li>Inference is pi-runtime-first and required; when pi is unavailable, Tako falls back to heuristic guidance instead of alternate model CLIs.</li>
-              <li>Installs pi runtime by default under <code>.tako/pi/node</code>; if Node/npm are missing or system Node is below pi requirements (<code>&lt;20</code>), bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
+              <li>Installs pi runtime by default under <code>.tako/pi/node</code> and XMTP CLI runtime under <code>.tako/xmtp/node</code>; if Node/npm are missing or system Node is below runtime requirements (<code>&lt;22</code>), bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
               <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, and pi OAuth inventory.</li>
               <li>Supports assisted pi login in-app: <code>inference login</code> relays prompts and accepts operator responses via <code>inference login answer &lt;text&gt;</code>; <code>inference login force</code> forces a fresh re-auth even when stale auth is detected as present.</li>
@@ -835,7 +835,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Prompt history compacts verbose inference-unavailable fallback diagnostics into a short marker line to prevent repeated fallback copy from bloating later prompts.</li>
               <li>Uses XMTP typing indicators for outbound replies when supported by the installed XMTP SDK/runtime.</li>
               <li>When paired, startup sends the operator a XMTP "back online" ping with a quick status snapshot (version/stage/inference/XMTP profile/jobs/tasks/address), including a Converge 1:1 profile confirmation line (<code>converge.cv/profile:1.0</code> name/avatar sync state).</li>
-              <li>On XMTP startup/rebuild/pairing/name updates, Tako verifies profile metadata against identity when read APIs are available, repairs mismatches when update APIs are available, and when writes are unavailable publishes Converge DM profile metadata for 1:1 chats (<code>converge.cv/profile:1.0</code>) plus Convos-compatible profile metadata in group <code>appData</code> (protobuf <code>ConversationCustomMetadata</code>) rather than sending chat-message JSON; self-DM fallback resolves by inbox lookup then account-address DM creation for SDKs that require <code>new_dm(0x...)</code>; deterministic avatar/cache files are written at <code>.tako/state/xmtp-avatar.svg</code>, <code>.tako/state/xmtp-profile.json</code>, and <code>.tako/state/xmtp-profile-broadcast.json</code>.</li>
+              <li>On XMTP startup/rebuild/pairing/name updates, Tako runs profile sync through workspace-managed XMTP runtime: Converge DM metadata for 1:1 chats (<code>converge.cv/profile:1.0</code>) and Convos-compatible group profile upserts in <code>appData</code> (protobuf <code>ConversationCustomMetadata</code>) via a runtime Node helper; deterministic avatar/cache files are written at <code>.tako/state/xmtp-avatar.svg</code>, <code>.tako/state/xmtp-profile.json</code>, and <code>.tako/state/xmtp-profile-broadcast.json</code>.</li>
               <li>Persists chat sessions in <code>.tako/state/conversations/</code> (<code>sessions.json</code> + per-session JSONL transcripts) and injects recent history into inference prompts.</li>
               <li>Checks DOSE-derived focus on every inference and runs <code>ragrep</code> semantic recall over <code>memory/</code> with adaptive breadth (focused: minimal context, diffuse: broader context) using runtime-local index state in <code>.tako/state/ragrep-memory.db</code>.</li>
               <li>

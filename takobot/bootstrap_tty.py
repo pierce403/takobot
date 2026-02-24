@@ -77,10 +77,11 @@ async def _resolve_operator_inbox_id(client, address: str, dm) -> str | None:
         return peer_inbox_id
 
     try:
-        from xmtp.identifiers import Identifier, IdentifierKind
-
-        identifier = Identifier(kind=IdentifierKind.ETHEREUM, value=address)
-        inbox_id = await client.get_inbox_id_by_identifier(identifier)
+        resolver = getattr(client, "resolve_inbox_id_for_address", None)
+        if not callable(resolver):
+            return None
+        maybe_inbox = resolver(address)
+        inbox_id = await maybe_inbox if asyncio.iscoroutine(maybe_inbox) else maybe_inbox
     except Exception:
         return None
     if isinstance(inbox_id, str) and inbox_id.strip():

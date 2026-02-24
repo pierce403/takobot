@@ -7,23 +7,43 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import inspect
-from importlib import metadata
 import json
-import re
-import socket
+import os
 from pathlib import Path
+import re
+import shutil
+import socket
+import subprocess
 from typing import Any
-import zlib
+
+from .node_runtime import ensure_workspace_node_runtime
+from .paths import ensure_runtime_dirs, runtime_paths
+from .xmtp_runtime import (
+    XMTP_CLI_VERSION,
+    XMTP_MIN_NODE_MAJOR,
+    ensure_workspace_xmtp_runtime_if_needed,
+    probe_xmtp_runtime as _probe_xmtp_runtime,
+    workspace_xmtp_cli_path,
+    workspace_xmtp_helper_script_path,
+)
 
 
-XMTP_PROFILE_STATE_VERSION = 2
+XMTP_PROFILE_STATE_VERSION = 3
 XMTP_PROFILE_STATE_FILE = "xmtp-profile.json"
 XMTP_PROFILE_AVATAR_FILE = "xmtp-avatar.svg"
 XMTP_PROFILE_NAME_MAX_CHARS = 40
-XMTP_PROFILE_BROADCAST_STATE_VERSION = 1
+XMTP_PROFILE_BROADCAST_STATE_VERSION = 2
 XMTP_PROFILE_BROADCAST_STATE_FILE = "xmtp-profile-broadcast.json"
 XMTP_PROFILE_TEXT_FALLBACK_PREFIX = "cv:profile:"
 _LEGACY_XMTP_PROFILE_MESSAGE_PREFIX = "tako:profile:"
+
+XMTPCMD_TIMEOUT_S = 75.0
+XMTPCMD_SYNC_TIMEOUT_S = 120.0
+XMTPCMD_STREAM_TIMEOUT_S = 0.0
+
+_ETH_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_INBOX_ID_RE = re.compile(r"^[a-fA-F0-9]{64}$")
+
 CONVERGE_PROFILE_CONTENT_TYPE: dict[str, Any] = {
     "authorityId": "converge.cv",
     "typeId": "profile",
@@ -57,10 +77,6 @@ _AVATAR_ACCENT_COLORS: tuple[str, ...] = (
     "#FB7185",
     "#94A3B8",
 )
-
-_CONVOS_PROTO_CACHE: tuple[Any, Any] | None = None
-_CONVOS_PROTO_UNAVAILABLE = False
-_ETH_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
 @dataclass(frozen=True)
@@ -96,6 +112,348 @@ class XmtpProfileMessage:
     raw: str
 
 
+@dataclass(frozen=True)
+class XmtpCliConversation:
+    _client: "XmtpCliClient"
+    id_hex: str
+    type: str
+    peer_inbox_id: str
+
+    @property
+    def id(self) -> bytes:
+        return _hex_or_text_to_bytes(self.id_hex)
+
+    @property
+    def conversation_id(self) -> bytes:
+        return self.id
+
+    async def send(self, content: object, content_type: object | None = None) -> bytes:
+        if content_type is not None:
+            raise RuntimeError("custom content send is handled via profile helper in CLI transport")
+        if not isinstance(content, str):
+            raise RuntimeError("conversation.send expects text content in CLI transport")
+        payload = await self._client.run_json(
+            ["conversation", "send-text", self.id_hex, content, "--json"],
+            timeout_s=XMTPCMD_TIMEOUT_S,
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeError("unexpected send-text payload")
+        message_id = str(payload.get("messageId") or "").strip()
+        if not message_id:
+            raise RuntimeError("send-text succeeded but returned no messageId")
+        return _hex_or_text_to_bytes(message_id)
+
+
+@dataclass(frozen=True)
+class XmtpCliMessage:
+    id: bytes
+    conversation_id: bytes
+    sender_inbox_id: str
+    content: str | None
+    content_type: dict[str, Any] | None
+    sent_at: datetime
+
+
+class XmtpCliMessageStream:
+    def __init__(self, client: "XmtpCliClient") -> None:
+        self._client = client
+        self._proc: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._stderr_tail: list[str] = []
+        self._stdout_tail: list[str] = []
+
+    def __aiter__(self) -> "XmtpCliMessageStream":
+        return self
+
+    async def __anext__(self) -> XmtpCliMessage:
+        await self._ensure_started()
+        assert self._proc is not None
+        assert self._proc.stdout is not None
+
+        while True:
+            chunk = await self._proc.stdout.readline()
+            if chunk:
+                line = chunk.decode("utf-8", errors="replace").strip()
+                if line:
+                    _tail_append(self._stdout_tail, line)
+                payload = _try_parse_json_line(line)
+                if not isinstance(payload, dict):
+                    continue
+                message = _message_from_payload(payload)
+                if message is None:
+                    continue
+                return message
+
+            rc = await self._proc.wait()
+            if self._stderr_task is not None:
+                with contextlib.suppress(Exception):
+                    await self._stderr_task
+            if rc == 0:
+                raise StopAsyncIteration
+            stderr_text = "\n".join(self._stderr_tail[-6:]).strip()
+            stdout_text = "\n".join(self._stdout_tail[-6:]).strip()
+            detail = stderr_text or stdout_text or f"exit={rc}"
+            raise RuntimeError(
+                "xmtp stream-all-messages failed: "
+                f"{_summarize_error_text(detail)}"
+            )
+
+    async def close(self) -> None:
+        if self._proc is None:
+            return
+        proc = self._proc
+        self._proc = None
+        if proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.terminate()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+        if proc.returncode is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+        if self._stderr_task is not None:
+            with contextlib.suppress(Exception):
+                await self._stderr_task
+        self._stderr_task = None
+
+    async def _ensure_started(self) -> None:
+        if self._proc is not None:
+            return
+        cmd = self._client.command_for(
+            [
+                "conversations",
+                "stream-all-messages",
+                "--json",
+            ]
+        )
+        self._proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=self._client.env,
+        )
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
+
+    async def _drain_stderr(self) -> None:
+        if self._proc is None or self._proc.stderr is None:
+            return
+        while True:
+            chunk = await self._proc.stderr.readline()
+            if not chunk:
+                break
+            line = chunk.decode("utf-8", errors="replace").strip()
+            if line:
+                _tail_append(self._stderr_tail, line)
+
+
+class XmtpCliConversations:
+    def __init__(self, client: "XmtpCliClient") -> None:
+        self._client = client
+
+    async def create_dm(self, recipient: str) -> XmtpCliConversation:
+        return await self.new_dm(recipient)
+
+    async def new_dm(self, recipient: str) -> XmtpCliConversation:
+        target = " ".join((recipient or "").split()).strip()
+        if not target:
+            raise RuntimeError("missing recipient")
+        if _looks_like_inbox_id(target) and not _looks_like_eth_address(target):
+            resolved = await self._client.resolve_address_for_inbox_id(target)
+            if resolved:
+                target = resolved
+        payload = await self._client.run_json(
+            ["conversations", "create-dm", target, "--json"],
+            timeout_s=XMTPCMD_TIMEOUT_S,
+        )
+        return _conversation_from_payload(self._client, payload)
+
+    async def get_conversation_by_id(self, conversation_id: bytes | str) -> XmtpCliConversation | None:
+        cid = _conversation_id_text(conversation_id)
+        if not cid:
+            return None
+        try:
+            payload = await self._client.run_json(
+                ["conversations", "get", cid, "--json"],
+                timeout_s=XMTPCMD_TIMEOUT_S,
+            )
+        except Exception:
+            return None
+        return _conversation_from_payload(self._client, payload)
+
+    async def list(self) -> list[XmtpCliConversation]:
+        payload = await self._client.run_json(
+            ["conversations", "list", "--sync", "--json"],
+            timeout_s=XMTPCMD_SYNC_TIMEOUT_S,
+        )
+        if not isinstance(payload, list):
+            return []
+        out: list[XmtpCliConversation] = []
+        for item in payload:
+            with contextlib.suppress(Exception):
+                out.append(_conversation_from_payload(self._client, item))
+        return out
+
+    async def list_dms(self) -> list[XmtpCliConversation]:
+        payload = await self._client.run_json(
+            ["conversations", "list", "--sync", "--type", "dm", "--json"],
+            timeout_s=XMTPCMD_SYNC_TIMEOUT_S,
+        )
+        if not isinstance(payload, list):
+            return []
+        out: list[XmtpCliConversation] = []
+        for item in payload:
+            with contextlib.suppress(Exception):
+                convo = _conversation_from_payload(self._client, item)
+                if convo.type == "dm":
+                    out.append(convo)
+        return out
+
+    async def list_groups(self) -> list[XmtpCliConversation]:
+        payload = await self._client.run_json(
+            ["conversations", "list", "--sync", "--type", "group", "--json"],
+            timeout_s=XMTPCMD_SYNC_TIMEOUT_S,
+        )
+        if not isinstance(payload, list):
+            return []
+        out: list[XmtpCliConversation] = []
+        for item in payload:
+            with contextlib.suppress(Exception):
+                convo = _conversation_from_payload(self._client, item)
+                if convo.type == "group":
+                    out.append(convo)
+        return out
+
+    async def sync_all_conversations(self) -> None:
+        await self._client.run_json(
+            ["conversations", "sync-all", "--json"],
+            timeout_s=XMTPCMD_SYNC_TIMEOUT_S,
+            json_expected=False,
+        )
+
+    async def messages(self, conversation_id: bytes | str, *, limit: int) -> list[XmtpCliMessage]:
+        cid = _conversation_id_text(conversation_id)
+        if not cid:
+            return []
+        payload = await self._client.run_json(
+            [
+                "conversation",
+                "messages",
+                cid,
+                "--json",
+                "--limit",
+                str(max(1, int(limit))),
+                "--direction",
+                "ascending",
+            ],
+            timeout_s=XMTPCMD_SYNC_TIMEOUT_S,
+            json_expected=False,
+        )
+        if not isinstance(payload, list):
+            return []
+        out: list[XmtpCliMessage] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            message = _message_from_payload(item)
+            if message is not None:
+                out.append(message)
+        return out
+
+    def stream_all_messages(self) -> XmtpCliMessageStream:
+        return XmtpCliMessageStream(self._client)
+
+
+class XmtpCliClient:
+    def __init__(
+        self,
+        *,
+        env_name: str,
+        cli_path: Path,
+        env_file: Path,
+        db_path: Path,
+        runtime_env: dict[str, str],
+        inbox_id: str,
+        address: str,
+    ) -> None:
+        self.env_name = env_name
+        self.cli_path = cli_path
+        self.env_file = env_file
+        self.db_path = db_path
+        self.env = dict(runtime_env)
+        self.inbox_id = inbox_id
+        self.inboxId = inbox_id
+        self.address = address
+        self.account_address = address
+        self.conversations = XmtpCliConversations(self)
+
+    def command_for(self, args: list[str]) -> list[str]:
+        cmd = [str(self.cli_path), *args]
+        if "--env-file" not in args:
+            cmd.extend(["--env-file", str(self.env_file)])
+        if "--db-path" not in args:
+            cmd.extend(["--db-path", str(self.db_path)])
+        if "--env" not in args:
+            cmd.extend(["--env", self.env_name])
+        return cmd
+
+    async def run_json(
+        self,
+        args: list[str],
+        *,
+        timeout_s: float,
+        json_expected: bool = True,
+    ) -> Any:
+        cmd = self.command_for(args)
+        proc = await asyncio.to_thread(_run_process, cmd, self.env, timeout_s)
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+            raise RuntimeError(
+                f"xmtp command failed: {_summarize_error_text(detail)}"
+            )
+        if not json_expected:
+            payload = _extract_first_json_value(proc.stdout)
+            return payload if payload is not None else {}
+        payload = _extract_first_json_value(proc.stdout)
+        if payload is None:
+            merged = "\n".join(part for part in (proc.stdout.strip(), proc.stderr.strip()) if part)
+            raise RuntimeError(
+                "xmtp command returned no JSON payload: "
+                f"{_summarize_error_text(merged)}"
+            )
+        return payload
+
+    async def resolve_address_for_inbox_id(self, inbox_id: str) -> str:
+        target = " ".join((inbox_id or "").split()).strip().lower()
+        if not _looks_like_inbox_id(target):
+            return ""
+        payload = await self.run_json(
+            ["inbox-states", target, "--json"],
+            timeout_s=XMTPCMD_TIMEOUT_S,
+        )
+        if not isinstance(payload, list):
+            return ""
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            recovery = item.get("recoveryIdentifier")
+            address = _extract_identifier_address(recovery)
+            if address:
+                return address
+            identifiers = item.get("identifiers")
+            if isinstance(identifiers, list):
+                for identifier in identifiers:
+                    address = _extract_identifier_address(identifier)
+                    if address:
+                        return address
+        return ""
+
+    async def resolve_inbox_id_for_address(self, address: str) -> str:
+        dm = await self.conversations.new_dm(address)
+        return dm.peer_inbox_id
+
+
 def default_message() -> str:
     hostname = socket.gethostname()
     return f"hi from {hostname} (tako)"
@@ -103,79 +461,79 @@ def default_message() -> str:
 
 def hint_for_xmtp_error(error: Exception) -> str | None:
     message = str(error)
-    if "grpc-status header missing" in message or "IdentityApi" in message:
+    lowered = message.lower()
+    if "addressvalidation" in lowered or "invalid address" in lowered:
+        return "Tip: XMTP CLI DM creation expects an Ethereum address (`0x...`) for create-dm."
+    if "file is not a database" in lowered or "sqlcipher" in lowered:
+        return (
+            "Tip: the local XMTP database appears corrupted or uses a different "
+            "encryption key. Remove `.tako/xmtp-db` to rebuild it from network state."
+        )
+    if "grpc-status header missing" in lowered or "identityapi" in lowered:
         return (
             "Tip: check outbound HTTPS/HTTP2 access to "
             "grpc.production.xmtp.network:443 and "
             "message-history.production.ephemera.network."
         )
-    if "file is not a database" in message or "sqlcipher" in message:
-        return (
-            "Tip: the local XMTP database appears corrupted or was created with a "
-            "different encryption key. Remove .tako/xmtp-db or set "
-            "a fresh runtime directory to recreate it."
-        )
     return None
 
 
+def probe_xmtp_runtime() -> tuple[bool, str]:
+    probe = _probe_xmtp_runtime()
+    return probe.ok, probe.status
+
+
 def probe_xmtp_import() -> tuple[bool, str]:
-    package_version: str | None = None
-    try:
-        package_version = metadata.version("xmtp")
-    except metadata.PackageNotFoundError:
-        package_version = None
-    except Exception:
-        package_version = None
-
-    try:
-        import xmtp  # noqa: F401
-    except ModuleNotFoundError as exc:
-        missing_name = (exc.name or "").strip()
-        if missing_name == "xmtp":
-            if package_version:
-                return False, f"package xmtp=={package_version} is installed, but import still failed: {exc}"
-            return False, "package `xmtp` is not installed in this Python environment."
-        if package_version:
-            return False, f"xmtp=={package_version} is installed, but a subdependency is missing: {missing_name or exc}"
-        return False, f"xmtp import failed: missing module {missing_name or exc}"
-    except Exception as exc:  # noqa: BLE001
-        if package_version:
-            return False, f"xmtp=={package_version} is installed, but import failed: {exc}"
-        return False, f"xmtp import failed: {exc}"
-
-    if package_version:
-        return True, f"import OK (xmtp=={package_version})"
-    return True, "import OK"
+    # Compatibility shim: runtime health now reflects CLI status, not Python imports.
+    return probe_xmtp_runtime()
 
 
-async def create_client(env: str, db_root: Path, wallet_key: str, db_encryption_key: str) -> object:
-    from xmtp import Client
-    from xmtp.signers import create_signer
-    from xmtp.types import ClientOptions
+async def create_client(env: str, db_root: Path, wallet_key: str, db_encryption_key: str) -> XmtpCliClient:
+    bootstrap_note = ensure_workspace_xmtp_runtime_if_needed()
+    if bootstrap_note.startswith("workspace xmtp bootstrap failed"):
+        raise RuntimeError(bootstrap_note)
 
-    signer = create_signer(wallet_key)
+    node_runtime = ensure_workspace_node_runtime(min_major=XMTP_MIN_NODE_MAJOR, require_npm=False)
+    if not node_runtime.ok:
+        raise RuntimeError(node_runtime.detail)
 
-    def db_path_for(inbox_id: str) -> str:
-        return str(db_root / f"xmtp-{env}-{inbox_id}.db3")
+    env_file = _write_xmtp_client_env(wallet_key, db_encryption_key)
+    db_root.mkdir(parents=True, exist_ok=True)
+    db_path = db_root / "xmtp-production.db3"
 
-    # Contract: no user-facing env-var configuration. Defaults are intentionally fixed for now.
-    api_url = None
-    history_sync_url = None
-    gateway_host = None
-    disable_history_sync = True
-    disable_device_sync = True
-
-    options = ClientOptions(
-        env=env,
-        api_url=api_url,
-        history_sync_url=history_sync_url,
-        gateway_host=gateway_host,
-        disable_history_sync=disable_history_sync,
-        disable_device_sync=disable_device_sync,
-        db_path=db_path_for,
-        db_encryption_key=db_encryption_key,
+    probe_client = XmtpCliClient(
+        env_name=(env or "production").strip() or "production",
+        cli_path=workspace_xmtp_cli_path(),
+        env_file=env_file,
+        db_path=db_path,
+        runtime_env=node_runtime.env,
+        inbox_id="",
+        address="",
     )
-    return await Client.create(signer, options)
+    payload = await probe_client.run_json(
+        ["client", "info", "--json"],
+        timeout_s=XMTPCMD_TIMEOUT_S,
+        json_expected=False,
+    )
+    info = payload.get("properties") if isinstance(payload, dict) else None
+    if not isinstance(info, dict):
+        raise RuntimeError("xmtp client info returned unexpected payload")
+    inbox_id = str(info.get("inboxId") or "").strip()
+    address = str(info.get("address") or "").strip().lower()
+    if not inbox_id:
+        raise RuntimeError("xmtp client info did not return inboxId")
+    if not _looks_like_eth_address(address):
+        raise RuntimeError("xmtp client info did not return a valid wallet address")
+
+    return XmtpCliClient(
+        env_name=(env or "production").strip() or "production",
+        cli_path=workspace_xmtp_cli_path(),
+        env_file=env_file,
+        db_path=db_path,
+        runtime_env=node_runtime.env,
+        inbox_id=inbox_id,
+        address=address,
+    )
 
 
 def canonical_profile_name(identity_name: str) -> str:
@@ -345,245 +703,6 @@ def ensure_profile_avatar(state_dir: Path, name: str) -> tuple[Path, str, str]:
     return avatar_path, data_uri, digest
 
 
-def _profile_targets(client: object) -> list[object]:
-    targets: list[object] = []
-    seen: set[int] = set()
-    for candidate in (
-        client,
-        getattr(client, "preferences", None),
-        getattr(client, "_client", None),
-        getattr(client, "_ffi", None),
-    ):
-        if candidate is None:
-            continue
-        ident = id(candidate)
-        if ident in seen:
-            continue
-        seen.add(ident)
-        targets.append(candidate)
-    return targets
-
-
-def _coerce_nonempty_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        try:
-            value = value.decode("utf-8", errors="ignore")
-        except Exception:
-            return None
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    return text or None
-
-
-def _looks_like_avatar_value(value: str) -> bool:
-    lowered = value.strip().lower()
-    if not lowered:
-        return False
-    if lowered.startswith(("data:image/", "http://", "https://", "ipfs://", "file://")):
-        return True
-    if lowered.startswith("/"):
-        return True
-    return lowered.endswith((".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"))
-
-
-def _extract_profile_fields(payload: Any) -> tuple[str | None, str | None]:
-    if payload is None:
-        return None, None
-    if isinstance(payload, str):
-        text = _coerce_nonempty_string(payload)
-        if not text:
-            return None, None
-        if _looks_like_avatar_value(text):
-            return None, text
-        return text, None
-
-    keys_name = ("display_name", "displayName", "name", "username", "profile_name", "profileName", "inbox_name", "inboxName")
-    keys_avatar = ("avatar_url", "avatarUrl", "avatar", "image_url", "imageUrl", "profile_image", "profileImage")
-
-    if isinstance(payload, dict):
-        name = None
-        avatar = None
-        for key in keys_name:
-            if key in payload:
-                name = _coerce_nonempty_string(payload.get(key))
-                if name:
-                    break
-        for key in keys_avatar:
-            if key in payload:
-                avatar = _coerce_nonempty_string(payload.get(key))
-                if avatar:
-                    break
-        return name, avatar
-
-    name = None
-    avatar = None
-    for key in keys_name:
-        with contextlib.suppress(Exception):
-            candidate = _coerce_nonempty_string(getattr(payload, key))
-            if candidate:
-                name = candidate
-                break
-    for key in keys_avatar:
-        with contextlib.suppress(Exception):
-            candidate = _coerce_nonempty_string(getattr(payload, key))
-            if candidate:
-                avatar = candidate
-                break
-    return name, avatar
-
-
-async def _call_noarg_member(member: Any) -> tuple[bool, Any, str | None]:
-    try:
-        result = member() if callable(member) else member
-        if inspect.isawaitable(result):
-            result = await result
-        return True, result, None
-    except TypeError:
-        return False, None, None
-    except Exception as exc:  # noqa: BLE001
-        return False, None, f"{exc.__class__.__name__}: {exc}"
-
-
-def _name_matches(observed_name: str | None, desired_name: str) -> bool:
-    if not observed_name:
-        return False
-    return canonical_profile_name(observed_name) == desired_name
-
-
-def _avatar_matches(observed_avatar: str | None, avatar_values: tuple[str, ...]) -> bool:
-    if not observed_avatar:
-        return False
-    probe = observed_avatar.strip()
-    if not probe:
-        return False
-    if probe in avatar_values:
-        return True
-    lowered = probe.lower()
-    for value in avatar_values:
-        if lowered == value.strip().lower():
-            return True
-    return False
-
-
-async def _read_profile_metadata(targets: list[object]) -> tuple[bool, str | None, str | None, tuple[str, ...]]:
-    read_api_found = False
-    observed_name: str | None = None
-    observed_avatar: str | None = None
-    errors: list[str] = []
-
-    combined_members = (
-        "get_profile",
-        "profile",
-        "get_user_profile",
-        "user_profile",
-        "get_public_profile",
-        "public_profile",
-        "get_identity_profile",
-        "identity_profile",
-        "get_profile_metadata",
-        "profile_metadata",
-    )
-    name_members = (
-        "get_display_name",
-        "display_name",
-        "get_inbox_name",
-        "inbox_name",
-        "get_profile_name",
-        "profile_name",
-        "get_username",
-        "username",
-        "get_name",
-    )
-    avatar_members = (
-        "get_avatar_url",
-        "avatar_url",
-        "get_avatar",
-        "avatar",
-        "get_profile_image",
-        "profile_image",
-        "get_image_url",
-        "image_url",
-    )
-
-    async def inspect_member(target: object, member_name: str, *, mode: str) -> None:
-        nonlocal read_api_found, observed_name, observed_avatar
-        member = getattr(target, member_name, None)
-        if member is None:
-            return
-        read_api_found = True
-        success, value, call_error = await _call_noarg_member(member)
-        if call_error:
-            entry = f"{target.__class__.__name__}.{member_name}: {call_error}"
-            if entry not in errors:
-                errors.append(entry)
-        if not success:
-            return
-        if mode == "name":
-            candidate = _coerce_nonempty_string(value)
-            if candidate and observed_name is None:
-                observed_name = candidate
-            return
-        if mode == "avatar":
-            candidate = _coerce_nonempty_string(value)
-            if candidate and observed_avatar is None:
-                observed_avatar = candidate
-            return
-        extracted_name, extracted_avatar = _extract_profile_fields(value)
-        if extracted_name and observed_name is None:
-            observed_name = extracted_name
-        if extracted_avatar and observed_avatar is None:
-            observed_avatar = extracted_avatar
-
-    for target in targets:
-        for member_name in combined_members:
-            await inspect_member(target, member_name, mode="combined")
-        for member_name in name_members:
-            await inspect_member(target, member_name, mode="name")
-        for member_name in avatar_members:
-            await inspect_member(target, member_name, mode="avatar")
-        if observed_name is not None and observed_avatar is not None:
-            break
-
-    return read_api_found, observed_name, observed_avatar, tuple(errors[:8])
-
-
-async def _invoke_method_variants(method: Any, variants: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> tuple[bool, tuple[str, ...]]:
-    errors: list[str] = []
-    for args, kwargs in variants:
-        try:
-            result = method(*args, **kwargs)
-            if inspect.isawaitable(result):
-                await result
-            return True, tuple(errors)
-        except TypeError:
-            continue
-        except Exception as exc:  # noqa: BLE001
-            summary = f"{exc.__class__.__name__}: {exc}"
-            if summary not in errors:
-                errors.append(summary)
-    return False, tuple(errors)
-
-
-def _avatar_candidates(avatar_path: Path | None, avatar_data_uri: str) -> tuple[str, ...]:
-    values: list[str] = []
-    if avatar_data_uri:
-        values.append(avatar_data_uri)
-    if avatar_path is not None:
-        values.append(str(avatar_path))
-        try:
-            values.append(avatar_path.resolve().as_uri())
-        except Exception:
-            pass
-    deduped: list[str] = []
-    for value in values:
-        if value and value not in deduped:
-            deduped.append(value)
-    return tuple(deduped)
-
-
 def _read_profile_broadcast_state(path: Path) -> tuple[str, str, dict[str, str]]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -626,810 +745,48 @@ def _write_profile_broadcast_state(
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _inbox_id_to_bytes(inbox_id: str) -> bytes:
-    value = (inbox_id or "").strip()
-    if not value:
-        return b""
-    if value.startswith(("0x", "0X")):
-        value = value[2:]
-    if value and len(value) % 2 == 0:
-        with contextlib.suppress(Exception):
-            return bytes.fromhex(value)
-    return value.encode("utf-8")
-
-
-def _client_inbox_id_bytes(client: object) -> bytes:
-    for attr in ("inbox_id_bytes", "inboxIdBytes"):
-        candidate = getattr(client, attr, None)
-        if isinstance(candidate, (bytes, bytearray)):
-            return bytes(candidate)
-        if isinstance(candidate, str):
-            converted = _inbox_id_to_bytes(candidate)
-            if converted:
-                return converted
-    inbox_id = _coerce_nonempty_string(getattr(client, "inbox_id", None))
-    if inbox_id is None:
-        inbox_id = _coerce_nonempty_string(getattr(client, "inboxId", None))
-    if inbox_id is None:
-        return b""
-    return _inbox_id_to_bytes(inbox_id)
-
-
-def _conversation_peer_inbox_id(conversation: object) -> str | None:
-    for target in _conversation_targets(conversation, include_ffi=True):
-        for attr in ("peer_inbox_id", "peerInboxId", "dm_peer_inbox_id", "dmPeerInboxId"):
-            member = getattr(target, attr, None)
-            if member is None:
-                continue
-            try:
-                value = member() if callable(member) else member
-            except Exception:
-                continue
-            peer = _coerce_nonempty_string(value)
-            if peer:
-                return peer
-    return None
-
-
 def _conversation_state_key(conversation: object) -> str:
-    peer = _conversation_peer_inbox_id(conversation)
+    peer = " ".join((str(getattr(conversation, "peer_inbox_id", "") or "")).split()).strip().lower()
     if peer:
-        return f"peer:{peer.lower()}"
-
-    for attr in ("conversation_id", "group_id", "id"):
-        value = getattr(conversation, attr, None)
-        if isinstance(value, (bytes, bytearray)):
-            return f"conversation:{bytes(value).hex()}"
-        if isinstance(value, str):
-            text = value.strip().lower()
-            if text:
-                return f"conversation:{text}"
+        return f"peer:{peer}"
+    cid = _conversation_id_hex(conversation)
+    if cid:
+        return f"conversation:{cid}"
     return ""
 
 
-def _conversation_targets(conversation: object, *, include_ffi: bool = False) -> list[object]:
-    targets: list[object] = []
-    seen: set[int] = set()
-    ffi_target = getattr(conversation, "_ffi", None) if include_ffi else None
-    for candidate in (
-        conversation,
-        ffi_target,
-        getattr(conversation, "group", None),
-        getattr(conversation, "_group", None),
-    ):
-        if candidate is None:
-            continue
-        ident = id(candidate)
-        if ident in seen:
-            continue
-        seen.add(ident)
-        targets.append(candidate)
-    return targets
-
-
-def _conversation_supports_app_data(conversation: object) -> bool:
-    for target in _conversation_targets(conversation, include_ffi=True):
-        for attr in ("app_data", "appData", "get_app_data", "getAppData", "update_app_data", "updateAppData"):
-            if getattr(target, attr, None) is not None:
-                return True
-    return False
+def _conversation_id_hex(conversation: object) -> str:
+    id_hex = getattr(conversation, "id_hex", None)
+    if isinstance(id_hex, str) and id_hex.strip():
+        return id_hex.strip().lower()
+    for attr in ("id", "conversation_id"):
+        raw = getattr(conversation, attr, None)
+        if isinstance(raw, (bytes, bytearray)):
+            value = bytes(raw).hex()
+            if value:
+                return value.lower()
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    return ""
 
 
 def _conversation_kind(conversation: object) -> str:
-    peer = _conversation_peer_inbox_id(conversation)
+    kind = str(getattr(conversation, "type", "") or "").strip().lower()
+    if kind in {"dm", "group"}:
+        return kind
+    peer = " ".join((str(getattr(conversation, "peer_inbox_id", "") or "")).split()).strip().lower()
     if peer:
         return "dm"
-    if _conversation_supports_app_data(conversation):
+    if any(
+        hasattr(conversation, attr)
+        for attr in ("update_app_data", "updateAppData", "app_data", "appData")
+    ):
         return "group"
-    return "unknown"
-
-
-def _normalize_eth_address(value: str | None) -> str:
-    text = _coerce_nonempty_string(value)
-    if not text:
-        return ""
-    if _ETH_ADDRESS_RE.fullmatch(text):
-        return text
-    return ""
-
-
-def _client_account_address(client: object) -> str:
-    candidates: list[Any] = []
-    for attr in ("account_address", "accountAddress", "wallet_address", "walletAddress", "address"):
-        candidates.append(getattr(client, attr, None))
-    account_identifier = getattr(client, "account_identifier", None)
-    if account_identifier is None:
-        account_identifier = getattr(client, "accountIdentifier", None)
-    if account_identifier is not None:
-        candidates.append(account_identifier)
-        for attr in ("value", "identifier", "address"):
-            candidates.append(getattr(account_identifier, attr, None))
-    for candidate in candidates:
-        if isinstance(candidate, dict):
-            for key in ("value", "identifier", "address"):
-                nested = _normalize_eth_address(str(candidate.get(key) or ""))
-                if nested:
-                    return nested
-            continue
-        if isinstance(candidate, str):
-            normalized = _normalize_eth_address(candidate)
-            if normalized:
-                return normalized
-    return ""
-
-
-def _client_inbox_id(client: object) -> str:
-    inbox = _coerce_nonempty_string(getattr(client, "inbox_id", None))
-    if inbox:
-        return inbox
-    inbox = _coerce_nonempty_string(getattr(client, "inboxId", None))
-    return inbox or ""
-
-
-async def _list_group_conversations(client: object) -> list[object]:
-    conversations = getattr(client, "conversations", None)
-    if conversations is None:
-        return []
-
-    for attr in ("list_groups", "listGroups", "list_group_conversations"):
-        list_groups = getattr(conversations, attr, None)
-        if not callable(list_groups):
-            continue
-        try:
-            result = list_groups()
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception:
-            continue
-        if isinstance(result, list):
-            return [item for item in result if _conversation_supports_app_data(item)]
-    return []
-
-
-async def _list_dm_conversations(client: object) -> list[object]:
-    conversations = getattr(client, "conversations", None)
-    if conversations is None:
-        return []
-
-    for attr in ("list_dms", "listDms", "list_dm_conversations"):
-        list_dms = getattr(conversations, attr, None)
-        if not callable(list_dms):
-            continue
-        try:
-            result = list_dms()
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception:
-            continue
-        if isinstance(result, list):
-            return [item for item in result if _conversation_kind(item) == "dm"]
-
-    for attr in ("list", "list_conversations", "listConversations"):
-        list_all = getattr(conversations, attr, None)
-        if not callable(list_all):
-            continue
-        try:
-            result = list_all()
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception:
-            continue
-        if isinstance(result, list):
-            return [item for item in result if _conversation_kind(item) == "dm"]
-    return []
-
-
-async def _get_or_create_dm_conversation(client: object, inbox_id: str) -> tuple[object | None, str | None]:
-    conversations = getattr(client, "conversations", None)
-    if conversations is None:
-        return None, "client conversations API unavailable"
-    target_inbox = " ".join((inbox_id or "").split()).strip()
-    target_address = _client_account_address(client)
-    if not target_inbox and not target_address:
-        return None, "missing inbox id/address for DM lookup"
-
-    lookup_errors: list[str] = []
-    for attr in ("get_dm_by_inbox_id", "getDmByInboxId"):
-        if not target_inbox:
-            continue
-        method = getattr(conversations, attr, None)
-        if not callable(method):
-            continue
-        try:
-            result = method(target_inbox)
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception as exc:  # noqa: BLE001
-            lookup_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
-            continue
-        if result is not None:
-            return result, None
-    for attr in ("get_dm_by_address", "getDmByAddress"):
-        if not target_address:
-            continue
-        method = getattr(conversations, attr, None)
-        if not callable(method):
-            continue
-        try:
-            result = method(target_address)
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception as exc:  # noqa: BLE001
-            lookup_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
-            continue
-        if result is not None:
-            return result, None
-    for attr in ("get_dm", "getDm"):
-        method = getattr(conversations, attr, None)
-        if not callable(method):
-            continue
-        for value in (target_inbox, target_address):
-            if not value:
-                continue
-            try:
-                result = method(value)
-                if inspect.isawaitable(result):
-                    result = await result
-            except Exception as exc:  # noqa: BLE001
-                lookup_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
-                continue
-            if result is not None:
-                return result, None
-
-    create_errors: list[str] = []
-    for attr in ("create_dm_by_inbox_id", "createDmByInboxId", "new_dm_by_inbox_id", "newDmByInboxId"):
-        if not target_inbox:
-            continue
-        method = getattr(conversations, attr, None)
-        if not callable(method):
-            continue
-        try:
-            result = method(target_inbox)
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception as exc:  # noqa: BLE001
-            create_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
-            continue
-        if result is not None:
-            return result, None
-    for attr in ("new_dm", "newDm", "create_dm", "createDm", "new_dm_by_address", "newDmByAddress"):
-        if not target_address:
-            continue
-        method = getattr(conversations, attr, None)
-        if not callable(method):
-            continue
-        try:
-            result = method(target_address)
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception as exc:  # noqa: BLE001
-            create_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
-            continue
-        if result is not None:
-            return result, None
-    if target_address:
-        identifier: Any = None
-        identifier_error = ""
-        try:
-            from xmtp.identifiers import Identifier, IdentifierKind
-
-            identifier = Identifier(kind=IdentifierKind.ETHEREUM, value=target_address)
-        except Exception as exc:  # noqa: BLE001
-            identifier_error = f"identifier-build: {exc.__class__.__name__}: {exc}"
-        if identifier_error:
-            create_errors.append(identifier_error)
-        if identifier is not None:
-            for attr in ("new_dm_with_identifier", "newDmWithIdentifier", "create_dm_with_identifier", "createDmWithIdentifier"):
-                method = getattr(conversations, attr, None)
-                if not callable(method):
-                    continue
-                try:
-                    result = method(identifier)
-                    if inspect.isawaitable(result):
-                        result = await result
-                except Exception as exc:  # noqa: BLE001
-                    create_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
-                    continue
-                if result is not None:
-                    return result, None
-
-    all_errors = tuple(lookup_errors + create_errors)
-    if all_errors:
-        return None, all_errors[0]
-    return None, "DM lookup/create API unavailable"
-
-
-async def _read_group_app_data(conversation: object) -> tuple[str | None, str | None]:
-    found = False
-    for target in _conversation_targets(conversation, include_ffi=True):
-        for attr in ("app_data", "appData", "get_app_data", "getAppData"):
-            member = getattr(target, attr, None)
-            if member is None:
-                continue
-            found = True
-            try:
-                value = member() if callable(member) else member
-                if inspect.isawaitable(value):
-                    value = await value
-            except Exception as exc:  # noqa: BLE001
-                return None, f"read appData failed via {target.__class__.__name__}.{attr}: {exc.__class__.__name__}: {exc}"
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="ignore")
-            if value is None:
-                return "", None
-            if isinstance(value, str):
-                return value, None
-    if found:
-        return "", None
-    return None, "group appData read API unavailable"
-
-
-async def _update_group_app_data(conversation: object, encoded: str) -> tuple[bool, str | None]:
-    errors: list[str] = []
-    for target in _conversation_targets(conversation, include_ffi=True):
-        for attr in ("update_app_data", "updateAppData", "set_app_data", "setAppData"):
-            method = getattr(target, attr, None)
-            if not callable(method):
-                continue
-            for args, kwargs in (
-                ((encoded,), {}),
-                ((), {"app_data": encoded}),
-                ((), {"appData": encoded}),
-                ((), {"value": encoded}),
-            ):
-                try:
-                    result = method(*args, **kwargs)
-                    if inspect.isawaitable(result):
-                        await result
-                    return True, None
-                except TypeError:
-                    continue
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(f"{target.__class__.__name__}.{attr}: {exc.__class__.__name__}: {exc}")
-                    break
-    if errors:
-        return False, errors[0]
-    return False, "group appData update API unavailable"
-
-
-def _base64url_decode(value: str) -> bytes:
-    padded = value + ("=" * (-len(value) % 4))
-    return base64.urlsafe_b64decode(padded.encode("ascii"))
-
-
-def _base64url_encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-
-def _decode_convos_app_data(encoded: str) -> tuple[bytes, str | None]:
-    text = (encoded or "").strip()
-    if not text:
-        return b"", None
-    try:
-        raw = _base64url_decode(text)
-    except Exception as exc:  # noqa: BLE001
-        return b"", f"base64url decode failed: {exc.__class__.__name__}: {exc}"
-    if not raw:
-        return b"", None
-    if raw[0] != 0x1F:
-        return raw, None
-    if len(raw) < 5:
-        return b"", "convos marker present but payload is too short"
-    expected_size = int.from_bytes(raw[1:5], byteorder="big", signed=False)
-    try:
-        decompressed = zlib.decompress(raw[5:])
-    except Exception as exc:  # noqa: BLE001
-        return b"", f"convos zlib decompress failed: {exc.__class__.__name__}: {exc}"
-    if expected_size > 0 and expected_size != len(decompressed):
-        return b"", f"convos decompressed size mismatch: expected={expected_size} got={len(decompressed)}"
-    return decompressed, None
-
-
-def _encode_convos_app_data(payload: bytes) -> str:
-    if not payload:
-        return ""
-    compressed = zlib.compress(payload)
-    marker_payload = bytes([0x1F]) + len(payload).to_bytes(4, byteorder="big", signed=False) + compressed
-    encoded_source = marker_payload if len(marker_payload) < len(payload) else payload
-    return _base64url_encode(encoded_source)
-
-
-def _convos_proto_classes() -> tuple[Any, Any] | None:
-    global _CONVOS_PROTO_CACHE, _CONVOS_PROTO_UNAVAILABLE
-    if _CONVOS_PROTO_CACHE is not None:
-        return _CONVOS_PROTO_CACHE
-    if _CONVOS_PROTO_UNAVAILABLE:
-        return None
-    try:
-        from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
-    except Exception:
-        _CONVOS_PROTO_UNAVAILABLE = True
-        return None
-
-    try:
-        file_proto = descriptor_pb2.FileDescriptorProto()
-        file_proto.name = "converge_cv_profile_metadata.proto"
-        file_proto.package = "converge.cv"
-        file_proto.syntax = "proto3"
-
-        profile = file_proto.message_type.add()
-        profile.name = "ConversationProfile"
-
-        field = profile.field.add()
-        field.name = "inboxId"
-        field.number = 1
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_BYTES
-
-        field = profile.field.add()
-        field.name = "name"
-        field.number = 2
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
-
-        field = profile.field.add()
-        field.name = "image"
-        field.number = 3
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
-
-        field = profile.field.add()
-        field.name = "encryptedImage"
-        field.number = 4
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_BYTES
-
-        metadata = file_proto.message_type.add()
-        metadata.name = "ConversationCustomMetadata"
-
-        field = metadata.field.add()
-        field.name = "tag"
-        field.number = 1
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
-
-        field = metadata.field.add()
-        field.name = "profiles"
-        field.number = 2
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
-        field.type_name = ".converge.cv.ConversationProfile"
-
-        field = metadata.field.add()
-        field.name = "expiresAtUnix"
-        field.number = 3
-        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
-        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_SFIXED64
-
-        pool = descriptor_pool.DescriptorPool()
-        pool.Add(file_proto)
-        metadata_descriptor = pool.FindMessageTypeByName("converge.cv.ConversationCustomMetadata")
-        profile_descriptor = pool.FindMessageTypeByName("converge.cv.ConversationProfile")
-
-        get_message_class = getattr(message_factory, "GetMessageClass", None)
-        if callable(get_message_class):
-            metadata_cls = get_message_class(metadata_descriptor)
-            profile_cls = get_message_class(profile_descriptor)
-        else:
-            factory = message_factory.MessageFactory(pool)
-            metadata_cls = factory.GetPrototype(metadata_descriptor)
-            profile_cls = factory.GetPrototype(profile_descriptor)
-    except Exception:
-        _CONVOS_PROTO_UNAVAILABLE = True
-        return None
-
-    _CONVOS_PROTO_CACHE = (metadata_cls, profile_cls)
-    return _CONVOS_PROTO_CACHE
-
-
-def _convos_profile_name(name: str) -> str:
-    trimmed = " ".join((name or "").split()).strip()
-    if not trimmed:
-        return "Tako"
-    return trimmed[:50].strip() or "Tako"
-
-
-def _upsert_profile_metadata_blob(
-    metadata_blob: bytes,
-    *,
-    inbox_id: bytes,
-    display_name: str,
-    avatar_url: str,
-) -> tuple[bytes | None, str | None]:
-    classes = _convos_proto_classes()
-    if classes is None:
-        return None, "protobuf runtime unavailable for Convos metadata"
-    metadata_cls, _profile_cls = classes
-
-    metadata = metadata_cls()
-    if metadata_blob:
-        try:
-            metadata.ParseFromString(metadata_blob)
-        except Exception as exc:  # noqa: BLE001
-            return None, f"ConversationCustomMetadata parse failed: {exc.__class__.__name__}: {exc}"
-
-    profile = None
-    for item in getattr(metadata, "profiles", []):
-        if bytes(getattr(item, "inboxId", b"")) == inbox_id:
-            profile = item
-            break
-    if profile is None:
-        profile = metadata.profiles.add()
-
-    profile.inboxId = inbox_id
-    profile.name = _convos_profile_name(display_name)
-
-    trimmed_avatar = _trim_profile_avatar_url(avatar_url)
-    if trimmed_avatar:
-        profile.image = trimmed_avatar
-        with contextlib.suppress(Exception):
-            profile.ClearField("encryptedImage")
-
-    try:
-        return metadata.SerializeToString(), None
-    except Exception as exc:  # noqa: BLE001
-        return None, f"ConversationCustomMetadata serialize failed: {exc.__class__.__name__}: {exc}"
-
-
-async def _upsert_profile_metadata_for_conversation(
-    conversation: object,
-    *,
-    inbox_id: bytes,
-    display_name: str,
-    avatar_url: str,
-) -> tuple[bool, str | None]:
-    encoded_app_data, read_error = await _read_group_app_data(conversation)
-    if read_error:
-        return False, read_error
-    raw_blob, decode_error = _decode_convos_app_data(encoded_app_data or "")
-    if decode_error:
-        return False, decode_error
-    updated_blob, upsert_error = _upsert_profile_metadata_blob(
-        raw_blob,
-        inbox_id=inbox_id,
-        display_name=display_name,
-        avatar_url=avatar_url,
-    )
-    if updated_blob is None:
-        return False, upsert_error
-    updated_encoded = _encode_convos_app_data(updated_blob)
-    if (encoded_app_data or "").strip() == updated_encoded:
-        return True, None
-    return await _update_group_app_data(conversation, updated_encoded)
-
-
-def _build_converge_dm_profile_message(name: str, avatar_url: str) -> dict[str, Any]:
-    payload = _build_profile_payload(name, avatar_url, include_timestamp=True)
-    return {
-        "type": dict(CONVERGE_PROFILE_CONTENT_TYPE),
-        "parameters": {},
-        "content": _encode_profile_payload(payload).encode("utf-8"),
-    }
-
-
-def _converge_profile_content_type_string() -> str:
-    return (
-        f"{CONVERGE_PROFILE_CONTENT_TYPE['authorityId']}/"
-        f"{CONVERGE_PROFILE_CONTENT_TYPE['typeId']}:"
-        f"{int(CONVERGE_PROFILE_CONTENT_TYPE['versionMajor'])}."
-        f"{int(CONVERGE_PROFILE_CONTENT_TYPE['versionMinor'])}"
-    )
-
-
-def _converge_profile_content_type_variants() -> tuple[Any, ...]:
-    variants: list[Any] = [
-        dict(CONVERGE_PROFILE_CONTENT_TYPE),
-        _converge_profile_content_type_string(),
-    ]
-    with contextlib.suppress(Exception):
-        from xmtp_content_type_primitives import ContentTypeId
-
-        variants.insert(
-            0,
-            ContentTypeId(
-                authority_id=str(CONVERGE_PROFILE_CONTENT_TYPE["authorityId"]),
-                type_id=str(CONVERGE_PROFILE_CONTENT_TYPE["typeId"]),
-                version_major=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMajor"]),
-                version_minor=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMinor"]),
-            ),
-        )
-    deduped: list[Any] = []
-    seen: set[tuple[str, str]] = set()
-    for value in variants:
-        key = (value.__class__.__name__, str(value))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(value)
-    return tuple(deduped)
-
-
-def _encode_converge_profile_ffi_content(payload: bytes) -> tuple[bytes | None, str | None]:
-    try:
-        from xmtp_bindings import xmtpv3 as bindings
-    except Exception as exc:  # noqa: BLE001
-        return None, f"xmtp bindings unavailable for custom content encode: {exc.__class__.__name__}: {exc}"
-    converter = getattr(bindings, "_UniffiConverterTypeFfiEncodedContent", None)
-    if converter is None or not hasattr(converter, "lower"):
-        return None, "xmtp bindings encoded-content converter unavailable"
-    try:
-        type_id = bindings.FfiContentTypeId(
-            authority_id=str(CONVERGE_PROFILE_CONTENT_TYPE["authorityId"]),
-            type_id=str(CONVERGE_PROFILE_CONTENT_TYPE["typeId"]),
-            version_major=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMajor"]),
-            version_minor=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMinor"]),
-        )
-        encoded = bindings.FfiEncodedContent(
-            type_id=type_id,
-            parameters={},
-            fallback=None,
-            compression=None,
-            content=payload,
-        )
-        rust_buf = converter.lower(encoded)
-        try:
-            size = int(getattr(rust_buf, "len", 0))
-            data = getattr(rust_buf, "data", None)
-            if data is None:
-                return None, "xmtp bindings encoded-content buffer has no data pointer"
-            raw = bytes(data[0:size])
-        finally:
-            free = getattr(rust_buf, "free", None)
-            if callable(free):
-                with contextlib.suppress(Exception):
-                    free()
-        if not raw:
-            return None, "xmtp bindings encoded-content result is empty"
-        return raw, None
-    except Exception as exc:  # noqa: BLE001
-        return None, f"encode custom content via xmtp bindings failed: {exc.__class__.__name__}: {exc}"
-
-
-def _build_converge_profile_ffi_send_options(*, should_push: bool) -> tuple[Any | None, str | None]:
-    try:
-        from xmtp_bindings import xmtpv3 as bindings
-    except Exception as exc:  # noqa: BLE001
-        return None, f"xmtp bindings unavailable for send options: {exc.__class__.__name__}: {exc}"
-    opts_cls = getattr(bindings, "FfiSendMessageOpts", None)
-    if opts_cls is None:
-        return None, "xmtp bindings send options type unavailable"
-    attempts: tuple[tuple[tuple[Any, ...], dict[str, Any]], ...] = (
-        ((), {"should_push": should_push}),
-        ((), {"shouldPush": should_push}),
-        ((should_push,), {}),
-    )
-    for args, kwargs in attempts:
-        try:
-            return opts_cls(*args, **kwargs), None
-        except TypeError:
-            continue
-        except Exception as exc:  # noqa: BLE001
-            return None, f"build send options failed: {exc.__class__.__name__}: {exc}"
-    return None, "unable to build xmtp send options for custom content"
-
-
-def _conversation_ffi_send_targets(conversation: object) -> list[object]:
-    targets: list[object] = []
-    seen: set[int] = set()
-    for candidate in (getattr(conversation, "_ffi", None), conversation):
-        if candidate is None:
-            continue
-        # Wrapper objects expose send(content, content_type); the low-level FFI target
-        # exposes send(encoded_bytes, opts), which is what we need for custom content.
-        if getattr(candidate, "_ffi", None) is not None and getattr(candidate, "_client", None) is not None:
-            continue
-        ident = id(candidate)
-        if ident in seen:
-            continue
-        seen.add(ident)
-        targets.append(candidate)
-    return targets
-
-
-async def _send_converge_profile_via_ffi(conversation: object, *, payload: bytes) -> tuple[bool, str | None]:
-    encoded_bytes, encode_error = _encode_converge_profile_ffi_content(payload)
-    if encoded_bytes is None:
-        return False, encode_error
-    send_options, options_error = _build_converge_profile_ffi_send_options(should_push=False)
-    if send_options is None:
-        return False, options_error
-    errors: list[str] = []
-    for target in _conversation_ffi_send_targets(conversation):
-        target_name = target.__class__.__name__
-        for method_name in ("send", "send_optimistic", "sendOptimistic"):
-            method = getattr(target, method_name, None)
-            if not callable(method):
-                continue
-            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = [
-                ((encoded_bytes, send_options), {}),
-                ((encoded_bytes,), {"opts": send_options}),
-                ((encoded_bytes,), {"options": send_options}),
-            ]
-            success, call_errors = await _invoke_method_variants(method, variants)
-            if success:
-                return True, None
-            for item in call_errors:
-                entry = f"{target_name}.{method_name}: {item}"
-                if entry not in errors:
-                    errors.append(entry)
-    if errors:
-        return False, errors[0]
-    return False, "DM custom content low-level send API unavailable"
-
-
-async def _send_converge_profile_message_to_dm(
-    conversation: object,
-    *,
-    display_name: str,
-    avatar_url: str,
-) -> tuple[bool, str | None]:
-    encoded = _build_converge_dm_profile_message(display_name, avatar_url)
-    payload = encoded["content"]
-    payload_types = _converge_profile_content_type_variants()
-    errors: list[str] = []
-    targets = _conversation_targets(conversation)
-
-    for target in targets:
-        target_name = target.__class__.__name__
-        for method_name in ("send_encoded_content", "sendEncodedContent", "send_content", "sendContent"):
-            method = getattr(target, method_name, None)
-            if not callable(method):
-                continue
-            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = [
-                ((encoded,), {"should_push": False}),
-                ((encoded,), {"shouldPush": False}),
-                ((encoded,), {"options": {"should_push": False}}),
-                ((encoded,), {"options": {"shouldPush": False}}),
-                ((encoded, {"should_push": False}), {}),
-                ((encoded, {"shouldPush": False}), {}),
-                ((encoded,), {}),
-            ]
-            success, call_errors = await _invoke_method_variants(method, variants)
-            if success:
-                return True, None
-            for item in call_errors:
-                entry = f"{target_name}.{method_name}: {item}"
-                if entry not in errors:
-                    errors.append(entry)
-
-        send_method = getattr(target, "send", None)
-        if callable(send_method):
-            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-            for payload_type in payload_types:
-                variants.extend(
-                    [
-                        ((payload,), {"content_type": payload_type}),
-                        ((payload,), {"contentType": payload_type}),
-                        ((payload, payload_type), {}),
-                        ((payload, payload_type), {"should_push": False}),
-                        ((payload, payload_type), {"shouldPush": False}),
-                        ((payload, payload_type), {"options": {"should_push": False}}),
-                        ((payload, payload_type), {"options": {"shouldPush": False}}),
-                        ((payload, payload_type, {"should_push": False}), {}),
-                        ((payload, payload_type, {"shouldPush": False}), {}),
-                    ]
-                )
-            success, call_errors = await _invoke_method_variants(send_method, variants)
-            if success:
-                return True, None
-            for item in call_errors:
-                entry = f"{target_name}.send: {item}"
-                if entry not in errors:
-                    errors.append(entry)
-
-    ffi_success, ffi_error = await _send_converge_profile_via_ffi(conversation, payload=payload)
-    if ffi_success:
-        return True, None
-    if ffi_error:
-        errors.append(ffi_error)
-
-    if errors:
-        return False, errors[0]
-    return False, "DM custom content send API unavailable"
+    return "dm"
 
 
 async def publish_profile_message(
-    client: object,
+    client: XmtpCliClient,
     *,
     state_dir: Path,
     identity_name: str,
@@ -1437,7 +794,7 @@ async def publish_profile_message(
     include_self_dm: bool = True,
     include_known_dm_peers: bool = True,
     include_known_groups: bool = True,
-    target_conversation: object | None = None,
+    target_conversation: XmtpCliConversation | None = None,
 ) -> XmtpProfileBroadcastResult:
     payload_sha256 = _payload_sha256(identity_name, avatar_url)
     state_path = state_dir / XMTP_PROFILE_BROADCAST_STATE_FILE
@@ -1446,85 +803,80 @@ async def publish_profile_message(
         self_sent_at = ""
         peer_sent = {}
 
-    self_sent = False
-    peer_sent_count = 0
     errors: list[str] = []
-    inbox_id = _client_inbox_id_bytes(client)
-    inbox_id_text = _client_inbox_id(client)
-    account_address = _client_account_address(client)
-    if not inbox_id:
-        errors.append("client inbox_id unavailable for Convos appData profile upsert")
-    if not inbox_id_text and not account_address:
-        errors.append("client inbox_id/address unavailable for Converge DM profile metadata")
-    now_stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+    state_key_by_conversation_id: dict[str, str] = {}
 
-    async def publish_for_conversation(conversation: object, *, label: str) -> None:
-        nonlocal peer_sent_count
+    dm_ids: list[str] = []
+    group_ids: list[str] = []
+
+    async def queue_conversation(conversation: object, *, label: str) -> None:
         key = _conversation_state_key(conversation)
         if not key:
             errors.append(f"{label}: missing stable conversation key")
             return
         if key in peer_sent:
             return
-        kind = _conversation_kind(conversation)
-        if kind == "group":
-            if not inbox_id:
-                errors.append(f"{label}: missing inbox_id bytes for group appData upsert")
-                return
-            ok, error = await _upsert_profile_metadata_for_conversation(
-                conversation,
-                inbox_id=inbox_id,
-                display_name=identity_name,
-                avatar_url=avatar_url,
-            )
-        elif kind == "dm":
-            ok, error = await _send_converge_profile_message_to_dm(
-                conversation,
-                display_name=identity_name,
-                avatar_url=avatar_url,
-            )
-        else:
-            ok, error = False, "unknown conversation type for profile publish"
-        if ok:
-            peer_sent[key] = now_stamp
-            peer_sent_count += 1
+        cid = _conversation_id_hex(conversation)
+        if not cid:
+            errors.append(f"{label}: conversation id is missing")
             return
-        if error:
-            errors.append(f"{label}: {error}")
+        state_key_by_conversation_id[cid] = key
+        if _conversation_kind(conversation) == "group":
+            group_ids.append(cid)
+            return
+        dm_ids.append(cid)
 
     if target_conversation is not None:
-        await publish_for_conversation(target_conversation, label="target-conversation")
+        await queue_conversation(target_conversation, label="target-conversation")
 
     if include_known_groups:
-        for group in await _list_group_conversations(client):
-            await publish_for_conversation(group, label="group")
+        for group in await client.conversations.list_groups():
+            await queue_conversation(group, label="group")
 
     if include_known_dm_peers:
-        for dm in await _list_dm_conversations(client):
-            peer_id = _conversation_peer_inbox_id(dm)
-            if peer_id and inbox_id_text and peer_id.lower() == inbox_id_text.lower():
+        for dm in await client.conversations.list_dms():
+            peer = dm.peer_inbox_id.strip().lower()
+            if peer and peer == client.inbox_id.lower():
                 continue
-            await publish_for_conversation(dm, label="dm")
+            await queue_conversation(dm, label="dm")
 
-    if include_self_dm and not self_sent_at:
-        if not inbox_id_text and not account_address:
-            errors.append("self-dm: client inbox_id/address unavailable")
-        else:
-            self_dm, dm_error = await _get_or_create_dm_conversation(client, inbox_id_text)
-            if self_dm is None:
-                if dm_error:
-                    errors.append(f"self-dm: {dm_error}")
-            else:
-                ok, send_error = await _send_converge_profile_message_to_dm(
-                    self_dm,
-                    display_name=identity_name,
-                    avatar_url=avatar_url,
-                )
-                if ok:
-                    self_sent = True
-                    self_sent_at = now_stamp
-                elif send_error:
-                    errors.append(f"self-dm: {send_error}")
+    helper_target_id = _conversation_id_hex(target_conversation) if target_conversation is not None else ""
+    helper = await _run_profile_helper(
+        client,
+        mode="publish",
+        display_name=identity_name,
+        avatar_url=avatar_url,
+        target_conversation_id=helper_target_id,
+        include_self_dm=include_self_dm and not bool(self_sent_at),
+        dm_conversation_ids=dm_ids,
+        group_conversation_ids=group_ids,
+    )
+
+    helper_errors = helper.get("errors")
+    if isinstance(helper_errors, list):
+        for item in helper_errors:
+            if isinstance(item, str) and item.strip():
+                errors.append(item.strip())
+
+    self_sent = bool(helper.get("fallbackSelfSent"))
+    sent_ids_raw = helper.get("sentConversationIds")
+    sent_ids: set[str] = set()
+    if isinstance(sent_ids_raw, list):
+        for item in sent_ids_raw:
+            if isinstance(item, str) and item.strip():
+                sent_ids.add(item.strip().lower())
+
+    now_stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+    peer_sent_count = 0
+    for cid in sorted(sent_ids):
+        key = state_key_by_conversation_id.get(cid)
+        if not key:
+            continue
+        peer_sent[key] = now_stamp
+        peer_sent_count += 1
+
+    if self_sent:
+        self_sent_at = now_stamp
 
     _write_profile_broadcast_state(
         state_path,
@@ -1538,162 +890,6 @@ async def publish_profile_message(
         peer_sent_count=peer_sent_count,
         errors=tuple(errors[:8]),
     )
-
-
-async def _apply_profile_metadata(
-    targets: list[object],
-    name: str,
-    avatar_values: tuple[str, ...],
-    *,
-    apply_name: bool,
-    apply_avatar: bool,
-) -> tuple[bool, bool, bool, tuple[str, ...]]:
-    profile_api_found = False
-    applied_name = False
-    applied_avatar = False
-    errors: list[str] = []
-
-    combined_methods = (
-        "set_profile",
-        "update_profile",
-        "set_user_profile",
-        "update_user_profile",
-        "set_public_profile",
-        "update_public_profile",
-    )
-    name_methods = (
-        "set_display_name",
-        "update_display_name",
-        "set_name",
-        "update_name",
-        "set_inbox_name",
-        "set_username",
-        "update_username",
-    )
-    avatar_methods = (
-        "set_avatar_url",
-        "update_avatar_url",
-        "set_avatar",
-        "update_avatar",
-        "set_profile_image",
-        "update_profile_image",
-        "set_image_url",
-    )
-
-    if apply_name or (apply_avatar and avatar_values):
-        for target in targets:
-            target_name = target.__class__.__name__
-            for method_name in combined_methods:
-                method = getattr(target, method_name, None)
-                if not callable(method):
-                    continue
-                profile_api_found = True
-                success = False
-                avatar_success = False
-                if apply_avatar and avatar_values:
-                    avatar_variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-                    for avatar in avatar_values:
-                        avatar_variants.extend(
-                            [
-                                ((), {"name": name, "avatar_url": avatar}),
-                                ((), {"display_name": name, "avatar_url": avatar}),
-                                ((), {"name": name, "avatar": avatar}),
-                                ((), {"display_name": name, "avatar": avatar}),
-                                (({"name": name, "avatar_url": avatar},), {}),
-                                (({"display_name": name, "avatar_url": avatar},), {}),
-                            ]
-                        )
-                    success, call_errors = await _invoke_method_variants(method, avatar_variants)
-                    for item in call_errors:
-                        entry = f"{target_name}.{method_name}: {item}"
-                        if entry not in errors:
-                            errors.append(entry)
-                    if success:
-                        avatar_success = True
-                if not success and apply_name:
-                    success, call_errors = await _invoke_method_variants(
-                        method,
-                        [
-                            ((), {"name": name}),
-                            ((), {"display_name": name}),
-                            (({"name": name},), {}),
-                            (({"display_name": name},), {}),
-                        ],
-                    )
-                    for item in call_errors:
-                        entry = f"{target_name}.{method_name}: {item}"
-                        if entry not in errors:
-                            errors.append(entry)
-                if success:
-                    if apply_name:
-                        applied_name = True
-                    if avatar_success:
-                        applied_avatar = True
-                    break
-            name_done = (not apply_name) or applied_name
-            avatar_done = (not apply_avatar) or (not avatar_values) or applied_avatar
-            if name_done and avatar_done:
-                break
-
-    if apply_name and not applied_name:
-        for target in targets:
-            target_name = target.__class__.__name__
-            for method_name in name_methods:
-                method = getattr(target, method_name, None)
-                if not callable(method):
-                    continue
-                profile_api_found = True
-                success, call_errors = await _invoke_method_variants(
-                    method,
-                    [
-                        ((name,), {}),
-                        ((), {"name": name}),
-                        ((), {"display_name": name}),
-                        ((), {"value": name}),
-                    ],
-                )
-                for item in call_errors:
-                    entry = f"{target_name}.{method_name}: {item}"
-                    if entry not in errors:
-                        errors.append(entry)
-                if success:
-                    applied_name = True
-                    break
-            if applied_name:
-                break
-
-    if apply_avatar and avatar_values and not applied_avatar:
-        for target in targets:
-            target_name = target.__class__.__name__
-            for method_name in avatar_methods:
-                method = getattr(target, method_name, None)
-                if not callable(method):
-                    continue
-                profile_api_found = True
-                variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-                for avatar in avatar_values:
-                    variants.extend(
-                        [
-                            ((avatar,), {}),
-                            ((), {"avatar_url": avatar}),
-                            ((), {"avatar": avatar}),
-                            ((), {"image_url": avatar}),
-                            ((), {"value": avatar}),
-                        ]
-                    )
-                success, call_errors = await _invoke_method_variants(method, variants)
-                for item in call_errors:
-                    entry = f"{target_name}.{method_name}: {item}"
-                    if entry not in errors:
-                        errors.append(entry)
-                if success:
-                    applied_avatar = True
-                    break
-            if applied_avatar:
-                break
-
-    trimmed_errors = tuple(errors[:8])
-    return profile_api_found, applied_name, applied_avatar, trimmed_errors
 
 
 def _write_profile_state(
@@ -1737,7 +933,7 @@ def _write_profile_state(
 
 
 async def sync_identity_profile(
-    client: object,
+    client: XmtpCliClient,
     *,
     state_dir: Path,
     identity_name: str,
@@ -1747,32 +943,9 @@ async def sync_identity_profile(
     avatar_path: Path | None = None
     avatar_data_uri = ""
     avatar_sha256 = ""
-    avatar_values: tuple[str, ...] = ()
     if generate_avatar:
         avatar_path, avatar_data_uri, avatar_sha256 = ensure_profile_avatar(state_dir, name)
-        avatar_values = _avatar_candidates(avatar_path, avatar_data_uri)
 
-    targets = _profile_targets(client)
-    profile_read_api_found, observed_name, observed_avatar, read_errors = await _read_profile_metadata(targets)
-    name_verified = _name_matches(observed_name, name)
-    avatar_verified = (not avatar_values) or _avatar_matches(observed_avatar, avatar_values)
-    needs_name_update = not name_verified
-    needs_avatar_update = bool(avatar_values) and not avatar_verified
-
-    profile_api_found = False
-    applied_name = False
-    applied_avatar = False
-    apply_errors: tuple[str, ...] = ()
-    if needs_name_update or needs_avatar_update:
-        profile_api_found, applied_name, applied_avatar, apply_errors = await _apply_profile_metadata(
-            targets,
-            name,
-            avatar_values,
-            apply_name=needs_name_update,
-            apply_avatar=needs_avatar_update,
-        )
-    name_in_sync = name_verified or applied_name
-    avatar_in_sync = (not avatar_values) or avatar_verified or applied_avatar
     fallback_result = await publish_profile_message(
         client,
         state_dir=state_dir,
@@ -1780,17 +953,25 @@ async def sync_identity_profile(
         avatar_url=avatar_data_uri,
         include_self_dm=True,
         include_known_dm_peers=True,
+        include_known_groups=True,
     )
-    errors = tuple(list(read_errors) + list(apply_errors) + list(fallback_result.errors))[:8]
 
+    applied_name = fallback_result.self_sent or fallback_result.peer_sent_count > 0
+    applied_avatar = bool(avatar_data_uri) and applied_name
+    name_in_sync = applied_name or not bool(fallback_result.errors)
+    avatar_in_sync = (not avatar_data_uri) or applied_avatar or not bool(fallback_result.errors)
+    observed_name = name if name_in_sync else None
+    observed_avatar = avatar_data_uri if avatar_in_sync and avatar_data_uri else None
+
+    errors = tuple(fallback_result.errors)[:8]
     state_path = state_dir / XMTP_PROFILE_STATE_FILE
     _write_profile_state(
         state_path,
         name=name,
         avatar_path=avatar_path,
         avatar_sha256=avatar_sha256,
-        profile_read_api_found=profile_read_api_found,
-        profile_api_found=profile_api_found,
+        profile_read_api_found=True,
+        profile_api_found=True,
         applied_name=applied_name,
         applied_avatar=applied_avatar,
         observed_name=observed_name,
@@ -1805,8 +986,8 @@ async def sync_identity_profile(
         name=name,
         state_path=state_path,
         avatar_path=avatar_path,
-        profile_read_api_found=profile_read_api_found,
-        profile_api_found=profile_api_found,
+        profile_read_api_found=True,
+        profile_api_found=True,
         applied_name=applied_name,
         applied_avatar=applied_avatar,
         observed_name=observed_name,
@@ -1820,8 +1001,8 @@ async def sync_identity_profile(
 
 
 async def ensure_profile_message_for_conversation(
-    client: object,
-    conversation: object,
+    client: XmtpCliClient,
+    conversation: XmtpCliConversation,
     *,
     state_dir: Path,
     identity_name: str,
@@ -1840,61 +1021,17 @@ async def ensure_profile_message_for_conversation(
 
 
 async def set_typing_indicator(conversation: object, active: bool) -> bool:
-    targets = [conversation]
-    ffi = getattr(conversation, "_ffi", None)
-    if ffi is not None:
-        targets.append(ffi)
-
-    if active:
-        simple_names = ("set_typing", "send_typing", "typing", "set_typing_indicator", "send_typing_indicator")
-        state_names = ("start_typing", "begin_typing", "typing_start")
-    else:
-        simple_names = ("set_typing", "send_typing", "typing", "set_typing_indicator", "send_typing_indicator")
-        state_names = ("stop_typing", "end_typing", "typing_stop")
-
-    for target in targets:
-        for name in simple_names:
-            method = getattr(target, name, None)
-            if not callable(method):
-                continue
-            if await _call_maybe_async(method, active):
-                return True
-            if await _call_maybe_async(method):
-                return True
-        for name in state_names:
-            method = getattr(target, name, None)
-            if not callable(method):
-                continue
-            if await _call_maybe_async(method):
-                return True
-
     return False
 
 
-async def _call_maybe_async(method, *args) -> bool:
-    try:
-        result = method(*args)
-        if inspect.isawaitable(result):
-            await result
-        return True
-    except TypeError:
-        return False
-    except Exception:
-        return False
-
-
 async def close_client(client: object) -> None:
-    for attr in ("close", "disconnect"):
-        method = getattr(client, attr, None)
-        if not callable(method):
-            continue
-        try:
-            result = method()
-            if inspect.isawaitable(result):
-                await result
-        except Exception:
-            pass
+    close_fn = getattr(client, "close", None)
+    if not callable(close_fn):
         return
+    with contextlib.suppress(Exception):
+        maybe_result = close_fn()
+        if inspect.isawaitable(maybe_result):
+            await maybe_result
 
 
 async def send_dm(
@@ -1919,3 +1056,849 @@ def send_dm_sync(
     db_encryption_key: str,
 ) -> None:
     asyncio.run(send_dm(recipient, message, env, db_root, wallet_key, db_encryption_key))
+
+
+def _conversation_from_payload(client: XmtpCliClient, payload: Any) -> XmtpCliConversation:
+    if not isinstance(payload, dict):
+        raise RuntimeError("conversation payload must be an object")
+    cid = str(payload.get("id") or "").strip().lower()
+    if not cid:
+        raise RuntimeError("conversation payload missing id")
+    kind = str(payload.get("type") or "").strip().lower()
+    if kind not in {"dm", "group"}:
+        kind = "dm" if isinstance(payload.get("peerInboxId"), str) else "group"
+    peer = str(payload.get("peerInboxId") or "").strip().lower()
+    return XmtpCliConversation(
+        _client=client,
+        id_hex=cid,
+        type=kind,
+        peer_inbox_id=peer,
+    )
+
+
+def _message_from_payload(payload: dict[str, Any]) -> XmtpCliMessage | None:
+    message_id = str(payload.get("id") or "").strip()
+    conversation_id = str(payload.get("conversationId") or payload.get("conversation_id") or "").strip()
+    sender = str(payload.get("senderInboxId") or payload.get("sender_inbox_id") or "").strip().lower()
+    if not message_id or not conversation_id or not sender:
+        return None
+    content = payload.get("content")
+    if not isinstance(content, str):
+        content = None
+    content_type = payload.get("contentType")
+    if not isinstance(content_type, dict):
+        content_type = None
+    sent_text = str(payload.get("sentAt") or "").strip()
+    sent_at = _parse_sent_at(sent_text)
+    return XmtpCliMessage(
+        id=_hex_or_text_to_bytes(message_id),
+        conversation_id=_hex_or_text_to_bytes(conversation_id),
+        sender_inbox_id=sender,
+        content=content,
+        content_type=content_type,
+        sent_at=sent_at,
+    )
+
+
+def _extract_identifier_address(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    identifier = str(value.get("identifier") or "").strip().lower()
+    if not _looks_like_eth_address(identifier):
+        return ""
+    kind = value.get("identifierKind")
+    if kind in {0, "0", "ethereum", "ETHEREUM", None}:
+        return identifier
+    return ""
+
+
+def _extract_first_json_value(text: str) -> Any | None:
+    source = text or ""
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(source):
+        if char not in "[{":
+            continue
+        with contextlib.suppress(Exception):
+            value, _end = decoder.raw_decode(source[idx:])
+            return value
+    return None
+
+
+def _try_parse_json_line(line: str) -> Any | None:
+    stripped = (line or "").strip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    with contextlib.suppress(Exception):
+        return json.loads(stripped)
+    return None
+
+
+def _parse_sent_at(value: str) -> datetime:
+    text = " ".join((value or "").split()).strip()
+    if text:
+        with contextlib.suppress(Exception):
+            if text.endswith("Z"):
+                return datetime.fromisoformat(text[:-1] + "+00:00")
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+    return datetime.now(tz=timezone.utc)
+
+
+def _conversation_id_text(value: bytes | str) -> str:
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, str):
+        return value.strip().lower()
+    return ""
+
+
+def _hex_or_text_to_bytes(value: str) -> bytes:
+    text = " ".join((value or "").split()).strip()
+    if not text:
+        return b""
+    lowered = text.lower()
+    if lowered.startswith("0x"):
+        lowered = lowered[2:]
+    if lowered and len(lowered) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", lowered):
+        with contextlib.suppress(Exception):
+            return bytes.fromhex(lowered)
+    return text.encode("utf-8", errors="ignore")
+
+
+def _looks_like_eth_address(value: str) -> bool:
+    return bool(_ETH_ADDRESS_RE.fullmatch(" ".join((value or "").split()).strip()))
+
+
+def _looks_like_inbox_id(value: str) -> bool:
+    return bool(_INBOX_ID_RE.fullmatch(" ".join((value or "").split()).strip()))
+
+
+def _tail_append(lines: list[str], line: str, *, limit: int = 40) -> None:
+    lines.append(line)
+    if len(lines) > limit:
+        del lines[: len(lines) - limit]
+
+
+def _run_process(cmd: list[str], env: dict[str, str], timeout_s: float) -> subprocess.CompletedProcess[str]:
+    timeout = None if timeout_s <= 0 else float(timeout_s)
+    return subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=timeout,
+    )
+
+
+def _summarize_error_text(value: str, limit: int = 220) -> str:
+    text = " ".join((value or "").split())
+    if not text:
+        return "no details available"
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _write_xmtp_client_env(wallet_key: str, db_encryption_key: str) -> Path:
+    runtime = ensure_runtime_dirs(runtime_paths())
+    env_path = runtime.root / "xmtp" / "client.env"
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (
+        f"XMTP_WALLET_KEY={wallet_key.strip()}\n"
+        f"XMTP_DB_ENCRYPTION_KEY={db_encryption_key.strip()}\n"
+    )
+    env_path.write_text(payload, encoding="utf-8")
+    with contextlib.suppress(Exception):
+        os.chmod(env_path, 0o600)
+    return env_path
+
+
+_PROFILE_HELPER_SCRIPT = r'''#!/usr/bin/env node
+import fs from "node:fs";
+import zlib from "node:zlib";
+import { Client } from "@xmtp/node-sdk";
+import { isHex, toBytes } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+
+const MARKER = 0x1f;
+
+function readInput() {
+  const text = fs.readFileSync(0, "utf8");
+  if (!text.trim()) {
+    return {};
+  }
+  return JSON.parse(text);
+}
+
+function normalizeHex(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("0x") ? raw : `0x${raw}`;
+}
+
+function createSigner(walletKey) {
+  const hex = normalizeHex(walletKey);
+  if (!isHex(hex, { strict: true })) {
+    throw new Error("walletKey is not valid hex");
+  }
+  const account = privateKeyToAccount(hex);
+  return {
+    type: "EOA",
+    getIdentifier: () => ({
+      identifierKind: 0,
+      identifier: account.address.toLowerCase(),
+    }),
+    signMessage: async (message) => {
+      const signature = await account.signMessage({ message });
+      return toBytes(signature);
+    },
+  };
+}
+
+function hexToBytes(value) {
+  const hex = normalizeHex(value);
+  if (!isHex(hex, { strict: true })) {
+    throw new Error("dbEncryptionKey is not valid hex");
+  }
+  return toBytes(hex);
+}
+
+function toBase64Url(bytes) {
+  return Buffer.from(bytes)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function fromBase64Url(value) {
+  const base64 = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padding = base64.length % 4 === 0 ? "" : "=".repeat(4 - (base64.length % 4));
+  return Uint8Array.from(Buffer.from(base64 + padding, "base64"));
+}
+
+function readVarint(bytes, start) {
+  let offset = start;
+  let result = 0n;
+  let shift = 0n;
+  while (offset < bytes.length) {
+    const byte = bytes[offset++];
+    result |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) {
+      return { value: result, offset };
+    }
+    shift += 7n;
+    if (shift > 63n) {
+      throw new Error("malformed varint");
+    }
+  }
+  throw new Error("unexpected EOF while reading varint");
+}
+
+function encodeVarint(value) {
+  let current = typeof value === "bigint" ? value : BigInt(value);
+  const out = [];
+  while (current >= 0x80n) {
+    out.push(Number((current & 0x7fn) | 0x80n));
+    current >>= 7n;
+  }
+  out.push(Number(current));
+  return Uint8Array.from(out);
+}
+
+function encodeKey(fieldNumber, wireType) {
+  return encodeVarint((BigInt(fieldNumber) << 3n) | BigInt(wireType));
+}
+
+function parseFields(bytes) {
+  const fields = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    const fieldStart = offset;
+    const key = readVarint(bytes, offset);
+    offset = key.offset;
+    const keyNum = Number(key.value);
+    const fieldNumber = keyNum >> 3;
+    const wireType = keyNum & 0x7;
+    let value;
+    if (wireType === 0) {
+      const parsed = readVarint(bytes, offset);
+      value = parsed.value;
+      offset = parsed.offset;
+    } else if (wireType === 1) {
+      const end = offset + 8;
+      if (end > bytes.length) throw new Error("fixed64 exceeds payload");
+      value = bytes.slice(offset, end);
+      offset = end;
+    } else if (wireType === 2) {
+      const len = readVarint(bytes, offset);
+      offset = len.offset;
+      const length = Number(len.value);
+      const end = offset + length;
+      if (end > bytes.length) throw new Error("length-delimited exceeds payload");
+      value = bytes.slice(offset, end);
+      offset = end;
+    } else if (wireType === 5) {
+      const end = offset + 4;
+      if (end > bytes.length) throw new Error("fixed32 exceeds payload");
+      value = bytes.slice(offset, end);
+      offset = end;
+    } else {
+      throw new Error(`unsupported wire type ${wireType}`);
+    }
+    fields.push({
+      fieldNumber,
+      wireType,
+      value,
+      raw: bytes.slice(fieldStart, offset),
+    });
+  }
+  return fields;
+}
+
+function decodeUtf8(bytes) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function encodeLengthDelimited(fieldNumber, value) {
+  return concatBytes(encodeKey(fieldNumber, 2), encodeVarint(value.length), value);
+}
+
+function encodeStringField(fieldNumber, value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return encodeLengthDelimited(fieldNumber, new TextEncoder().encode(text));
+}
+
+function concatBytes(...chunks) {
+  if (!chunks.length) return new Uint8Array();
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function parseSfixed64(bytes) {
+  if (bytes.length !== 8) return 0n;
+  let value = 0n;
+  for (let i = 0; i < 8; i++) {
+    value |= BigInt(bytes[i]) << BigInt(i * 8);
+  }
+  if (value & (1n << 63n)) {
+    value -= 1n << 64n;
+  }
+  return value;
+}
+
+function encodeSfixed64(fieldNumber, value) {
+  let intValue = BigInt(value);
+  if (intValue < 0n) {
+    intValue = (1n << 64n) + intValue;
+  }
+  const bytes = new Uint8Array(8);
+  for (let i = 0; i < 8; i++) {
+    bytes[i] = Number((intValue >> BigInt(i * 8)) & 0xffn);
+  }
+  return concatBytes(encodeKey(fieldNumber, 1), bytes);
+}
+
+function bytesToHex(bytes) {
+  let out = "";
+  for (const byte of bytes) {
+    out += byte.toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
+function hexToRawBytes(value) {
+  const text = String(value || "").trim().replace(/^0x/i, "").toLowerCase();
+  if (!text || text.length % 2 !== 0 || !/^[0-9a-f]+$/.test(text)) {
+    return null;
+  }
+  const out = new Uint8Array(text.length / 2);
+  for (let i = 0; i < text.length; i += 2) {
+    out[i / 2] = parseInt(text.slice(i, i + 2), 16);
+  }
+  return out;
+}
+
+function decodeAppData(encoded) {
+  const text = String(encoded || "").trim();
+  if (!text) {
+    return { payload: new Uint8Array(), error: "" };
+  }
+  let raw;
+  try {
+    raw = fromBase64Url(text);
+  } catch (error) {
+    return { payload: new Uint8Array(), error: `base64url decode failed: ${String(error)}` };
+  }
+  if (!raw.length) {
+    return { payload: new Uint8Array(), error: "" };
+  }
+  if (raw[0] !== MARKER) {
+    return { payload: raw, error: "" };
+  }
+  if (raw.length < 5) {
+    return { payload: new Uint8Array(), error: "compressed payload marker missing size header" };
+  }
+  const expected = (raw[1] << 24) | (raw[2] << 16) | (raw[3] << 8) | raw[4];
+  try {
+    const inflated = zlib.inflateSync(Buffer.from(raw.slice(5)));
+    const payload = Uint8Array.from(inflated);
+    if (expected > 0 && payload.length !== expected) {
+      return { payload: new Uint8Array(), error: `decompressed size mismatch expected=${expected} got=${payload.length}` };
+    }
+    return { payload, error: "" };
+  } catch (error) {
+    return { payload: new Uint8Array(), error: `inflate failed: ${String(error)}` };
+  }
+}
+
+function encodeAppData(payload) {
+  if (!payload.length) {
+    return "";
+  }
+  const compressed = Uint8Array.from(zlib.deflateSync(Buffer.from(payload)));
+  const marker = concatBytes(
+    Uint8Array.from([MARKER]),
+    Uint8Array.from([
+      (payload.length >>> 24) & 0xff,
+      (payload.length >>> 16) & 0xff,
+      (payload.length >>> 8) & 0xff,
+      payload.length & 0xff,
+    ]),
+    compressed,
+  );
+  return toBase64Url(marker.length < payload.length ? marker : payload);
+}
+
+function parseProfile(bytes) {
+  const fields = parseFields(bytes);
+  const profile = {
+    inboxId: "",
+    name: "",
+    image: "",
+    extra: [],
+  };
+  for (const field of fields) {
+    if (field.fieldNumber === 1 && field.wireType === 2 && field.value instanceof Uint8Array) {
+      profile.inboxId = bytesToHex(field.value).toLowerCase();
+      continue;
+    }
+    if (field.fieldNumber === 2 && field.wireType === 2 && field.value instanceof Uint8Array) {
+      profile.name = decodeUtf8(field.value).trim();
+      continue;
+    }
+    if (field.fieldNumber === 3 && field.wireType === 2 && field.value instanceof Uint8Array) {
+      profile.image = decodeUtf8(field.value).trim();
+      continue;
+    }
+    profile.extra.push(field.raw);
+  }
+  return profile;
+}
+
+function encodeProfile(profile) {
+  const inbox = hexToRawBytes(profile.inboxId);
+  if (!inbox || !inbox.length) return null;
+  const chunks = [encodeLengthDelimited(1, inbox)];
+  const nameField = encodeStringField(2, profile.name);
+  if (nameField) chunks.push(nameField);
+  const imageField = encodeStringField(3, profile.image);
+  if (imageField) chunks.push(imageField);
+  if (Array.isArray(profile.extra)) {
+    for (const item of profile.extra) {
+      if (item instanceof Uint8Array) chunks.push(item);
+    }
+  }
+  return concatBytes(...chunks);
+}
+
+function parseMetadata(payload) {
+  const fields = parseFields(payload);
+  const metadata = {
+    tag: "",
+    expiresAtUnix: 0n,
+    profiles: [],
+    extra: [],
+  };
+  for (const field of fields) {
+    if (field.fieldNumber === 1 && field.wireType === 2 && field.value instanceof Uint8Array) {
+      metadata.tag = decodeUtf8(field.value).trim();
+      continue;
+    }
+    if (field.fieldNumber === 2 && field.wireType === 2 && field.value instanceof Uint8Array) {
+      const profile = parseProfile(field.value);
+      if (profile.inboxId) metadata.profiles.push(profile);
+      continue;
+    }
+    if (field.fieldNumber === 3 && field.wireType === 1 && field.value instanceof Uint8Array) {
+      metadata.expiresAtUnix = parseSfixed64(field.value);
+      continue;
+    }
+    metadata.extra.push(field.raw);
+  }
+  return metadata;
+}
+
+function encodeMetadata(metadata) {
+  const chunks = [];
+  const tagField = encodeStringField(1, metadata.tag);
+  if (tagField) chunks.push(tagField);
+  for (const profile of metadata.profiles || []) {
+    const encoded = encodeProfile(profile);
+    if (encoded) {
+      chunks.push(encodeLengthDelimited(2, encoded));
+    }
+  }
+  if (metadata.expiresAtUnix && metadata.expiresAtUnix !== 0n) {
+    chunks.push(encodeSfixed64(3, metadata.expiresAtUnix));
+  }
+  if (Array.isArray(metadata.extra)) {
+    for (const item of metadata.extra) {
+      if (item instanceof Uint8Array) chunks.push(item);
+    }
+  }
+  return chunks.length ? concatBytes(...chunks) : new Uint8Array();
+}
+
+function sanitizeDisplayName(value) {
+  const text = String(value || "").trim();
+  if (!text) return "Tako";
+  return text.slice(0, 50);
+}
+
+function sanitizeImage(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.slice(0, 4096);
+}
+
+function conversationKind(conversation) {
+  if (!conversation) return "unknown";
+  if (typeof conversation.peerInboxId === "string" && conversation.peerInboxId) {
+    return "dm";
+  }
+  if (typeof conversation.appData === "string" || typeof conversation.updateAppData === "function") {
+    return "group";
+  }
+  return "unknown";
+}
+
+async function maybeArray(value) {
+  const out = await Promise.resolve(value);
+  if (Array.isArray(out)) return out;
+  if (out && typeof out[Symbol.iterator] === "function") {
+    return Array.from(out);
+  }
+  return [];
+}
+
+async function main() {
+  const input = readInput();
+  const mode = String(input.mode || "sync").trim().toLowerCase() || "sync";
+  const env = String(input.env || "production").trim() || "production";
+  const displayName = sanitizeDisplayName(input.displayName);
+  const avatarUrl = sanitizeImage(input.avatarUrl);
+
+  const result = {
+    ok: true,
+    nameInSync: false,
+    avatarInSync: avatarUrl ? false : true,
+    appliedName: false,
+    appliedAvatar: false,
+    fallbackSelfSent: false,
+    fallbackPeerSentCount: 0,
+    sentConversationIds: [],
+    errors: [],
+  };
+
+  const signer = createSigner(input.walletKey || "");
+  const client = await Client.create(signer, {
+    env,
+    dbPath: String(input.dbPath || "").trim(),
+    dbEncryptionKey: hexToBytes(input.dbEncryptionKey || ""),
+    appVersion: `takobot-xmtp-helper/${String(input.version || "dev")}`,
+  });
+
+  const payload = {
+    type: "profile",
+    v: 1,
+    displayName,
+    ...(avatarUrl ? { avatarUrl } : {}),
+    ts: Date.now(),
+  };
+  const encodedContent = {
+    type: {
+      authorityId: "converge.cv",
+      typeId: "profile",
+      versionMajor: 1,
+      versionMinor: 0,
+    },
+    parameters: {},
+    content: new TextEncoder().encode(JSON.stringify(payload)),
+    fallback: undefined,
+  };
+
+  const dmTargets = new Set();
+  const groupTargets = new Set();
+
+  const explicitDmIds = Array.isArray(input.dmConversationIds) ? input.dmConversationIds : [];
+  const explicitGroupIds = Array.isArray(input.groupConversationIds) ? input.groupConversationIds : [];
+
+  for (const item of explicitDmIds) {
+    const id = String(item || "").trim().toLowerCase();
+    if (id) dmTargets.add(id);
+  }
+  for (const item of explicitGroupIds) {
+    const id = String(item || "").trim().toLowerCase();
+    if (id) groupTargets.add(id);
+  }
+
+  const targetConversationId = String(input.targetConversationId || "").trim().toLowerCase();
+  if (targetConversationId) {
+    try {
+      const targetConversation = await client.conversations.getConversationById(targetConversationId);
+      const kind = conversationKind(targetConversation);
+      if (kind === "group") {
+        groupTargets.add(targetConversationId);
+      } else if (kind === "dm") {
+        dmTargets.add(targetConversationId);
+      }
+    } catch (error) {
+      result.errors.push(`target conversation lookup failed: ${String(error)}`);
+    }
+  }
+
+  if (mode === "sync" && !dmTargets.size && !groupTargets.size) {
+    const dms = await maybeArray(client.conversations.listDms());
+    for (const dm of dms) {
+      if (dm && dm.id) dmTargets.add(String(dm.id).toLowerCase());
+    }
+    const groups = await maybeArray(client.conversations.listGroups());
+    for (const group of groups) {
+      if (group && group.id) groupTargets.add(String(group.id).toLowerCase());
+    }
+  }
+
+  const shouldSendSelf = Boolean(input.includeSelfDm);
+  if (shouldSendSelf) {
+    try {
+      let selfDm = await Promise.resolve(client.conversations.getDmByInboxId(client.inboxId));
+      if (!selfDm) {
+        if (client.accountIdentifier && typeof client.conversations.createDmWithIdentifier === "function") {
+          selfDm = await client.conversations.createDmWithIdentifier(client.accountIdentifier);
+        } else if (typeof client.conversations.createDm === "function") {
+          selfDm = await client.conversations.createDm(client.inboxId);
+        }
+      }
+      if (!selfDm) {
+        throw new Error("unable to resolve self DM");
+      }
+      await selfDm.send(encodedContent, { shouldPush: false });
+      result.fallbackSelfSent = true;
+      result.appliedName = true;
+      if (avatarUrl) result.appliedAvatar = true;
+      result.nameInSync = true;
+      if (avatarUrl) result.avatarInSync = true;
+    } catch (error) {
+      result.errors.push(`self-dm publish failed: ${String(error)}`);
+    }
+  }
+
+  for (const conversationId of dmTargets) {
+    try {
+      const dm = await client.conversations.getConversationById(conversationId);
+      if (!dm || conversationKind(dm) !== "dm") {
+        continue;
+      }
+      await dm.send(encodedContent, { shouldPush: false });
+      result.sentConversationIds.push(conversationId);
+      result.fallbackPeerSentCount += 1;
+      result.appliedName = true;
+      if (avatarUrl) result.appliedAvatar = true;
+      result.nameInSync = true;
+      if (avatarUrl) result.avatarInSync = true;
+    } catch (error) {
+      result.errors.push(`dm publish failed (${conversationId}): ${String(error)}`);
+    }
+  }
+
+  for (const conversationId of groupTargets) {
+    try {
+      const group = await client.conversations.getConversationById(conversationId);
+      if (!group || conversationKind(group) !== "group" || typeof group.updateAppData !== "function") {
+        continue;
+      }
+      const rawAppData = typeof group.appData === "string" ? group.appData : "";
+      const decoded = decodeAppData(rawAppData);
+      if (decoded.error) {
+        result.errors.push(`group appData decode failed (${conversationId}): ${decoded.error}`);
+        continue;
+      }
+      const metadata = parseMetadata(decoded.payload);
+      const selfInboxId = String(client.inboxId || "").trim().replace(/^0x/i, "").toLowerCase();
+      if (!selfInboxId) {
+        result.errors.push(`group profile upsert failed (${conversationId}): missing inboxId`);
+        continue;
+      }
+      let found = false;
+      for (const profile of metadata.profiles) {
+        if (String(profile.inboxId || "").trim().toLowerCase() !== selfInboxId) {
+          continue;
+        }
+        profile.inboxId = selfInboxId;
+        profile.name = displayName;
+        profile.image = avatarUrl;
+        found = true;
+        break;
+      }
+      if (!found) {
+        metadata.profiles.push({
+          inboxId: selfInboxId,
+          name: displayName,
+          image: avatarUrl,
+          extra: [],
+        });
+      }
+      const encoded = encodeAppData(encodeMetadata(metadata));
+      if ((rawAppData || "").trim() !== encoded) {
+        await group.updateAppData(encoded);
+        result.sentConversationIds.push(conversationId);
+        result.fallbackPeerSentCount += 1;
+        result.appliedName = true;
+        if (avatarUrl) result.appliedAvatar = true;
+      }
+      result.nameInSync = true;
+      if (avatarUrl) result.avatarInSync = true;
+    } catch (error) {
+      result.errors.push(`group profile upsert failed (${conversationId}): ${String(error)}`);
+    }
+  }
+
+  if (!result.nameInSync && result.errors.length === 0) {
+    result.nameInSync = true;
+  }
+  if (!avatarUrl && result.errors.length === 0) {
+    result.avatarInSync = true;
+  }
+
+  if (result.errors.length > 0) {
+    result.ok = false;
+  }
+
+  process.stdout.write(JSON.stringify(result));
+}
+
+main().catch((error) => {
+  process.stderr.write(String(error && error.stack ? error.stack : error));
+  process.exit(1);
+});
+'''
+
+
+async def _run_profile_helper(
+    client: XmtpCliClient,
+    *,
+    mode: str,
+    display_name: str,
+    avatar_url: str,
+    target_conversation_id: str = "",
+    include_self_dm: bool = True,
+    dm_conversation_ids: list[str] | None = None,
+    group_conversation_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    ensure_workspace_xmtp_runtime_if_needed()
+    node_runtime = ensure_workspace_node_runtime(min_major=XMTP_MIN_NODE_MAJOR, require_npm=False)
+    if not node_runtime.ok:
+        raise RuntimeError(node_runtime.detail)
+
+    node_exec = _resolve_node_exec(node_runtime.node_bin_dir)
+    if not node_exec:
+        raise RuntimeError(f"compatible node executable is unavailable (requires node >= {XMTP_MIN_NODE_MAJOR})")
+
+    script_path = _ensure_profile_helper_script()
+    payload = {
+        "version": XMTP_CLI_VERSION,
+        "env": client.env_name,
+        "walletKey": _read_env_var(client.env_file, "XMTP_WALLET_KEY"),
+        "dbEncryptionKey": _read_env_var(client.env_file, "XMTP_DB_ENCRYPTION_KEY"),
+        "dbPath": str(client.db_path),
+        "displayName": canonical_profile_name(display_name),
+        "avatarUrl": _trim_profile_avatar_url(avatar_url),
+        "mode": mode,
+        "targetConversationId": target_conversation_id,
+        "includeSelfDm": bool(include_self_dm),
+        "dmConversationIds": sorted({str(item).strip().lower() for item in (dm_conversation_ids or []) if str(item).strip()}),
+        "groupConversationIds": sorted({str(item).strip().lower() for item in (group_conversation_ids or []) if str(item).strip()}),
+    }
+    cmd = [node_exec, str(script_path)]
+    proc = await asyncio.to_thread(
+        subprocess.run,
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=node_runtime.env,
+        input=json.dumps(payload, ensure_ascii=True),
+        timeout=120,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+        raise RuntimeError(f"profile helper failed: {_summarize_error_text(detail)}")
+    parsed = _extract_first_json_value(proc.stdout)
+    if not isinstance(parsed, dict):
+        merged = "\n".join(part for part in (proc.stdout.strip(), proc.stderr.strip()) if part)
+        raise RuntimeError(f"profile helper returned invalid JSON: {_summarize_error_text(merged)}")
+    return parsed
+
+
+def _ensure_profile_helper_script() -> Path:
+    path = workspace_xmtp_helper_script_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current = ""
+    try:
+        current = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        current = ""
+    except Exception:
+        current = ""
+    if current != _PROFILE_HELPER_SCRIPT:
+        path.write_text(_PROFILE_HELPER_SCRIPT, encoding="utf-8")
+    with contextlib.suppress(Exception):
+        os.chmod(path, 0o700)
+    return path
+
+
+def _resolve_node_exec(node_bin_dir: Path | None) -> str:
+    if node_bin_dir is not None:
+        candidate = node_bin_dir / ("node.exe" if os.name == "nt" else "node")
+        if candidate.exists():
+            return str(candidate)
+    system_node = shutil.which("node")
+    return system_node or ""
+
+
+def _read_env_var(path: Path, key: str) -> str:
+    needle = f"{key}="
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or not line.startswith(needle):
+                continue
+            return line[len(needle) :].strip()
+    except Exception:
+        return ""
+    return ""

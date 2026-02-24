@@ -14,6 +14,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
 - Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`), and XMTP chat paths attempt automatic inference runtime repair before fallback.
 - Name-intent inference checks now run only when messages hint at rename/profile changes (for example `name`, `rename`, `display name`, `xmtp profile`) and use a short timeout, so smalltalk does not trigger extra classifier calls.
+- Explicit XMTP profile requests without a replacement name (for example `can you set your display name on XMTP yet?`) now trigger an immediate profile-sync attempt to current identity instead of falling through to generic model chat.
 - Prompt history context now compacts verbose inference-unavailable fallback diagnostics into a short marker line to avoid repeated fallback copy bloating later inference prompts.
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`), and interactive prompts like `Press any key to continue...` are detected as fast-fail errors instead of hanging until timeout.

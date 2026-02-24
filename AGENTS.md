@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-24 — XMTP display-name requests now bypass generic chat and trigger profile sync
+
+- What happened: messages like `can you set your display name on XMTP yet?` could miss deterministic rename/profile handling and fall through to generic model answers, even when the operator intended immediate XMTP profile sync behavior.
+- Fix: added explicit name-change request heuristics and XMTP profile-sync request detection so no-name XMTP profile requests trigger a direct profile sync to current identity with actionable follow-up guidance.
+- Prevention: keep operator control intents (identity/profile) deterministic-first, using model classification as fallback only, and cover request/info-query separation with identity parser tests.
+
 ### 2026-02-24 — XMTP self-DM profile fallback now uses address-safe DM creation
 
 - What happened: profile fallback could fail with `AddressValidation` when attempting self-DM creation via `new_dm(<inbox_id>)` on SDKs that require `new_dm(<0x address>)`.

@@ -157,6 +157,70 @@ def looks_like_name_change_hint(text: str) -> bool:
     return False
 
 
+def looks_like_name_change_request(text: str) -> bool:
+    lowered = _normalize_text(text).lower()
+    if not lowered:
+        return False
+
+    if extract_name_from_text(text):
+        return True
+
+    info_only_patterns = (
+        r"\bwhat(?:'s| is)\s+your\s+name\b",
+        r"\bwhat\s+is\s+your\s+display\s+name\b",
+        r"\bwhat\s+should\s+i\s+call\s+you\b",
+        r"\bwhat\s+do\s+i\s+call\s+you\b",
+        r"\bcan\s+you\s+tell\s+me\s+your\s+name\b",
+    )
+    if any(re.search(pattern, lowered) for pattern in info_only_patterns):
+        return False
+
+    action_words = ("set", "change", "update", "rename", "call", "fix", "correct", "sync", "refresh")
+    name_targets = (
+        "name",
+        "display name",
+        "profile name",
+        "identity name",
+        "xmtp profile",
+        "xmtp name",
+        "avatar",
+        "profile photo",
+        "profile image",
+    )
+
+    mentions_self = ("your " in lowered) or (" you " in f" {lowered} ")
+    has_action = any(word in lowered for word in action_words)
+    has_target = any(target in lowered for target in name_targets)
+    if mentions_self and has_action and has_target:
+        return True
+
+    request_phrases = (
+        "set your display name on xmtp",
+        "set your name on xmtp",
+        "update your xmtp profile",
+        "sync your xmtp profile",
+        "refresh your xmtp profile",
+        "set your avatar on xmtp",
+    )
+    if any(phrase in lowered for phrase in request_phrases):
+        return True
+
+    return False
+
+
+def looks_like_xmtp_profile_sync_request(text: str) -> bool:
+    lowered = _normalize_text(text).lower()
+    if not lowered:
+        return False
+    if "xmtp" not in lowered:
+        return False
+    targets = ("profile", "display name", "name", "avatar", "image", "photo")
+    actions = ("set", "update", "sync", "refresh", "fix", "repair", "apply")
+    if any(target in lowered for target in targets) and any(action in lowered for action in actions):
+        return True
+    return False
+
+
 def build_identity_name_prompt(*, text: str, current_name: str) -> str:
     return (
         "Extract the intended display name from the user message.\n"

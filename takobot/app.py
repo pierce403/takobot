@@ -80,6 +80,8 @@ from .identity import (
     extract_role_from_model_output,
     extract_role_from_text,
     looks_like_name_change_hint,
+    looks_like_name_change_request,
+    looks_like_xmtp_profile_sync_request,
     looks_like_role_change_request,
     looks_like_role_info_query,
 )
@@ -4867,7 +4869,7 @@ class TakoTerminalApp(App[None]):
 
         previous = self.identity_name
         parsed_name = extract_name_from_text(text)
-        requested = bool(parsed_name)
+        requested = bool(parsed_name) or looks_like_name_change_request(text)
         if not requested:
             requested, inferred_name = await self._infer_identity_name_intent(text)
             if not requested:
@@ -4875,6 +4877,13 @@ class TakoTerminalApp(App[None]):
             parsed_name = inferred_name
 
         if not parsed_name:
+            if looks_like_xmtp_profile_sync_request(text):
+                await self._sync_xmtp_profile_best_effort(reason="local-profile-sync-request")
+                self._write_tako(
+                    f"I just attempted XMTP profile sync to current identity `{self.identity_name}`. "
+                    "If you want a different name, send: `set your name to <name>`."
+                )
+                return True
             self._write_tako(
                 "I can do that. send the exact name you want me to use, for example: "
                 "`set your name to TAKOBOT`."

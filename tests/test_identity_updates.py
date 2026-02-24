@@ -10,6 +10,8 @@ from takobot.identity import (
     extract_role_from_model_output,
     extract_role_from_text,
     looks_like_name_change_hint,
+    looks_like_name_change_request,
+    looks_like_xmtp_profile_sync_request,
     looks_like_role_info_query,
     looks_like_role_change_request,
 )
@@ -57,6 +59,18 @@ class TestIdentityUpdates(unittest.TestCase):
         self.assertTrue(looks_like_name_change_hint("can you set your name on xmtp?"))
         self.assertTrue(looks_like_name_change_hint("please update your display name"))
         self.assertTrue(looks_like_name_change_hint("call yourself DantoBot"))
+
+    def test_name_change_request_detects_actionable_request_without_explicit_name(self) -> None:
+        self.assertTrue(looks_like_name_change_request("can you set your display name on xmtp yet?"))
+        self.assertTrue(looks_like_name_change_request("please sync your xmtp profile avatar"))
+
+    def test_name_change_request_ignores_info_only_name_questions(self) -> None:
+        self.assertFalse(looks_like_name_change_request("what is your name?"))
+        self.assertFalse(looks_like_name_change_request("what should I call you?"))
+
+    def test_xmtp_profile_sync_request_detection(self) -> None:
+        self.assertTrue(looks_like_xmtp_profile_sync_request("can you sync your xmtp profile now?"))
+        self.assertFalse(looks_like_xmtp_profile_sync_request("please sync your profile"))
 
     def test_role_change_detection_ignores_information_only_questions(self) -> None:
         self.assertFalse(looks_like_role_change_request("what is your purpose?"))

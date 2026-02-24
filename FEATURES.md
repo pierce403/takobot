@@ -113,6 +113,7 @@
   - XMTP chat now attempts automatic inference runtime repair before returning fallback-only replies.
   - Inference subprocess temp artifacts and `TMPDIR`/`TMP`/`TEMP` are pinned to `.tako/tmp/` (workspace-local runtime path).
   - Identity name-intent inference checks are now hint-gated (for example `name`/`rename`/`display name`/`xmtp profile`) with a short timeout, so normal chat like `hi` does not trigger separate rename-classifier inference calls.
+  - Operator requests to set/sync XMTP display name/profile without an explicit replacement name now trigger a direct profile-sync attempt to the current identity (plus follow-up guidance) instead of falling through to generic model chat.
   - Conversation prompt context now compacts verbose inference-unavailable fallback diagnostics into a short marker line, preventing repeated fallback/error copy from bloating subsequent inference prompts.
   - Runs XMTP daemon loop as a background task when paired.
   - When paired, startup sends the operator a brief XMTP "back online" status summary (version, stage, inference readiness, jobs/tasks counts, address).

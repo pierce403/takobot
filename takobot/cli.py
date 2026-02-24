@@ -106,6 +106,8 @@ from .identity import (
     extract_role_from_model_output,
     extract_role_from_text,
     looks_like_name_change_hint,
+    looks_like_name_change_request,
+    looks_like_xmtp_profile_sync_request,
     looks_like_role_change_request,
     looks_like_role_info_query,
 )
@@ -1684,7 +1686,7 @@ async def _maybe_handle_operator_identity_update(
 
     current_name, current_role = read_identity()
     parsed = extract_name_from_text(text)
-    requested_name_change = bool(parsed)
+    requested_name_change = bool(parsed) or looks_like_name_change_request(text)
     if not requested_name_change and inference_runtime.ready and looks_like_name_change_hint(text):
         prompt = build_identity_name_intent_prompt(text=text, current_name=current_name)
         try:
@@ -1704,6 +1706,19 @@ async def _maybe_handle_operator_identity_update(
         return False
     if requested_name_change:
         if not parsed:
+            if looks_like_xmtp_profile_sync_request(text):
+                await _sync_xmtp_profile(
+                    client,
+                    paths=paths,
+                    identity_name=current_name,
+                    hooks=hooks,
+                    context="operator-profile-sync-request",
+                )
+                await convo.send(
+                    f"I just attempted XMTP profile sync to current identity `{current_name}`. "
+                    "If you want a different name, send: `set your name to <name>`."
+                )
+                return True
             await convo.send(
                 "I can do that. send the exact name you want me to use, for example: "
                 "`set your name to TAKOBOT`."

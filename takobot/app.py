@@ -79,6 +79,7 @@ from .identity import (
     extract_name_from_model_output,
     extract_role_from_model_output,
     extract_role_from_text,
+    looks_like_name_change_hint,
     looks_like_role_change_request,
     looks_like_role_info_query,
 )
@@ -4814,6 +4815,8 @@ class TakoTerminalApp(App[None]):
         if self.inference_runtime is None or not self.inference_runtime.ready:
             self._add_activity("identity", "name intent check blocked: inference unavailable")
             return False, ""
+        if not looks_like_name_change_hint(text):
+            return False, ""
 
         prompt = build_identity_name_intent_prompt(text=text, current_name=self.identity_name)
         self._add_activity("inference", "identity name intent check requested")
@@ -4822,7 +4825,7 @@ class TakoTerminalApp(App[None]):
                 run_inference_prompt_with_fallback,
                 self.inference_runtime,
                 prompt,
-                timeout_s=30.0,
+                timeout_s=12.0,
             )
         except Exception as exc:  # noqa: BLE001
             self.inference_last_error = _summarize_error(exc)

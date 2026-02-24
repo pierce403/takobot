@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-24 — Rename-intent checks are now hint-gated and fallback diagnostics no longer pollute prompt history
+
+- What happened: XMTP/local chat was invoking a separate identity-name intent inference call even on generic messages (for example `hi`), and repeated inference-unavailable fallback replies (with long error/log-path diagnostics) were being injected back into prompt history, increasing latency and timeout risk on later turns.
+- Fix: added `looks_like_name_change_hint` gating before running model-based rename-intent classification (plus shorter intent timeout), and compacted verbose fallback diagnostic assistant turns to a short marker line when building prompt history context.
+- Prevention: keep expensive intent-classifier inference behind high-signal hint gates and avoid feeding large operational diagnostics back into model context windows.
+
 ### 2026-02-24 — XMTP profile fallback now matches Converge DM + Convos group specs
 
 - What happened: DM fallback profile updates could miss Converge custom-content transport, and Convos group profile upserts depended on wrapper-level `appData` methods that are absent in some XMTP SDK wrappers.

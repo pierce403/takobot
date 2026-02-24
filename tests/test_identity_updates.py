@@ -9,6 +9,7 @@ from takobot.identity import (
     extract_name_from_text,
     extract_role_from_model_output,
     extract_role_from_text,
+    looks_like_name_change_hint,
     looks_like_role_info_query,
     looks_like_role_change_request,
 )
@@ -47,6 +48,15 @@ class TestIdentityUpdates(unittest.TestCase):
     def test_extract_name_from_text_rejects_non_name_acks(self) -> None:
         self.assertEqual("", extract_name_from_text("yes", allow_plain_name=True))
         self.assertEqual("", extract_name_from_model_output('{"name":"yes"}'))
+
+    def test_name_change_hint_gate_skips_plain_smalltalk(self) -> None:
+        self.assertFalse(looks_like_name_change_hint("hi"))
+        self.assertFalse(looks_like_name_change_hint("how are you today?"))
+
+    def test_name_change_hint_gate_accepts_name_and_profile_phrases(self) -> None:
+        self.assertTrue(looks_like_name_change_hint("can you set your name on xmtp?"))
+        self.assertTrue(looks_like_name_change_hint("please update your display name"))
+        self.assertTrue(looks_like_name_change_hint("call yourself DantoBot"))
 
     def test_role_change_detection_ignores_information_only_questions(self) -> None:
         self.assertFalse(looks_like_role_change_request("what is your purpose?"))

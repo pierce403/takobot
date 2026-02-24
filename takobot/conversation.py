@@ -10,6 +10,7 @@ import secrets
 
 SESSION_STORE_FILE = "sessions.json"
 SESSION_TRANSCRIPTS_DIR = "sessions"
+_ASSISTANT_FALLBACK_HISTORY_COMPACT = "Inference unavailable fallback reply (details omitted)."
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ class ConversationStore:
                 label = assistant_label
             else:
                 label = "System"
-            lines.append(f"{label}: {message.text}")
+            lines.append(f"{label}: {_history_text_for_prompt(message)}")
         return "\n".join(lines)
 
     def _load_messages(self, session_key: str) -> list[ConversationMessage]:
@@ -239,3 +240,17 @@ def _trim_messages_to_chars(messages: list[ConversationMessage], *, max_chars: i
         used += cost
     kept.reverse()
     return kept
+
+
+def _history_text_for_prompt(message: ConversationMessage) -> str:
+    text = message.text
+    if message.role != "assistant":
+        return text
+    lowered = text.lower()
+    if "inference is unavailable right now" in lowered:
+        return _ASSISTANT_FALLBACK_HISTORY_COMPACT
+    if "i'm replying in fallback mode" in lowered or "diagnostic status only" in lowered:
+        return _ASSISTANT_FALLBACK_HISTORY_COMPACT
+    if "last inference error:" in lowered and "detailed command logs:" in lowered:
+        return _ASSISTANT_FALLBACK_HISTORY_COMPACT
+    return text

@@ -61,3 +61,16 @@ class TestConversationHistory(unittest.TestCase):
             recent = store.recent_messages(session_key, user_turn_limit=5, max_chars=120)
             self.assertGreaterEqual(len(recent), 1)
             self.assertLessEqual(sum(len(item.text) for item in recent), 120)
+
+    def test_prompt_context_compacts_long_inference_fallback_diagnostics(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / ".tako" / "state"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            store = ConversationStore(state_dir)
+            session_key = "xmtp:conversation-compact"
+
+            store.append_user_assistant(session_key, "hello", "Inference is unavailable right now, so this reply is diagnostic status only. Last inference error: timeout. Detailed command logs: .tako/logs/error.log.")
+            context = store.format_prompt_context(session_key, user_turn_limit=2, max_chars=8_000)
+
+            self.assertIn("Inference unavailable fallback reply (details omitted).", context)
+            self.assertNotIn("Detailed command logs:", context)

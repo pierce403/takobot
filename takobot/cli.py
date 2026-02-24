@@ -105,6 +105,7 @@ from .identity import (
     extract_name_from_text,
     extract_role_from_model_output,
     extract_role_from_text,
+    looks_like_name_change_hint,
     looks_like_role_change_request,
     looks_like_role_info_query,
 )
@@ -1684,14 +1685,14 @@ async def _maybe_handle_operator_identity_update(
     current_name, current_role = read_identity()
     parsed = extract_name_from_text(text)
     requested_name_change = bool(parsed)
-    if not requested_name_change and inference_runtime.ready:
+    if not requested_name_change and inference_runtime.ready and looks_like_name_change_hint(text):
         prompt = build_identity_name_intent_prompt(text=text, current_name=current_name)
         try:
             _, output = await asyncio.to_thread(
                 run_inference_prompt_with_fallback,
                 inference_runtime,
                 prompt,
-                timeout_s=30.0,
+                timeout_s=12.0,
             )
             requested_name_change, inferred_name = extract_name_intent_from_model_output(output)
             if inferred_name:

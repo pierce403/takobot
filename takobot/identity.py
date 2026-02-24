@@ -120,6 +120,43 @@ def extract_name_from_text(text: str, *, allow_plain_name: bool = False) -> str:
     return ""
 
 
+def looks_like_name_change_hint(text: str) -> bool:
+    lowered = _normalize_text(text).lower()
+    if not lowered:
+        return False
+
+    if extract_name_from_text(text):
+        return True
+
+    direct_phrases = (
+        "your name",
+        "set name",
+        "set your name",
+        "change name",
+        "change your name",
+        "update name",
+        "update your name",
+        "rename",
+        "call yourself",
+        "call you",
+        "display name",
+        "identity name",
+        "alias",
+        "profile name",
+        "xmtp name",
+        "xmtp profile",
+    )
+    if any(phrase in lowered for phrase in direct_phrases):
+        return True
+
+    action_words = ("set", "change", "update", "rename", "fix", "correct")
+    if "profile" in lowered and any(word in lowered for word in action_words):
+        if "xmtp" in lowered or "display" in lowered or "name" in lowered:
+            return True
+
+    return False
+
+
 def build_identity_name_prompt(*, text: str, current_name: str) -> str:
     return (
         "Extract the intended display name from the user message.\n"

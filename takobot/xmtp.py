@@ -24,6 +24,12 @@ XMTP_PROFILE_BROADCAST_STATE_VERSION = 1
 XMTP_PROFILE_BROADCAST_STATE_FILE = "xmtp-profile-broadcast.json"
 XMTP_PROFILE_TEXT_FALLBACK_PREFIX = "cv:profile:"
 _LEGACY_XMTP_PROFILE_MESSAGE_PREFIX = "tako:profile:"
+CONVERGE_PROFILE_CONTENT_TYPE: dict[str, Any] = {
+    "authorityId": "converge.cv",
+    "typeId": "profile",
+    "versionMajor": 1,
+    "versionMinor": 0,
+}
 
 _AVATAR_BACKGROUNDS: tuple[tuple[str, str], ...] = (
     ("#ECFEFF", "#A5F3FC"),
@@ -648,8 +654,24 @@ def _client_inbox_id_bytes(client: object) -> bytes:
     return _inbox_id_to_bytes(inbox_id)
 
 
+def _conversation_peer_inbox_id(conversation: object) -> str | None:
+    for target in _conversation_targets(conversation, include_ffi=True):
+        for attr in ("peer_inbox_id", "peerInboxId", "dm_peer_inbox_id", "dmPeerInboxId"):
+            member = getattr(target, attr, None)
+            if member is None:
+                continue
+            try:
+                value = member() if callable(member) else member
+            except Exception:
+                continue
+            peer = _coerce_nonempty_string(value)
+            if peer:
+                return peer
+    return None
+
+
 def _conversation_state_key(conversation: object) -> str:
-    peer = _coerce_nonempty_string(getattr(conversation, "peer_inbox_id", None))
+    peer = _conversation_peer_inbox_id(conversation)
     if peer:
         return f"peer:{peer.lower()}"
 
@@ -664,11 +686,13 @@ def _conversation_state_key(conversation: object) -> str:
     return ""
 
 
-def _conversation_targets(conversation: object) -> list[object]:
+def _conversation_targets(conversation: object, *, include_ffi: bool = False) -> list[object]:
     targets: list[object] = []
     seen: set[int] = set()
+    ffi_target = getattr(conversation, "_ffi", None) if include_ffi else None
     for candidate in (
         conversation,
+        ffi_target,
         getattr(conversation, "group", None),
         getattr(conversation, "_group", None),
     ):
@@ -683,11 +707,28 @@ def _conversation_targets(conversation: object) -> list[object]:
 
 
 def _conversation_supports_app_data(conversation: object) -> bool:
-    for target in _conversation_targets(conversation):
+    for target in _conversation_targets(conversation, include_ffi=True):
         for attr in ("app_data", "appData", "get_app_data", "getAppData", "update_app_data", "updateAppData"):
             if getattr(target, attr, None) is not None:
                 return True
     return False
+
+
+def _conversation_kind(conversation: object) -> str:
+    peer = _conversation_peer_inbox_id(conversation)
+    if peer:
+        return "dm"
+    if _conversation_supports_app_data(conversation):
+        return "group"
+    return "unknown"
+
+
+def _client_inbox_id(client: object) -> str:
+    inbox = _coerce_nonempty_string(getattr(client, "inbox_id", None))
+    if inbox:
+        return inbox
+    inbox = _coerce_nonempty_string(getattr(client, "inboxId", None))
+    return inbox or ""
 
 
 async def _list_group_conversations(client: object) -> list[object]:
@@ -710,9 +751,86 @@ async def _list_group_conversations(client: object) -> list[object]:
     return []
 
 
+async def _list_dm_conversations(client: object) -> list[object]:
+    conversations = getattr(client, "conversations", None)
+    if conversations is None:
+        return []
+
+    for attr in ("list_dms", "listDms", "list_dm_conversations"):
+        list_dms = getattr(conversations, attr, None)
+        if not callable(list_dms):
+            continue
+        try:
+            result = list_dms()
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            continue
+        if isinstance(result, list):
+            return [item for item in result if _conversation_kind(item) == "dm"]
+
+    for attr in ("list", "list_conversations", "listConversations"):
+        list_all = getattr(conversations, attr, None)
+        if not callable(list_all):
+            continue
+        try:
+            result = list_all()
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            continue
+        if isinstance(result, list):
+            return [item for item in result if _conversation_kind(item) == "dm"]
+    return []
+
+
+async def _get_or_create_dm_conversation(client: object, inbox_id: str) -> tuple[object | None, str | None]:
+    conversations = getattr(client, "conversations", None)
+    if conversations is None:
+        return None, "client conversations API unavailable"
+    target_inbox = " ".join((inbox_id or "").split()).strip()
+    if not target_inbox:
+        return None, "missing inbox id for DM lookup"
+
+    lookup_errors: list[str] = []
+    for attr in ("get_dm_by_inbox_id", "getDmByInboxId", "get_dm", "getDm"):
+        method = getattr(conversations, attr, None)
+        if not callable(method):
+            continue
+        try:
+            result = method(target_inbox)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:  # noqa: BLE001
+            lookup_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
+            continue
+        if result is not None:
+            return result, None
+
+    create_errors: list[str] = []
+    for attr in ("create_dm", "createDm", "new_dm", "newDm"):
+        method = getattr(conversations, attr, None)
+        if not callable(method):
+            continue
+        try:
+            result = method(target_inbox)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:  # noqa: BLE001
+            create_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
+            continue
+        if result is not None:
+            return result, None
+
+    all_errors = tuple(lookup_errors + create_errors)
+    if all_errors:
+        return None, all_errors[0]
+    return None, "DM lookup/create API unavailable"
+
+
 async def _read_group_app_data(conversation: object) -> tuple[str | None, str | None]:
     found = False
-    for target in _conversation_targets(conversation):
+    for target in _conversation_targets(conversation, include_ffi=True):
         for attr in ("app_data", "appData", "get_app_data", "getAppData"):
             member = getattr(target, attr, None)
             if member is None:
@@ -737,7 +855,7 @@ async def _read_group_app_data(conversation: object) -> tuple[str | None, str | 
 
 async def _update_group_app_data(conversation: object, encoded: str) -> tuple[bool, str | None]:
     errors: list[str] = []
-    for target in _conversation_targets(conversation):
+    for target in _conversation_targets(conversation, include_ffi=True):
         for attr in ("update_app_data", "updateAppData", "set_app_data", "setAppData"):
             method = getattr(target, attr, None)
             if not callable(method):
@@ -969,6 +1087,236 @@ async def _upsert_profile_metadata_for_conversation(
     return await _update_group_app_data(conversation, updated_encoded)
 
 
+def _build_converge_dm_profile_message(name: str, avatar_url: str) -> dict[str, Any]:
+    payload = _build_profile_payload(name, avatar_url, include_timestamp=True)
+    return {
+        "type": dict(CONVERGE_PROFILE_CONTENT_TYPE),
+        "parameters": {},
+        "content": _encode_profile_payload(payload).encode("utf-8"),
+    }
+
+
+def _converge_profile_content_type_string() -> str:
+    return (
+        f"{CONVERGE_PROFILE_CONTENT_TYPE['authorityId']}/"
+        f"{CONVERGE_PROFILE_CONTENT_TYPE['typeId']}:"
+        f"{int(CONVERGE_PROFILE_CONTENT_TYPE['versionMajor'])}."
+        f"{int(CONVERGE_PROFILE_CONTENT_TYPE['versionMinor'])}"
+    )
+
+
+def _converge_profile_content_type_variants() -> tuple[Any, ...]:
+    variants: list[Any] = [
+        dict(CONVERGE_PROFILE_CONTENT_TYPE),
+        _converge_profile_content_type_string(),
+    ]
+    with contextlib.suppress(Exception):
+        from xmtp_content_type_primitives import ContentTypeId
+
+        variants.insert(
+            0,
+            ContentTypeId(
+                authority_id=str(CONVERGE_PROFILE_CONTENT_TYPE["authorityId"]),
+                type_id=str(CONVERGE_PROFILE_CONTENT_TYPE["typeId"]),
+                version_major=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMajor"]),
+                version_minor=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMinor"]),
+            ),
+        )
+    deduped: list[Any] = []
+    seen: set[tuple[str, str]] = set()
+    for value in variants:
+        key = (value.__class__.__name__, str(value))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return tuple(deduped)
+
+
+def _encode_converge_profile_ffi_content(payload: bytes) -> tuple[bytes | None, str | None]:
+    try:
+        from xmtp_bindings import xmtpv3 as bindings
+    except Exception as exc:  # noqa: BLE001
+        return None, f"xmtp bindings unavailable for custom content encode: {exc.__class__.__name__}: {exc}"
+    converter = getattr(bindings, "_UniffiConverterTypeFfiEncodedContent", None)
+    if converter is None or not hasattr(converter, "lower"):
+        return None, "xmtp bindings encoded-content converter unavailable"
+    try:
+        type_id = bindings.FfiContentTypeId(
+            authority_id=str(CONVERGE_PROFILE_CONTENT_TYPE["authorityId"]),
+            type_id=str(CONVERGE_PROFILE_CONTENT_TYPE["typeId"]),
+            version_major=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMajor"]),
+            version_minor=int(CONVERGE_PROFILE_CONTENT_TYPE["versionMinor"]),
+        )
+        encoded = bindings.FfiEncodedContent(
+            type_id=type_id,
+            parameters={},
+            fallback=None,
+            compression=None,
+            content=payload,
+        )
+        rust_buf = converter.lower(encoded)
+        try:
+            size = int(getattr(rust_buf, "len", 0))
+            data = getattr(rust_buf, "data", None)
+            if data is None:
+                return None, "xmtp bindings encoded-content buffer has no data pointer"
+            raw = bytes(data[0:size])
+        finally:
+            free = getattr(rust_buf, "free", None)
+            if callable(free):
+                with contextlib.suppress(Exception):
+                    free()
+        if not raw:
+            return None, "xmtp bindings encoded-content result is empty"
+        return raw, None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"encode custom content via xmtp bindings failed: {exc.__class__.__name__}: {exc}"
+
+
+def _build_converge_profile_ffi_send_options(*, should_push: bool) -> tuple[Any | None, str | None]:
+    try:
+        from xmtp_bindings import xmtpv3 as bindings
+    except Exception as exc:  # noqa: BLE001
+        return None, f"xmtp bindings unavailable for send options: {exc.__class__.__name__}: {exc}"
+    opts_cls = getattr(bindings, "FfiSendMessageOpts", None)
+    if opts_cls is None:
+        return None, "xmtp bindings send options type unavailable"
+    attempts: tuple[tuple[tuple[Any, ...], dict[str, Any]], ...] = (
+        ((), {"should_push": should_push}),
+        ((), {"shouldPush": should_push}),
+        ((should_push,), {}),
+    )
+    for args, kwargs in attempts:
+        try:
+            return opts_cls(*args, **kwargs), None
+        except TypeError:
+            continue
+        except Exception as exc:  # noqa: BLE001
+            return None, f"build send options failed: {exc.__class__.__name__}: {exc}"
+    return None, "unable to build xmtp send options for custom content"
+
+
+def _conversation_ffi_send_targets(conversation: object) -> list[object]:
+    targets: list[object] = []
+    seen: set[int] = set()
+    for candidate in (getattr(conversation, "_ffi", None), conversation):
+        if candidate is None:
+            continue
+        # Wrapper objects expose send(content, content_type); the low-level FFI target
+        # exposes send(encoded_bytes, opts), which is what we need for custom content.
+        if getattr(candidate, "_ffi", None) is not None and getattr(candidate, "_client", None) is not None:
+            continue
+        ident = id(candidate)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        targets.append(candidate)
+    return targets
+
+
+async def _send_converge_profile_via_ffi(conversation: object, *, payload: bytes) -> tuple[bool, str | None]:
+    encoded_bytes, encode_error = _encode_converge_profile_ffi_content(payload)
+    if encoded_bytes is None:
+        return False, encode_error
+    send_options, options_error = _build_converge_profile_ffi_send_options(should_push=False)
+    if send_options is None:
+        return False, options_error
+    errors: list[str] = []
+    for target in _conversation_ffi_send_targets(conversation):
+        target_name = target.__class__.__name__
+        for method_name in ("send", "send_optimistic", "sendOptimistic"):
+            method = getattr(target, method_name, None)
+            if not callable(method):
+                continue
+            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = [
+                ((encoded_bytes, send_options), {}),
+                ((encoded_bytes,), {"opts": send_options}),
+                ((encoded_bytes,), {"options": send_options}),
+            ]
+            success, call_errors = await _invoke_method_variants(method, variants)
+            if success:
+                return True, None
+            for item in call_errors:
+                entry = f"{target_name}.{method_name}: {item}"
+                if entry not in errors:
+                    errors.append(entry)
+    if errors:
+        return False, errors[0]
+    return False, "DM custom content low-level send API unavailable"
+
+
+async def _send_converge_profile_message_to_dm(
+    conversation: object,
+    *,
+    display_name: str,
+    avatar_url: str,
+) -> tuple[bool, str | None]:
+    encoded = _build_converge_dm_profile_message(display_name, avatar_url)
+    payload = encoded["content"]
+    payload_types = _converge_profile_content_type_variants()
+    errors: list[str] = []
+    targets = _conversation_targets(conversation)
+
+    for target in targets:
+        target_name = target.__class__.__name__
+        for method_name in ("send_encoded_content", "sendEncodedContent", "send_content", "sendContent"):
+            method = getattr(target, method_name, None)
+            if not callable(method):
+                continue
+            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = [
+                ((encoded,), {"should_push": False}),
+                ((encoded,), {"shouldPush": False}),
+                ((encoded,), {"options": {"should_push": False}}),
+                ((encoded,), {"options": {"shouldPush": False}}),
+                ((encoded, {"should_push": False}), {}),
+                ((encoded, {"shouldPush": False}), {}),
+                ((encoded,), {}),
+            ]
+            success, call_errors = await _invoke_method_variants(method, variants)
+            if success:
+                return True, None
+            for item in call_errors:
+                entry = f"{target_name}.{method_name}: {item}"
+                if entry not in errors:
+                    errors.append(entry)
+
+        send_method = getattr(target, "send", None)
+        if callable(send_method):
+            variants: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+            for payload_type in payload_types:
+                variants.extend(
+                    [
+                        ((payload,), {"content_type": payload_type}),
+                        ((payload,), {"contentType": payload_type}),
+                        ((payload, payload_type), {}),
+                        ((payload, payload_type), {"should_push": False}),
+                        ((payload, payload_type), {"shouldPush": False}),
+                        ((payload, payload_type), {"options": {"should_push": False}}),
+                        ((payload, payload_type), {"options": {"shouldPush": False}}),
+                        ((payload, payload_type, {"should_push": False}), {}),
+                        ((payload, payload_type, {"shouldPush": False}), {}),
+                    ]
+                )
+            success, call_errors = await _invoke_method_variants(send_method, variants)
+            if success:
+                return True, None
+            for item in call_errors:
+                entry = f"{target_name}.send: {item}"
+                if entry not in errors:
+                    errors.append(entry)
+
+    ffi_success, ffi_error = await _send_converge_profile_via_ffi(conversation, payload=payload)
+    if ffi_success:
+        return True, None
+    if ffi_error:
+        errors.append(ffi_error)
+
+    if errors:
+        return False, errors[0]
+    return False, "DM custom content send API unavailable"
+
+
 async def publish_profile_message(
     client: object,
     *,
@@ -977,6 +1325,7 @@ async def publish_profile_message(
     avatar_url: str = "",
     include_self_dm: bool = True,
     include_known_dm_peers: bool = True,
+    include_known_groups: bool = True,
     target_conversation: object | None = None,
 ) -> XmtpProfileBroadcastResult:
     payload_sha256 = _payload_sha256(identity_name, avatar_url)
@@ -990,11 +1339,14 @@ async def publish_profile_message(
     peer_sent_count = 0
     errors: list[str] = []
     inbox_id = _client_inbox_id_bytes(client)
+    inbox_id_text = _client_inbox_id(client)
     if not inbox_id:
         errors.append("client inbox_id unavailable for Convos appData profile upsert")
+    if not inbox_id_text:
+        errors.append("client inbox_id unavailable for Converge DM profile metadata")
     now_stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
 
-    async def upsert(conversation: object, *, label: str) -> None:
+    async def publish_for_conversation(conversation: object, *, label: str) -> None:
         nonlocal peer_sent_count
         key = _conversation_state_key(conversation)
         if not key:
@@ -1002,14 +1354,25 @@ async def publish_profile_message(
             return
         if key in peer_sent:
             return
-        if not inbox_id:
-            return
-        ok, error = await _upsert_profile_metadata_for_conversation(
-            conversation,
-            inbox_id=inbox_id,
-            display_name=identity_name,
-            avatar_url=avatar_url,
-        )
+        kind = _conversation_kind(conversation)
+        if kind == "group":
+            if not inbox_id:
+                errors.append(f"{label}: missing inbox_id bytes for group appData upsert")
+                return
+            ok, error = await _upsert_profile_metadata_for_conversation(
+                conversation,
+                inbox_id=inbox_id,
+                display_name=identity_name,
+                avatar_url=avatar_url,
+            )
+        elif kind == "dm":
+            ok, error = await _send_converge_profile_message_to_dm(
+                conversation,
+                display_name=identity_name,
+                avatar_url=avatar_url,
+            )
+        else:
+            ok, error = False, "unknown conversation type for profile publish"
         if ok:
             peer_sent[key] = now_stamp
             peer_sent_count += 1
@@ -1018,15 +1381,38 @@ async def publish_profile_message(
             errors.append(f"{label}: {error}")
 
     if target_conversation is not None:
-        await upsert(target_conversation, label="target-conversation")
+        await publish_for_conversation(target_conversation, label="target-conversation")
+
+    if include_known_groups:
+        for group in await _list_group_conversations(client):
+            await publish_for_conversation(group, label="group")
 
     if include_known_dm_peers:
-        for group in await _list_group_conversations(client):
-            await upsert(group, label="group")
+        for dm in await _list_dm_conversations(client):
+            peer_id = _conversation_peer_inbox_id(dm)
+            if peer_id and inbox_id_text and peer_id.lower() == inbox_id_text.lower():
+                continue
+            await publish_for_conversation(dm, label="dm")
 
-    if include_self_dm and not self_sent_at and peer_sent_count > 0:
-        self_sent = True
-        self_sent_at = now_stamp
+    if include_self_dm and not self_sent_at:
+        if not inbox_id_text:
+            errors.append("self-dm: client inbox_id unavailable")
+        else:
+            self_dm, dm_error = await _get_or_create_dm_conversation(client, inbox_id_text)
+            if self_dm is None:
+                if dm_error:
+                    errors.append(f"self-dm: {dm_error}")
+            else:
+                ok, send_error = await _send_converge_profile_message_to_dm(
+                    self_dm,
+                    display_name=identity_name,
+                    avatar_url=avatar_url,
+                )
+                if ok:
+                    self_sent = True
+                    self_sent_at = now_stamp
+                elif send_error:
+                    errors.append(f"self-dm: {send_error}")
 
     _write_profile_broadcast_state(
         state_path,
@@ -1336,6 +1722,7 @@ async def ensure_profile_message_for_conversation(
         avatar_url=avatar_url,
         include_self_dm=False,
         include_known_dm_peers=False,
+        include_known_groups=False,
         target_conversation=conversation,
     )
 

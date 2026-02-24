@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-24 — XMTP profile fallback now matches Converge DM + Convos group specs
+
+- What happened: DM fallback profile updates could miss Converge custom-content transport, and Convos group profile upserts depended on wrapper-level `appData` methods that are absent in some XMTP SDK wrappers.
+- Fix: DM profile fallback now sends `converge.cv/profile:1.0` custom metadata payloads in 1:1 conversations, while group fallback keeps Convos `appData` protobuf upserts and now uses wrapper `_ffi` appData APIs when needed; added explicit `protobuf` dependency and unit coverage for both DM and group metadata paths.
+- Prevention: keep DM and group profile transport separated by conversation type, avoid plain-text JSON profile fallbacks, and preserve tests that assert both Converge DM sends and Convos group upserts.
+
 ### 2026-02-23 — Pi legacy `tools/` migration prompts are auto-remediated before inference
 
 - What happened: pi runtime started pausing with `Press any key to continue...` when deprecated custom `tools/` directories were present (global or project-local), which blocked non-interactive Takobot inference.

@@ -1073,7 +1073,7 @@ async def _handle_incoming_message(
         if broadcast.self_sent or broadcast.peer_sent_count:
             _emit_runtime_log(
                 (
-                    "xmtp profile metadata upserted for active conversation appData "
+                    "xmtp profile metadata published for active conversation "
                     f"(self={'yes' if broadcast.self_sent else 'no'} peers={broadcast.peer_sent_count})"
                 ),
                 hooks=hooks,

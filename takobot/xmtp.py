@@ -60,6 +60,7 @@ _AVATAR_ACCENT_COLORS: tuple[str, ...] = (
 
 _CONVOS_PROTO_CACHE: tuple[Any, Any] | None = None
 _CONVOS_PROTO_UNAVAILABLE = False
+_ETH_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
 @dataclass(frozen=True)
@@ -723,6 +724,40 @@ def _conversation_kind(conversation: object) -> str:
     return "unknown"
 
 
+def _normalize_eth_address(value: str | None) -> str:
+    text = _coerce_nonempty_string(value)
+    if not text:
+        return ""
+    if _ETH_ADDRESS_RE.fullmatch(text):
+        return text
+    return ""
+
+
+def _client_account_address(client: object) -> str:
+    candidates: list[Any] = []
+    for attr in ("account_address", "accountAddress", "wallet_address", "walletAddress", "address"):
+        candidates.append(getattr(client, attr, None))
+    account_identifier = getattr(client, "account_identifier", None)
+    if account_identifier is None:
+        account_identifier = getattr(client, "accountIdentifier", None)
+    if account_identifier is not None:
+        candidates.append(account_identifier)
+        for attr in ("value", "identifier", "address"):
+            candidates.append(getattr(account_identifier, attr, None))
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            for key in ("value", "identifier", "address"):
+                nested = _normalize_eth_address(str(candidate.get(key) or ""))
+                if nested:
+                    return nested
+            continue
+        if isinstance(candidate, str):
+            normalized = _normalize_eth_address(candidate)
+            if normalized:
+                return normalized
+    return ""
+
+
 def _client_inbox_id(client: object) -> str:
     inbox = _coerce_nonempty_string(getattr(client, "inbox_id", None))
     if inbox:
@@ -789,11 +824,14 @@ async def _get_or_create_dm_conversation(client: object, inbox_id: str) -> tuple
     if conversations is None:
         return None, "client conversations API unavailable"
     target_inbox = " ".join((inbox_id or "").split()).strip()
-    if not target_inbox:
-        return None, "missing inbox id for DM lookup"
+    target_address = _client_account_address(client)
+    if not target_inbox and not target_address:
+        return None, "missing inbox id/address for DM lookup"
 
     lookup_errors: list[str] = []
-    for attr in ("get_dm_by_inbox_id", "getDmByInboxId", "get_dm", "getDm"):
+    for attr in ("get_dm_by_inbox_id", "getDmByInboxId"):
+        if not target_inbox:
+            continue
         method = getattr(conversations, attr, None)
         if not callable(method):
             continue
@@ -806,9 +844,42 @@ async def _get_or_create_dm_conversation(client: object, inbox_id: str) -> tuple
             continue
         if result is not None:
             return result, None
+    for attr in ("get_dm_by_address", "getDmByAddress"):
+        if not target_address:
+            continue
+        method = getattr(conversations, attr, None)
+        if not callable(method):
+            continue
+        try:
+            result = method(target_address)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:  # noqa: BLE001
+            lookup_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
+            continue
+        if result is not None:
+            return result, None
+    for attr in ("get_dm", "getDm"):
+        method = getattr(conversations, attr, None)
+        if not callable(method):
+            continue
+        for value in (target_inbox, target_address):
+            if not value:
+                continue
+            try:
+                result = method(value)
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception as exc:  # noqa: BLE001
+                lookup_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
+                continue
+            if result is not None:
+                return result, None
 
     create_errors: list[str] = []
-    for attr in ("create_dm", "createDm", "new_dm", "newDm"):
+    for attr in ("create_dm_by_inbox_id", "createDmByInboxId", "new_dm_by_inbox_id", "newDmByInboxId"):
+        if not target_inbox:
+            continue
         method = getattr(conversations, attr, None)
         if not callable(method):
             continue
@@ -821,6 +892,46 @@ async def _get_or_create_dm_conversation(client: object, inbox_id: str) -> tuple
             continue
         if result is not None:
             return result, None
+    for attr in ("new_dm", "newDm", "create_dm", "createDm", "new_dm_by_address", "newDmByAddress"):
+        if not target_address:
+            continue
+        method = getattr(conversations, attr, None)
+        if not callable(method):
+            continue
+        try:
+            result = method(target_address)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:  # noqa: BLE001
+            create_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
+            continue
+        if result is not None:
+            return result, None
+    if target_address:
+        identifier: Any = None
+        identifier_error = ""
+        try:
+            from xmtp.identifiers import Identifier, IdentifierKind
+
+            identifier = Identifier(kind=IdentifierKind.ETHEREUM, value=target_address)
+        except Exception as exc:  # noqa: BLE001
+            identifier_error = f"identifier-build: {exc.__class__.__name__}: {exc}"
+        if identifier_error:
+            create_errors.append(identifier_error)
+        if identifier is not None:
+            for attr in ("new_dm_with_identifier", "newDmWithIdentifier", "create_dm_with_identifier", "createDmWithIdentifier"):
+                method = getattr(conversations, attr, None)
+                if not callable(method):
+                    continue
+                try:
+                    result = method(identifier)
+                    if inspect.isawaitable(result):
+                        result = await result
+                except Exception as exc:  # noqa: BLE001
+                    create_errors.append(f"{attr}: {exc.__class__.__name__}: {exc}")
+                    continue
+                if result is not None:
+                    return result, None
 
     all_errors = tuple(lookup_errors + create_errors)
     if all_errors:
@@ -1340,10 +1451,11 @@ async def publish_profile_message(
     errors: list[str] = []
     inbox_id = _client_inbox_id_bytes(client)
     inbox_id_text = _client_inbox_id(client)
+    account_address = _client_account_address(client)
     if not inbox_id:
         errors.append("client inbox_id unavailable for Convos appData profile upsert")
-    if not inbox_id_text:
-        errors.append("client inbox_id unavailable for Converge DM profile metadata")
+    if not inbox_id_text and not account_address:
+        errors.append("client inbox_id/address unavailable for Converge DM profile metadata")
     now_stamp = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
 
     async def publish_for_conversation(conversation: object, *, label: str) -> None:
@@ -1395,8 +1507,8 @@ async def publish_profile_message(
             await publish_for_conversation(dm, label="dm")
 
     if include_self_dm and not self_sent_at:
-        if not inbox_id_text:
-            errors.append("self-dm: client inbox_id unavailable")
+        if not inbox_id_text and not account_address:
+            errors.append("self-dm: client inbox_id/address unavailable")
         else:
             self_dm, dm_error = await _get_or_create_dm_conversation(client, inbox_id_text)
             if self_dm is None:

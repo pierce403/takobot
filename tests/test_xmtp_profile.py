@@ -129,10 +129,13 @@ class _FakeConversations:
         *,
         dms: list[object] | None = None,
         self_dms: dict[str, object] | None = None,
+        reject_non_address_new_dm: bool = False,
     ) -> None:
         self._groups = groups
         self._dms = list(dms or [])
         self._self_dms = {str(key): value for key, value in (self_dms or {}).items()}
+        self._reject_non_address_new_dm = reject_non_address_new_dm
+        self.new_dm_calls: list[str] = []
 
     async def list_groups(self) -> list[object]:
         return list(self._groups)
@@ -140,8 +143,11 @@ class _FakeConversations:
     async def list_dms(self) -> list[object]:
         return list(self._dms)
 
-    async def new_dm(self, inbox_id: str) -> object:
-        value = self._self_dms.get(inbox_id)
+    async def new_dm(self, recipient: str) -> object:
+        self.new_dm_calls.append(recipient)
+        if self._reject_non_address_new_dm and not recipient.startswith("0x"):
+            raise RuntimeError("AddressValidation: expected 0x address")
+        value = self._self_dms.get(recipient)
         if value is None:
             raise RuntimeError("dm unavailable")
         return value
@@ -164,7 +170,10 @@ class _ClientWithDmFallback:
         self.conversations = _FakeConversations(
             [],
             dms=[self.dm],
-            self_dms={"inbox-self": self.self_dm},
+            self_dms={
+                "inbox-self": self.self_dm,
+                "0x1111111111111111111111111111111111111111": self.self_dm,
+            },
         )
 
 
@@ -396,6 +405,33 @@ class TestXmtpProfile(unittest.TestCase):
             self.assertIsInstance(raw_payload, (bytes, bytearray))
             self.assertGreater(len(raw_payload), 0)
             self.assertFalse(getattr(send_opts, "should_push", True))
+
+    def test_publish_profile_message_self_dm_uses_account_address_when_new_dm_validates_address(self) -> None:
+        client = _ClientWithDmFallback()
+        client.conversations = _FakeConversations(
+            [],
+            dms=[],
+            self_dms={"0x1111111111111111111111111111111111111111": client.self_dm},
+            reject_non_address_new_dm=True,
+        )
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            result = asyncio.run(
+                xmtp_mod.publish_profile_message(
+                    client,
+                    state_dir=state_dir,
+                    identity_name="InkTako",
+                    avatar_url=_avatar_data_uri("InkTako"),
+                    include_self_dm=True,
+                    include_known_dm_peers=False,
+                    include_known_groups=False,
+                )
+            )
+
+            self.assertTrue(result.self_sent)
+            self.assertEqual(1, len(client.self_dm.sent))
+            self.assertEqual(["0x1111111111111111111111111111111111111111"], client.conversations.new_dm_calls)
+            self.assertFalse(any("AddressValidation" in item for item in result.errors))
 
     def test_parse_profile_message_returns_none_for_non_profile_text(self) -> None:
         self.assertIsNone(parse_profile_message("hello world"))

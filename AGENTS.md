@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-24 — XMTP self-DM profile fallback now uses address-safe DM creation
+
+- What happened: profile fallback could fail with `AddressValidation` when attempting self-DM creation via `new_dm(<inbox_id>)` on SDKs that require `new_dm(<0x address>)`.
+- Fix: self-DM resolution now performs inbox-id lookup first, then falls back to account-address DM creation (plus identifier-based DM creation where available); added regression coverage for address-validated `new_dm` behavior.
+- Prevention: keep DM creation path format-aware (inbox lookup vs address create) and preserve tests that fail when self-DM uses inbox IDs in address-validated SDK runtimes.
+
 ### 2026-02-24 — Rename-intent checks are now hint-gated and fallback diagnostics no longer pollute prompt history
 
 - What happened: XMTP/local chat was invoking a separate identity-name intent inference call even on generic messages (for example `hi`), and repeated inference-unavailable fallback replies (with long error/log-path diagnostics) were being injected back into prompt history, increasing latency and timeout risk on later turns.

@@ -87,6 +87,7 @@ from .soul import (
 )
 from .tool_ops import fetch_webpage, run_local_command, workspace_command_path_prefixes
 from .xmtp import (
+    XmtpProfileSyncResult,
     close_client,
     create_client,
     default_message,
@@ -678,7 +679,7 @@ async def _run_daemon(
                 hooks=hooks,
             )
 
-    await _sync_xmtp_profile(
+    startup_profile_sync = await _sync_xmtp_profile(
         client,
         paths=paths,
         identity_name=git_identity_name,
@@ -707,6 +708,7 @@ async def _run_daemon(
             inference_runtime=inference_runtime,
             jobs_count=jobs_count,
             open_tasks_count=open_tasks_count,
+            xmtp_profile=_startup_profile_confirmation_line(startup_profile_sync),
         )
         await _send_operator_startup_presence(
             client,
@@ -1901,7 +1903,7 @@ async def _sync_xmtp_profile(
     identity_name: str,
     hooks: RuntimeHooks | None = None,
     context: str,
-) -> None:
+) -> XmtpProfileSyncResult | None:
     try:
         result = await sync_identity_profile(
             client,
@@ -1920,7 +1922,7 @@ async def _sync_xmtp_profile(
             stderr=True,
             hooks=hooks,
         )
-        return
+        return None
 
     if result.applied_name or result.applied_avatar:
         _emit_runtime_log(
@@ -1933,7 +1935,7 @@ async def _sync_xmtp_profile(
             ),
             hooks=hooks,
         )
-        return
+        return result
 
     if result.name_in_sync and result.avatar_in_sync:
         _emit_runtime_log(
@@ -1946,7 +1948,7 @@ async def _sync_xmtp_profile(
             ),
             hooks=hooks,
         )
-        return
+        return result
 
     if result.profile_api_found:
         detail = result.errors[0] if result.errors else "profile method signature mismatch"
@@ -1960,7 +1962,7 @@ async def _sync_xmtp_profile(
             stderr=True,
             hooks=hooks,
         )
-        return
+        return result
 
     if result.profile_read_api_found:
         observed = result.observed_name or "(none)"
@@ -1975,7 +1977,7 @@ async def _sync_xmtp_profile(
             stderr=True,
             hooks=hooks,
         )
-        return
+        return result
 
     avatar_note = str(result.avatar_path) if result.avatar_path is not None else "(none)"
     _emit_runtime_log(
@@ -1986,6 +1988,7 @@ async def _sync_xmtp_profile(
         ),
         hooks=hooks,
     )
+    return result
 
 
 async def _rebuild_xmtp_client(
@@ -2153,6 +2156,27 @@ def _replace_inference_runtime(target: InferenceRuntime, source: InferenceRuntim
     target._provider_env_overrides = source._provider_env_overrides
 
 
+def _startup_profile_confirmation_line(result: XmtpProfileSyncResult | None) -> str:
+    spec = "converge.cv/profile:1.0"
+    if result is None:
+        return f"{spec} status=sync-failed name=unknown avatar=unknown dm_publish=no"
+    dm_publish = result.fallback_self_sent or result.fallback_peer_sent_count > 0
+    if result.name_in_sync and result.avatar_in_sync:
+        status = "verified"
+    elif result.applied_name or result.applied_avatar:
+        status = "repaired"
+    elif dm_publish:
+        status = "published"
+    else:
+        status = "unconfirmed"
+    return (
+        f"{spec} status={status} "
+        f"name={'yes' if result.name_in_sync else 'no'} "
+        f"avatar={'yes' if result.avatar_in_sync else 'no'} "
+        f"dm_publish={'yes' if dm_publish else 'no'}"
+    )
+
+
 def _startup_presence_message(
     *,
     identity_name: str,
@@ -2162,6 +2186,7 @@ def _startup_presence_message(
     inference_runtime: InferenceRuntime,
     jobs_count: int,
     open_tasks_count: int,
+    xmtp_profile: str = "",
 ) -> str:
     display_name = _canonical_identity_name(identity_name)
     provider = inference_runtime.selected_provider or "none"
@@ -2173,6 +2198,7 @@ def _startup_presence_message(
         )
     else:
         inference_line = "none ready=no auth=none"
+    xmtp_profile_line = " ".join((xmtp_profile or "").split()).strip() or "unknown"
     return (
         f"{display_name} is back online.\n"
         "quick state:\n"
@@ -2180,6 +2206,7 @@ def _startup_presence_message(
         f"- env: {env}\n"
         f"- stage: {stage}\n"
         f"- inference: {inference_line}\n"
+        f"- xmtp profile: {xmtp_profile_line}\n"
         f"- jobs: {max(0, int(jobs_count))}\n"
         f"- open tasks: {max(0, int(open_tasks_count))}\n"
         f"- address: {address}\n"
@@ -2583,6 +2610,8 @@ def _chat_prompt(
         f"{stage_behavior}"
         "Use MEMORY.md frontmatter to keep memory-vs-execution boundaries explicit.\n"
         "You have access to available tools and skills; use them for live checks when asked instead of claiming you cannot access sources.\n"
+        "For operator XMTP profile requests, runtime supports profile sync with Converge 1:1 metadata (`converge.cv/profile:1.0`) and avatar updates.\n"
+        "Do not claim XMTP profile name/avatar support is unavailable in this runtime.\n"
         "For web/current-events/fact-verification requests, attempt live evidence gathering with `web_search`/`web_fetch` before answering.\n"
         "Only claim web access is unavailable after a real tool attempt fails, and include the concrete failure reason.\n"
         f"{task_help_line}"

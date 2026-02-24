@@ -6217,6 +6217,8 @@ def _build_terminal_chat_prompt(
         f"{stage_behavior}"
         "Use MEMORY.md frontmatter spec to decide what belongs in memory vs execution structures.\n"
         "You have access to available tools and skills; use them for live checks when asked instead of claiming you cannot access sources.\n"
+        "For operator XMTP profile requests, runtime supports profile sync with Converge 1:1 metadata (`converge.cv/profile:1.0`) and avatar updates.\n"
+        "Do not claim XMTP profile name/avatar support is unavailable in this runtime.\n"
         "For web/current-events/fact-verification requests, attempt live evidence gathering with `web_search`/`web_fetch` before answering.\n"
         "Only claim web access is unavailable after a real tool attempt fails, and include the concrete failure reason.\n"
         "Terminal chat is always available.\n"

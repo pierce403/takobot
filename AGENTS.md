@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-24 — Startup XMTP presence now includes explicit Converge profile confirmation
+
+- What happened: operators could receive a startup "back online" XMTP ping without an explicit statement that Converge-profile name/avatar sync had been verified/repaired/published at connection initialization.
+- Fix: daemon startup now keeps XMTP profile-sync result context and includes a dedicated startup summary line for `converge.cv/profile:1.0` status (name/avatar sync state plus DM metadata publish signal).
+- Prevention: keep profile-sync outcomes surfaced in operator-visible startup state so XMTP identity/profile health is auditable immediately after reconnect.
+
 ### 2026-02-24 — XMTP display-name requests now bypass generic chat and trigger profile sync
 
 - What happened: messages like `can you set your display name on XMTP yet?` could miss deterministic rename/profile handling and fall through to generic model answers, even when the operator intended immediate XMTP profile sync behavior.

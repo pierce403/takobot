@@ -21,6 +21,7 @@ from takobot.cli import (
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
     _send_operator_startup_presence,
+    _startup_profile_confirmation_line,
     _startup_presence_message,
 )
 from takobot.inference import InferenceProviderStatus, InferenceRuntime
@@ -150,6 +151,7 @@ class TestCliXmtpResilience(unittest.TestCase):
         self.assertIn("memory_rag_context=", prompt)
         self.assertIn("Do not ask which channel the operator is using", prompt)
         self.assertIn("If the operator asks for identity/config changes, apply them directly", prompt)
+        self.assertIn("runtime supports profile sync with Converge 1:1 metadata", prompt)
 
     def test_retryable_xmtp_error_detection(self) -> None:
         self.assertTrue(_is_retryable_xmtp_error(RuntimeError("grpc-status header missing")))
@@ -301,11 +303,13 @@ class TestCliXmtpResilience(unittest.TestCase):
             inference_runtime=self._pi_runtime(),
             jobs_count=3,
             open_tasks_count=5,
+            xmtp_profile=_startup_profile_confirmation_line(None),
         )
         self.assertIn("ProTako is back online.", message)
         self.assertIn("version:", message)
         self.assertIn("stage: adult", message)
         self.assertIn("inference: pi ready=yes", message)
+        self.assertIn("xmtp profile: converge.cv/profile:1.0 status=sync-failed", message)
         self.assertIn("jobs: 3", message)
         self.assertIn("open tasks: 5", message)
 

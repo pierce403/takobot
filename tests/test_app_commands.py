@@ -160,6 +160,7 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("tools_frontmatter=", prompt)
         self.assertIn("skills_inventory=", prompt)
         self.assertIn("tools_inventory=", prompt)
+        self.assertIn("runtime supports profile sync with Converge 1:1 metadata", prompt)
 
     def test_build_memory_rag_query_includes_mission_objective(self) -> None:
         query = _build_memory_rag_query(

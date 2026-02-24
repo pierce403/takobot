@@ -2541,11 +2541,36 @@ def _run_pi(
         merged = f"{proc.stderr or ''}\n{proc.stdout or ''}".lower()
         if "unrecognized" in merged or "unknown option" in merged or "no such option" in merged:
             return True
-        if "invalid choice" in merged or "invalid value" in merged:
+        if "invalid choice" in merged or "invalid value" in merged or "unsupported value" in merged:
             return True
         if proc.returncode != 0 and not (proc.stderr or "").strip() and not (proc.stdout or "").strip():
             return True
         return False
+
+    def retry_thinking_override(proc: subprocess.CompletedProcess[str]) -> str:
+        requested = _clean_thinking_setting(thinking)
+        if not requested:
+            return ""
+        merged = f"{proc.stderr or ''}\n{proc.stdout or ''}".lower()
+        if requested == "minimal":
+            if (
+                "unsupported value: 'minimal'" in merged
+                or 'unsupported value: "minimal"' in merged
+                or "'minimal' is not supported" in merged
+                or '"minimal" is not supported' in merged
+                or ("invalid value" in merged and "minimal" in merged and "low" in merged)
+            ):
+                return "low"
+        if requested == "xhigh":
+            if (
+                "unsupported value: 'xhigh'" in merged
+                or 'unsupported value: "xhigh"' in merged
+                or "'xhigh' is not supported" in merged
+                or '"xhigh" is not supported' in merged
+                or ("invalid value" in merged and "xhigh" in merged and "high" in merged)
+            ):
+                return "high"
+        return ""
 
     try:
         proc = run_once(cmd)
@@ -2586,8 +2611,9 @@ def _run_pi(
         return proc.stdout.strip()
 
     if should_retry_with_minimal(proc):
+        retry_thinking = retry_thinking_override(proc) or thinking
         retry_cmd = [cli]
-        retry_cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
+        retry_cmd.extend(_pi_cli_thinking_args(cli, retry_thinking, help_text=help_text))
         retry_cmd.append(prepared_prompt)
         if retry_cmd != cmd:
             try:

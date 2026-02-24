@@ -1157,9 +1157,10 @@ async def _handle_incoming_message(
         )
         _record_chat_turn(conversations, session_key, text, reply, hooks=hooks)
         await convo.send(reply)
-        for line in child_followups:
-            if line.strip():
-                await convo.send(line)
+        if _should_emit_child_followups(reply):
+            for line in child_followups:
+                if line.strip():
+                    await convo.send(line)
         return
 
     cmd, rest = _parse_command(text)
@@ -2657,6 +2658,11 @@ def _fallback_chat_reply(
     if operator_paired:
         return "Happy to chat. Operator-only boundary still applies for identity/config/tools/permissions/routines."
     return "Happy to chat. This instance is not paired yet; run `.venv/bin/takobot` locally to set the operator channel."
+
+
+def _should_emit_child_followups(reply: str) -> bool:
+    lowered = " ".join((reply or "").split()).lower()
+    return not ("inference is unavailable right now" in lowered and "fallback mode" in lowered)
 
 
 def _clean_chat_reply(text: str) -> str:

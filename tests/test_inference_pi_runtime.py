@@ -337,6 +337,47 @@ class TestInferencePiRuntime(unittest.TestCase):
 
         self.assertIn("interactive input", str(ctx.exception))
 
+    def test_run_pi_retries_with_low_when_model_rejects_minimal(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            called_cmd = [str(part) for part in cmd]
+            calls.append(called_cmd)
+            if len(calls) == 1:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "400 Unsupported value: 'minimal' is not supported with the 'gpt-5.1-codex' model. "
+                        "Supported values are: 'low', 'medium', and 'high'."
+                    ),
+                )
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        with (
+            patch(
+                "takobot.inference._safe_help_text",
+                return_value="usage: pi --print --mode <text|json> --no-session --thinking-level {minimal,low,medium,high}",
+            ),
+            patch("takobot.inference.subprocess.run", side_effect=fake_run),
+        ):
+            output = _run_pi(runtime, "hello world", env={}, timeout_s=10.0, thinking="minimal")
+
+        self.assertEqual("ok", output)
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertIn("--thinking-level", calls[0])
+        self.assertIn("minimal", calls[0])
+        self.assertIn("--thinking-level", calls[1])
+        self.assertIn("low", calls[1])
+
     def test_pi_cli_thinking_args_maps_minimal_to_low_when_unavailable(self) -> None:
         with patch("takobot.inference._safe_help_text", return_value="usage: pi --thinking-level {low,medium,high}"):
             args = _pi_cli_thinking_args("pi", "minimal")

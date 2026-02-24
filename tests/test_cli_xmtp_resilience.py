@@ -21,6 +21,7 @@ from takobot.cli import (
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
     _send_operator_startup_presence,
+    _should_emit_child_followups,
     _startup_profile_confirmation_line,
     _startup_presence_message,
 )
@@ -185,6 +186,15 @@ class TestCliXmtpResilience(unittest.TestCase):
             auto_repair_attempted=True,
         )
         self.assertIn("already attempted automatic inference recovery", reply)
+
+    def test_child_followups_suppressed_when_inference_is_unavailable(self) -> None:
+        fallback = _fallback_chat_reply(
+            is_operator=True,
+            operator_paired=True,
+            last_error="pi inference failed",
+        )
+        self.assertFalse(_should_emit_child_followups(fallback))
+        self.assertTrue(_should_emit_child_followups("Sure, I can help with that."))
 
     def test_close_xmtp_client_supports_async_and_sync(self) -> None:
         async_client = _DummyAsyncClosable()

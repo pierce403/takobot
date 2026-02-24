@@ -78,6 +78,7 @@ class _FakeDmFfi:
     def __init__(self) -> None:
         self._app_data = ""
         self.app_data_updates: list[str] = []
+        self.raw_sends: list[tuple[bytes, object]] = []
 
     def app_data(self) -> str:
         return self._app_data
@@ -85,6 +86,10 @@ class _FakeDmFfi:
     async def update_app_data(self, encoded: str) -> None:
         self._app_data = encoded
         self.app_data_updates.append(encoded)
+
+    async def send(self, content_bytes: bytes, opts: object) -> bytes:
+        self.raw_sends.append((content_bytes, opts))
+        return b"msg-id"
 
 
 class _FakeDmConversation:
@@ -99,6 +104,11 @@ class _FakeDmConversation:
             raise RuntimeError("content_type is required for profile metadata sends")
         self.sent.append((content, content_type))
         return b"msg-id"
+
+
+class _FakeDmConversationNoCodec(_FakeDmConversation):
+    async def send(self, content: object, content_type: object | None = None) -> bytes:
+        raise RuntimeError("codec unavailable for converge profile content type")
 
 
 class _FakeGroupConversation:
@@ -146,10 +156,10 @@ class _ClientWithBroadcastFallback:
 
 
 class _ClientWithDmFallback:
-    def __init__(self) -> None:
+    def __init__(self, *, dm: _FakeDmConversation | None = None) -> None:
         self.inbox_id = "inbox-self"
         self.account_identifier = _FakeIdentifier("0x1111111111111111111111111111111111111111")
-        self.dm = _FakeDmConversation(b"\x02profile", peer_inbox_id="inbox-peer")
+        self.dm = dm or _FakeDmConversation(b"\x02profile", peer_inbox_id="inbox-peer")
         self.self_dm = _FakeDmConversation(b"\x03profile", peer_inbox_id="inbox-self")
         self.conversations = _FakeConversations(
             [],
@@ -360,6 +370,32 @@ class TestXmtpProfile(unittest.TestCase):
                 self.assertEqual(0, content_type.get("versionMinor"))
             else:
                 self.assertEqual("converge.cv/profile:1.0", str(content_type))
+
+    def test_publish_profile_message_dm_uses_ffi_fallback_when_codec_missing(self) -> None:
+        dm = _FakeDmConversationNoCodec(b"\x04profile", peer_inbox_id="inbox-peer")
+        client = _ClientWithDmFallback(dm=dm)
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            result = asyncio.run(
+                xmtp_mod.publish_profile_message(
+                    client,
+                    state_dir=state_dir,
+                    identity_name="InkTako",
+                    avatar_url=_avatar_data_uri("InkTako"),
+                    include_self_dm=False,
+                    include_known_dm_peers=False,
+                    include_known_groups=False,
+                    target_conversation=dm,
+                )
+            )
+
+            self.assertEqual(1, result.peer_sent_count)
+            self.assertEqual([], dm.sent)
+            self.assertEqual(1, len(dm._ffi.raw_sends))
+            raw_payload, send_opts = dm._ffi.raw_sends[0]
+            self.assertIsInstance(raw_payload, (bytes, bytearray))
+            self.assertGreater(len(raw_payload), 0)
+            self.assertFalse(getattr(send_opts, "should_push", True))
 
     def test_parse_profile_message_returns_none_for_non_profile_text(self) -> None:
         self.assertIsNone(parse_profile_message("hello world"))

@@ -1,0 +1,10 @@
+[skill]
+name = "Skill Creator"
+version = "0.1.0"
+entry = "playbook.md"
+
+[permissions]
+network = false
+shell = false
+xmtp = false
+filesystem = true

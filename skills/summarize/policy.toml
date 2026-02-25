@@ -1,0 +1,10 @@
+[skill]
+name = "Summarize CLI"
+version = "0.1.0"
+entry = "playbook.md"
+
+[permissions]
+network = true
+shell = true
+xmtp = false
+filesystem = true

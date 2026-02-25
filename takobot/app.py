@@ -17,7 +17,7 @@ import time
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -299,6 +299,26 @@ FIRST_INTERACTIVE_INFERENCE_STATES = {
 }
 
 
+def _running_inside_screen(env: Mapping[str, str] | None = None) -> bool:
+    source = os.environ if env is None else env
+    return bool(" ".join(str(source.get("STY", "")).split()))
+
+
+def _tui_bindings(env: Mapping[str, str] | None = None) -> list[tuple[str, str, str]]:
+    bindings: list[tuple[str, str, str]] = [
+        ("ctrl+q", "request_quit", "Quit"),
+        ("f2", "toggle_safe_mode", "Safe Mode"),
+        ("ctrl+shift+c", "copy_transcript", "Copy Transcript"),
+        ("ctrl+shift+l", "copy_last_line", "Copy Last Line"),
+        ("ctrl+shift+v", "paste_input", "Paste"),
+        ("ctrl+v", "paste_input", "Paste"),
+        ("shift+insert", "paste_input", "Paste"),
+    ]
+    if not _running_inside_screen(env):
+        bindings.insert(0, ("ctrl+c", "request_quit", "Quit"))
+    return bindings
+
+
 class TakoTerminalApp(App[None]):
     CSS = """
     Screen {
@@ -371,15 +391,7 @@ class TakoTerminalApp(App[None]):
     }
     """
 
-    BINDINGS = [
-        ("ctrl+c", "request_quit", "Quit"),
-        ("f2", "toggle_safe_mode", "Safe Mode"),
-        ("ctrl+shift+c", "copy_transcript", "Copy Transcript"),
-        ("ctrl+shift+l", "copy_last_line", "Copy Last Line"),
-        ("ctrl+shift+v", "paste_input", "Paste"),
-        ("ctrl+v", "paste_input", "Paste"),
-        ("shift+insert", "paste_input", "Paste"),
-    ]
+    BINDINGS = _tui_bindings()
 
     def __init__(self, *, interval: float = 30.0) -> None:
         super().__init__()

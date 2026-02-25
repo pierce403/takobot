@@ -45,6 +45,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - TUI activity feed (inference/tool/runtime events), clipboard copy actions, and a stage-specific ASCII octopus panel with Takobot version + DOSE indicators
 - Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
+- TUI quit shortcuts: `Ctrl+Q` always exits app mode; `Ctrl+C` remains available when not running under GNU `screen`
 - Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/jobs` for schedule control, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
 - Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors

@@ -166,6 +166,7 @@
   - Pi inference streaming uses `pi --mode json` so TUI can surface live thinking deltas, tool execution progress, and pi lifecycle status while turns are running.
   - Persists chat sessions as JSONL transcripts under `.tako/state/conversations/` and injects recent history windows into inference prompts.
   - Supports clipboard-friendly controls (`Ctrl+Shift+C` transcript, `Ctrl+Shift+L` last line, paste sanitization).
+  - Supports screen-safe quit shortcuts (`Ctrl+Q` always; `Ctrl+C` when not running inside GNU `screen`).
   - Supports input history recall in the TUI input box (`Up`/`Down` cycles previously submitted local messages).
   - Slash shortcuts are surfaced in-app via a dropdown under the input field (`/`), including `/models`, `/jobs`, `/stats`, `/upgrade`, and `/dose <channel> <0..1>`.
   - Input box supports `Tab` command autocomplete and cycles through matching candidates on repeated presses.

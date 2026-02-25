@@ -32,6 +32,8 @@ Common commands:
 
 Clipboard helpers:
 
+- `Ctrl+Q` quits the TUI in all environments.
+- `Ctrl+C` also quits the TUI when not running inside GNU `screen`.
 - `Ctrl+Shift+C` copy transcript
 - `Ctrl+Shift+L` copy last line
 - `Ctrl+V` / `Shift+Insert` paste

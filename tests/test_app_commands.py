@@ -18,9 +18,11 @@ from takobot.app import (
     _looks_like_local_command,
     _parse_command,
     _parse_dose_set_request,
+    _running_inside_screen,
     _slash_command_matches,
     _stream_focus_summary,
     _task_hint_from_status_line,
+    _tui_bindings,
     TakoTerminalApp,
     run_terminal_app,
 )
@@ -125,6 +127,19 @@ class TestAppCommands(unittest.TestCase):
     def test_activity_text_escapes_markup_sequences(self) -> None:
         rendered = _activity_text(["14:44:57 inference: provider attempt: [pi]"])
         self.assertIn(r"- 14:44:57 inference: provider attempt: \[pi]", rendered)
+
+    def test_screen_detection_uses_sty_env(self) -> None:
+        self.assertTrue(_running_inside_screen({"STY": "1234.main"}))
+        self.assertFalse(_running_inside_screen({"STY": "   "}))
+        self.assertFalse(_running_inside_screen({}))
+
+    def test_tui_bindings_disable_ctrl_c_in_screen(self) -> None:
+        screen_keys = [key for key, _action, _label in _tui_bindings({"STY": "1234.main"})]
+        non_screen_keys = [key for key, _action, _label in _tui_bindings({})]
+        self.assertIn("ctrl+q", screen_keys)
+        self.assertNotIn("ctrl+c", screen_keys)
+        self.assertIn("ctrl+c", non_screen_keys)
+        self.assertIn("ctrl+q", non_screen_keys)
 
     def test_run_terminal_app_uses_default_mouse_mode(self) -> None:
         with patch.object(TakoTerminalApp, "run", return_value=None) as run_mock:

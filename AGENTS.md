@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-26 — App mode now degrades to text-only runtime logs on low-capability terminals
+
+- What happened: some environments launched `takobot app` in terminals that were technically attached but too limited for Textual UI (for example `TERM=dumb`), causing unreliable startup behavior instead of a deterministic fallback.
+- Fix: app command startup now probes terminal capability (`TERM` + stdin/stdout TTY checks) and falls back to `takobot run` text-only runtime logs when UI prerequisites are not met; missing `textual` import now also triggers the same fallback path.
+- Prevention: keep app-mode startup capability-gated and cover capability-based fallback behavior with dedicated CLI tests so low-capability terminal environments remain operable.
+
 ### 2026-02-26 — Pi thinking-level retry now keeps non-interactive flags unless option-compat fallback is required
 
 - What happened: some inference retries for model-level thinking mismatches rebuilt pi commands without `--print --mode text --no-session`, even when the original failure was a thinking-level incompatibility (not an unknown-option issue), which could reduce reliability and observability in fallback runs.

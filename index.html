@@ -801,6 +801,9 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>
                 Launches the interactive terminal app and runs onboarding as explicit states (or falls back to stdout daemon mode when no interactive TTY is available).
               </li>
+              <li>
+                If terminal capability is too limited for Textual UI (<code>TERM=dumb|unknown</code>, missing TERM, or non-TTY stdin/stdout), <code>takobot app</code> falls back automatically to simple text-only runtime logs (<code>takobot run</code>).
+              </li>
               <li>Uses stage policy from <code>tako.toml</code> (<code>[life].stage</code>) to control exploration cadence, Type2 budget/day, and DOSE baseline multipliers.</li>
               <li>
                 Installs <code>tako.sh</code> with the package as a shell wrapper; deployed mode dispatches to installed <code>takobot</code>.

@@ -57,6 +57,7 @@
 - **Properties**:
   - `takobot` / `python -m takobot` launch `app` mode by default (interactive terminal main loop).
   - `takobot app` starts the TUI explicitly.
+  - If terminal capability is too limited for Textual UI (`TERM=dumb|unknown`, missing TERM, or non-TTY stdin/stdout), `takobot app` auto-falls back to simple text-only runtime logs (`takobot run`).
   - `takobot run` remains available for direct daemon loop (dev path).
   - Daemon/runtime performs periodic update checks and logs when a newer package version is available.
   - `takobot run` appends daemon/runtime lines to `.tako/logs/runtime.log`.

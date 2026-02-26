@@ -8,6 +8,7 @@ from collections import deque
 from dataclasses import dataclass, replace
 import inspect
 import json
+import os
 from pathlib import Path
 import random
 import re
@@ -256,19 +257,45 @@ def _preferred_git_identity_name(root: Path) -> str:
     return " ".join((identity_name or "").split()).strip()
 
 
+def _terminal_text_ui_unavailable_reason() -> str:
+    term = " ".join(str(os.environ.get("TERM") or "").split()).strip().lower()
+    if term in {"", "dumb", "unknown"}:
+        return f"TERM={term or '(unset)'}"
+    with contextlib.suppress(Exception):
+        if not sys.stdin.isatty():
+            return "stdin is not a TTY"
+    with contextlib.suppress(Exception):
+        if not sys.stdout.isatty():
+            return "stdout is not a TTY"
+    return ""
+
+
+def _run_terminal_app_entry(*, interval: float) -> int:
+    from .app import run_terminal_app
+
+    return run_terminal_app(interval=interval)
+
+
 def cmd_app(args: argparse.Namespace) -> int:
+    interval = max(1.0, float(args.interval))
+    reason = _terminal_text_ui_unavailable_reason()
+    if reason:
+        print(
+            f"Interactive app unavailable ({reason}); falling back to text-only runtime logs.",
+            file=sys.stderr,
+        )
+        return cmd_run(argparse.Namespace(interval=interval, once=False))
+
     try:
-        from .app import run_terminal_app
+        return _run_terminal_app_entry(interval=interval)
     except ModuleNotFoundError as exc:
         if exc.name == "textual":
             print(
-                "Interactive app requires `textual`. Re-run workspace bootstrap (setup.sh) so dependencies install into .venv, then retry.",
+                "Interactive app requires `textual`; falling back to text-only runtime logs.",
                 file=sys.stderr,
             )
-            return 1
+            return cmd_run(argparse.Namespace(interval=interval, once=False))
         raise
-
-    return run_terminal_app(interval=max(1.0, float(args.interval)))
 
 
 def cmd_hi(args: argparse.Namespace) -> int:

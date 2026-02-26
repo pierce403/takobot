@@ -3,6 +3,7 @@
 Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. By default, Tako is intentionally curious about the world and pushes toward evidence-backed answers. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
+- If terminal capabilities are limited (`TERM=dumb|unknown`, missing TERM, or non-TTY stdin/stdout), `takobot app` now auto-falls back to simple text-only runtime logs (`takobot run`) instead of crashing or hanging the TUI.
 - Installed shell wrapper support: `tako.sh` is packaged for deployments and fresh workspaces now materialize a local `tako.sh` launcher (dispatching to installed `takobot` outside repo mode)
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
 - Pi-first/required inference discovery: Takobot installs and uses workspace-local `pi` runtime (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`) and records key-source detection

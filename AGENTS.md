@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-02-26 — Pi thinking-level retry now keeps non-interactive flags unless option-compat fallback is required
+
+- What happened: some inference retries for model-level thinking mismatches rebuilt pi commands without `--print --mode text --no-session`, even when the original failure was a thinking-level incompatibility (not an unknown-option issue), which could reduce reliability and observability in fallback runs.
+- Fix: centralized pi command construction and updated retry behavior to preserve non-interactive optional flags for thinking-compat retries (`minimal`→`low`, `xhigh`→`high`) while still dropping optional flags only for true unknown-option compatibility fallback.
+- Prevention: keep retry command shape aligned to failure class (option-compat vs model-compat), and cover both `--thinking-level` and `--thinking` retry paths in inference runtime tests.
+
 ### 2026-02-24 — XMTP transport migrated from `xmtp-py` to workspace-managed `@xmtp/cli`
 
 - What happened: Python XMTP SDK flows (`xmtp-py`) were brittle across environments, required source-install fallbacks, and diverged from the intended workspace-local Node runtime model already used for pi.

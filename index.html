@@ -829,6 +829,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Shows an animated mind indicator in the TUI while Tako is thinking/responding.</li>
               <li>If pi stream mode fails (for example unsupported stream-json or thinking flags), inference now auto-falls back to sync pi execution instead of failing the turn immediately.</li>
               <li>Pi inference subprocesses are forced non-interactive (<code>stdin=DEVNULL</code>, <code>CI=1</code>), and interactive prompts (for example <code>Press any key to continue...</code>) now fail fast instead of hanging until timeout.</li>
+              <li>Pi sync retry now preserves <code>--print --mode text --no-session</code> for model-thinking fallback (<code>minimal</code>-&gt;<code>low</code>, <code>xhigh</code>-&gt;<code>high</code>) and only drops optional flags for true unknown-option compatibility retries.</li>
               <li>Pi capability sync now remediates deprecated legacy <code>tools/</code> mappings into <code>extensions/</code> locations (global agent + project <code>.pi/</code>) so migration prompts do not block inference.</li>
               <li>Name-intent inference checks now run only when messages hint at rename/profile changes and use a short timeout, so normal smalltalk does not trigger extra rename-classifier calls.</li>
               <li>Operator requests to set/sync XMTP display name/profile without an explicit replacement name now trigger a direct profile-sync attempt to current identity instead of generic model chat fallback.</li>

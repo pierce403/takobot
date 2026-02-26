@@ -18,6 +18,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Prompt history context now compacts verbose inference-unavailable fallback diagnostics into a short marker line to avoid repeated fallback copy bloating later inference prompts.
 - Pi stream inference now auto-falls back to sync pi execution when stream-json invocation fails (for example older CLI flag/value incompatibilities)
 - Pi inference subprocesses are forced non-interactive (`stdin=DEVNULL`, `CI=1`), and interactive prompts like `Press any key to continue...` are detected as fast-fail errors instead of hanging until timeout.
+- Pi sync retry logic now preserves `--print --mode text --no-session` for model-level thinking fallback (`minimal` -> `low`, `xhigh` -> `high`), only dropping optional flags for true unknown-option CLI compatibility retries.
 - Pi capability sync now remediates deprecated legacy `tools/` mappings into `extensions/` locations (global + project `.pi/`) so migration warnings do not block inference.
 - Default Node tooling install in workspace (`.tako/pi/node` + `.tako/xmtp/node`), with local `nvm` bootstrap under `.tako/nvm` when host Node/npm are missing or Node is incompatible (`<22`)
 - Inference execution gate so first model call starts on the first interactive chat turn

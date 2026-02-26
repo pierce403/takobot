@@ -2290,6 +2290,27 @@ def _pi_cli_thinking_args(cli: str, thinking: str, *, help_text: str | None = No
     return []
 
 
+def _build_pi_command(
+    cli: str,
+    *,
+    help_text: str,
+    prepared_prompt: str,
+    thinking: str,
+    include_optional_flags: bool = True,
+) -> list[str]:
+    cmd = [cli]
+    if include_optional_flags:
+        if _pi_help_supports(help_text, "--print"):
+            cmd.append("--print")
+        if _pi_help_supports(help_text, "--mode"):
+            cmd.extend(["--mode", "text"])
+        if _pi_help_supports(help_text, "--no-session"):
+            cmd.append("--no-session")
+    cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
+    cmd.append(prepared_prompt)
+    return cmd
+
+
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
 
@@ -2516,15 +2537,13 @@ def _run_pi(
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
     help_text = _pi_help_text(cli)
     prepared_prompt, _prompt_notes = _prepare_prompt_for_pi(prompt)
-    cmd = [cli]
-    if _pi_help_supports(help_text, "--print"):
-        cmd.append("--print")
-    if _pi_help_supports(help_text, "--mode"):
-        cmd.extend(["--mode", "text"])
-    if _pi_help_supports(help_text, "--no-session"):
-        cmd.append("--no-session")
-    cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
-    cmd.append(prepared_prompt)
+    cmd = _build_pi_command(
+        cli,
+        help_text=help_text,
+        prepared_prompt=prepared_prompt,
+        thinking=thinking,
+        include_optional_flags=True,
+    )
 
     def run_once(command: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -2537,10 +2556,16 @@ def _run_pi(
             stdin=subprocess.DEVNULL,
         )
 
-    def should_retry_with_minimal(proc: subprocess.CompletedProcess[str]) -> bool:
+    def should_retry_without_optional_flags(proc: subprocess.CompletedProcess[str]) -> bool:
         merged = f"{proc.stderr or ''}\n{proc.stdout or ''}".lower()
         if "unrecognized" in merged or "unknown option" in merged or "no such option" in merged:
             return True
+        return False
+
+    def should_retry_with_compat_fallback(proc: subprocess.CompletedProcess[str]) -> bool:
+        if should_retry_without_optional_flags(proc):
+            return True
+        merged = f"{proc.stderr or ''}\n{proc.stdout or ''}".lower()
         if "invalid choice" in merged or "invalid value" in merged or "unsupported value" in merged:
             return True
         if proc.returncode != 0 and not (proc.stderr or "").strip() and not (proc.stdout or "").strip():
@@ -2610,11 +2635,15 @@ def _run_pi(
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
 
-    if should_retry_with_minimal(proc):
+    if should_retry_with_compat_fallback(proc):
         retry_thinking = retry_thinking_override(proc) or thinking
-        retry_cmd = [cli]
-        retry_cmd.extend(_pi_cli_thinking_args(cli, retry_thinking, help_text=help_text))
-        retry_cmd.append(prepared_prompt)
+        retry_cmd = _build_pi_command(
+            cli,
+            help_text=help_text,
+            prepared_prompt=prepared_prompt,
+            thinking=retry_thinking,
+            include_optional_flags=not should_retry_without_optional_flags(proc),
+        )
         if retry_cmd != cmd:
             try:
                 retry_proc = run_once(retry_cmd)

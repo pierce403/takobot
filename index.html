@@ -783,7 +783,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>Inference is pi-runtime-first and required; when pi is unavailable, Tako falls back to heuristic guidance instead of alternate model CLIs.</li>
               <li>Installs pi runtime by default under <code>.tako/pi/node</code> and XMTP CLI runtime under <code>.tako/xmtp/node</code>; if Node/npm are missing or system Node is below runtime requirements (<code>&lt;22</code>), bootstraps workspace-local <code>nvm</code> under <code>.tako/nvm</code>.</li>
               <li>Keeps npm cache local to the workspace under <code>.tako/npm-cache</code> when installing Node tools.</li>
-              <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, and pi OAuth inventory.</li>
+              <li>Supports direct inference configuration from commands: provider preference (<code>auto|pi</code>), persisted API keys, pi OAuth inventory, and Type1/Type2 model lane overrides via <code>models set type1|type2 &lt;model|auto&gt;</code>.</li>
               <li>Supports assisted pi login in-app: <code>inference login</code> relays prompts and accepts operator responses via <code>inference login answer &lt;text&gt;</code>; <code>inference login force</code> forces a fresh re-auth even when stale auth is detected as present.</li>
               <li>Workspace pi auth sync refreshes from newer local <code>~/.pi</code> auth profiles and does not overwrite an existing workspace <code>openai-codex</code> OAuth entry with Codex-imported tokens.</li>
               <li>When inference fails with OpenAI refresh-token errors, fallback replies include non-inference recovery steps (<code>inference login force</code>, <code>inference login answer &lt;text&gt;</code>, <code>inference refresh</code>, <code>inference auth</code>), and XMTP chat attempts auto-repair first.</li>
@@ -833,6 +833,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>If pi stream mode fails (for example unsupported stream-json or thinking flags), inference now auto-falls back to sync pi execution instead of failing the turn immediately.</li>
               <li>Pi inference subprocesses are forced non-interactive (<code>stdin=DEVNULL</code>, <code>CI=1</code>), and interactive prompts (for example <code>Press any key to continue...</code>) now fail fast instead of hanging until timeout.</li>
               <li>Pi sync retry now preserves <code>--print --mode text --no-session</code> for model-thinking fallback (<code>minimal</code>-&gt;<code>low</code>, <code>xhigh</code>-&gt;<code>high</code>) and only drops optional flags for true unknown-option compatibility retries.</li>
+              <li>Type1 local/XMTP chat now defaults to fast <code>openai/gpt-5.1-codex-mini</code> (unless overridden with <code>models set type1 ...</code>), while Type2 keeps deep model selection from base/override settings.</li>
               <li>Pi capability sync now remediates deprecated legacy <code>tools/</code> mappings into <code>extensions/</code> locations (global agent + project <code>.pi/</code>) so migration prompts do not block inference.</li>
               <li>Name-intent inference checks now run only when messages hint at rename/profile changes and use a short timeout, so normal smalltalk does not trigger extra rename-classifier calls.</li>
               <li>Operator requests to set/sync XMTP display name/profile without an explicit replacement name now trigger a direct profile-sync attempt to current identity instead of generic model chat fallback.</li>
@@ -884,7 +885,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>TUI clipboard helpers: <code>Ctrl+Shift+C</code> copies transcript, <code>Ctrl+Shift+L</code> copies last line.</li>
               <li>TUI quit shortcuts: <code>Ctrl+Q</code> always exits app mode; <code>Ctrl+C</code> also exits when not running inside GNU <code>screen</code>.</li>
               <li>TUI input supports history recall: <code>↑</code>/<code>↓</code> cycles previously submitted local messages.</li>
-              <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code>, <code>/jobs</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>
+              <li>TUI slash shortcuts: type <code>/</code> to open a command dropdown under the input field, including <code>/models</code> (plan + list + set Type1/Type2), <code>/jobs</code>, <code>/stats</code>, <code>/upgrade</code>, and <code>/dose &lt;channel&gt; &lt;0..1&gt;</code>.</li>
               <li>TUI command input supports <code>Tab</code> autocomplete for command names and cycles matching candidates on repeated <code>Tab</code>.</li>
               <li>Local TUI input is queued so long-running turns do not block new entry; pending input count is visible in status and sensors.</li>
               <li>Outbound XMTP replies are mirrored into the local TUI transcript/activity feed for a unified conversation view.</li>
@@ -896,7 +897,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
               <li>During streamed inference, tool/research progress is surfaced as live "active work" in the Tasks panel (for example browsing/search/tool steps).</li>
               <li>TUI right-click on selected transcript/stream text copies that selection in-app without clearing it.</li>
               <li>XMTP runtime is more resilient: transient send errors are retried and repeated poll/stream failures trigger client-session rebuilds.</li>
-              <li>Inference stream emits periodic debug wait updates and applies a total local-chat timeout budget to avoid indefinite response stalls.</li>
+              <li>Inference stream emits periodic debug wait updates and applies expanded local-chat timeout budgets (<code>180s</code> provider window, <code>420s</code> total) to avoid premature timeout stalls.</li>
               <li>Pi chat logs include turn summaries in <code>.tako/logs/runtime.log</code> and <code>.tako/logs/app.log</code> (<code>pi chat user</code>/<code>pi chat assistant</code>).</li>
               <li>Even unexpected provider exceptions (outside normal subprocess exits) are appended to <code>.tako/logs/error.log</code> with traceback context.</li>
               <li>Local/XMTP chat prompts enforce canonical identity naming from workspace config/identity state after rename updates.</li>

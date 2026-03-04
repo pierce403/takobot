@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-03-04 — Type1 model lane now defaults to a fast coding model and `/models` is writable
+
+- What happened: first-turn Type1 chat could still run on auto-selected heavier models (surfacing medium-thinking status and timing out), while `/models` only reported plan/auth and could not set lane-specific model choices or show live options.
+- Fix: inference settings now persist Type1/Type2 model overrides, local+XMTP chat use expanded timeout budgets, Type1 defaults to fast `openai/gpt-5.1-codex-mini` unless overridden, pi command wiring now passes lane model flags, `/models` can list available options from `pi --list-models` and set `type1|type2` (`<model|auto>`), and pi sync fallback retries once without model override when a configured model is unavailable.
+- Prevention: keep lane model selection explicit in inference command construction, expose deterministic operator controls for model lanes, and maintain tests for model listing/override persistence/model-unavailable fallback behavior.
+
 ### 2026-02-26 — App mode now degrades to text-only runtime logs on low-capability terminals
 
 - What happened: some environments launched `takobot app` in terminals that were technically attached but too limited for Textual UI (for example `TERM=dumb`), causing unreliable startup behavior instead of a deterministic fallback.

@@ -49,6 +49,7 @@ from .ens import DEFAULT_ENS_RPC_URLS, resolve_recipient
 from .git_safety import assert_not_tracked, auto_commit_pending, ensure_local_git_identity, panic_check_runtime_secrets
 from .inference import (
     PI_TYPE1_THINKING_DEFAULT,
+    PI_TYPE1_MODEL_DEFAULT,
     PI_TYPE2_THINKING_DEFAULT,
     PROVIDER_PRIORITY,
     CONFIGURABLE_API_KEY_VARS,
@@ -61,11 +62,15 @@ from .inference import (
     format_inference_auth_inventory,
     format_pi_model_plan_lines,
     format_runtime_lines,
+    inference_model_for_lane,
     inference_reauth_guidance_lines,
     inference_error_log_path,
+    list_pi_available_models,
     prepare_pi_login_plan,
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
+    set_inference_type1_model,
+    set_inference_type2_model,
     set_inference_api_key,
     set_inference_preferred_provider,
     stream_inference_prompt_with_fallback,
@@ -161,8 +166,8 @@ from .extensions.registry import (
 
 
 HEARTBEAT_JITTER = 0.2
-LOCAL_CHAT_TIMEOUT_S = 75.0
-LOCAL_CHAT_TOTAL_TIMEOUT_S = 120.0
+LOCAL_CHAT_TIMEOUT_S = 180.0
+LOCAL_CHAT_TOTAL_TIMEOUT_S = 420.0
 LOCAL_CHAT_MAX_CHARS = 700
 ACTIVITY_LOG_MAX = 80
 TRANSCRIPT_LOG_MAX = 2000
@@ -187,7 +192,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/config", "Explain tako.toml settings"),
     ("/stage", "Show or set life stage"),
     ("/mission", "Show or set mission objectives"),
-    ("/models", "Show type1/type2 model plan + inference auth"),
+    ("/models", "Show/set type1/type2 models + available options"),
     ("/dose", "Show or tune DOSE levels"),
     ("/explore", "Trigger manual exploration (optional topic)"),
     ("/jobs", "Manage scheduled jobs"),
@@ -1586,6 +1591,7 @@ class TakoTerminalApp(App[None]):
                     prompt,
                     timeout_s=_type2_inference_timeout(depth),
                     thinking=PI_TYPE2_THINKING_DEFAULT,
+                    model=inference_model_for_lane("type2"),
                 )
                 cleaned = _sanitize_for_display(model_output).strip()
                 if cleaned:
@@ -3133,11 +3139,61 @@ class TakoTerminalApp(App[None]):
             if self.inference_runtime is None:
                 self._write_tako("models unavailable: inference runtime is not initialized.")
                 return
+            action_raw = " ".join(rest.split()).strip()
+            action = action_raw.lower()
+            if action in {"help", "?"}:
+                self._write_tako(
+                    "models commands:\n"
+                    "- models\n"
+                    "- models list [search]\n"
+                    "- models set type1 <model|auto>\n"
+                    "- models set type2 <model|auto>\n"
+                    f"default type1 model when unset: {PI_TYPE1_MODEL_DEFAULT}"
+                )
+                return
+            if action.startswith("set "):
+                parts = action_raw.split(maxsplit=2)
+                if len(parts) < 3:
+                    self._write_tako("usage: `models set type1|type2 <model|auto>`")
+                    return
+                lane = parts[1].strip().lower()
+                target_model = parts[2].strip()
+                if lane == "type1":
+                    ok, summary = set_inference_type1_model(target_model)
+                elif lane == "type2":
+                    ok, summary = set_inference_type2_model(target_model)
+                else:
+                    self._write_tako("usage: `models set type1|type2 <model|auto>`")
+                    return
+                if ok:
+                    self._initialize_inference_runtime()
+                self._write_tako(summary)
+                return
+            if action in {"list", "options"} or action.startswith("list ") or action.startswith("options "):
+                query = action_raw.split(maxsplit=1)[1].strip() if " " in action_raw else ""
+                models, detail = list_pi_available_models(self.inference_runtime, search=query)
+                lines = ["pi model options:"]
+                if query:
+                    lines.append(f"filter: {query}")
+                if not models:
+                    lines.append(f"- unavailable: {detail or 'none found'}")
+                else:
+                    for model in models:
+                        lines.append(
+                            f"- {model.model_id} | thinking={'yes' if model.supports_thinking else 'no'} "
+                            f"| context={model.context_window} | max_out={model.max_output_tokens}"
+                        )
+                self._write_tako("\n".join(lines))
+                return
             pi_status = self.inference_runtime.statuses.get("pi")
+            effective_type1_model = inference_model_for_lane("type1") or "(auto-select)"
+            effective_type2_model = inference_model_for_lane("type2") or "(auto-select)"
             lines = [
                 "models (pi + inference):",
                 f"selected provider: {self.inference_runtime.selected_provider or 'none'}",
                 f"inference ready: {'yes' if self.inference_runtime.ready else 'no'}",
+                f"effective type1 model: {effective_type1_model}",
+                f"effective type2 model: {effective_type2_model}",
             ]
             if pi_status is None:
                 lines.append("pi: unavailable")
@@ -3161,6 +3217,24 @@ class TakoTerminalApp(App[None]):
             )
             if self.stream_model and self.stream_model != "auto":
                 lines.append(f"- last streamed model (type1): {self.stream_model}")
+            model_options, model_error = list_pi_available_models(self.inference_runtime)
+            lines.append("")
+            lines.append("pi model options:")
+            if model_options:
+                for model in model_options[:24]:
+                    lines.append(
+                        f"- {model.model_id} | thinking={'yes' if model.supports_thinking else 'no'} "
+                        f"| context={model.context_window} | max_out={model.max_output_tokens}"
+                    )
+                if len(model_options) > 24:
+                    lines.append(f"- ... and {len(model_options) - 24} more (`models list` to show all)")
+            else:
+                lines.append(f"- unavailable: {model_error or 'none found'}")
+            lines.append("")
+            lines.append("configure:")
+            lines.append("- `models set type1 <model|auto>`")
+            lines.append("- `models set type2 <model|auto>`")
+            lines.append("- `models list [search]`")
             lines.append("")
             lines.extend(format_inference_auth_inventory())
             self._write_tako("\n".join(lines))
@@ -3566,6 +3640,7 @@ class TakoTerminalApp(App[None]):
                         prompt,
                         timeout_s=timeout_s,
                         thinking=PI_TYPE2_THINKING_DEFAULT,
+                        model=inference_model_for_lane("type2"),
                     )
                 infer = _infer
 
@@ -3631,6 +3706,7 @@ class TakoTerminalApp(App[None]):
                         prompt,
                         timeout_s=timeout_s,
                         thinking=PI_TYPE2_THINKING_DEFAULT,
+                        model=inference_model_for_lane("type2"),
                     )
                 infer = _infer
             report, provider, err = prod_weekly.weekly_review_with_inference(review, infer=infer)
@@ -4692,6 +4768,7 @@ class TakoTerminalApp(App[None]):
                             timeout_s=LOCAL_CHAT_TIMEOUT_S,
                             on_event=self._on_inference_stream_event,
                             thinking=PI_TYPE1_THINKING_DEFAULT,
+                            model=inference_model_for_lane("type1"),
                         ),
                         timeout=LOCAL_CHAT_TOTAL_TIMEOUT_S,
                     )

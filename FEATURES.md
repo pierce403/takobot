@@ -175,10 +175,10 @@
   - Bubble stream shows request focus and elapsed time while inference is thinking/responding.
   - Incremental `pi thinking` stream chunks are coalesced inline into a single thinking-status line (instead of one newline per token), while structural markers remain separate.
   - Bubble stream header includes streamed model identity when provided by inference events.
-  - Local chat inference emits periodic debug status updates and enforces a total timeout budget to avoid stalled pi-runtime turns.
+  - Local chat inference emits periodic debug status updates and now uses expanded timeout budgets (`180s` provider window, `420s` total) to avoid stalled pi-runtime turns timing out too early.
   - When inference is unavailable, local chat returns a clear diagnostics-mode message with immediate repair guidance instead of ambiguous status text.
   - Right-click on selected transcript/stream text copies the selected text to clipboard in-app.
-  - `models` command reports effective Type1/Type2 pi model/thinking plan (Type1 fast/minimal, Type2 deep/xhigh) plus the last streamed model seen in TUI.
+  - `models` command reports effective Type1/Type2 pi model/thinking plan (Type1 fast/minimal defaulting to `openai/gpt-5.1-codex-mini`, Type2 deep/xhigh), supports lane overrides (`models set type1|type2 <model|auto>`), and lists available options from `pi --list-models`.
   - Inference command failures write detailed diagnostics (invoked command + output tails) to `.tako/logs/error.log`.
   - Pi prompt input is preflighted before invocation: oversized lines are wrapped and overly large prompts are trimmed to avoid splitter chunk-limit crashes.
   - Unexpected provider exceptions (before subprocess failure handling) are appended to `.tako/logs/error.log` with traceback context.
@@ -212,6 +212,7 @@
   - [x] Pi JSON stream events are surfaced to TUI stream status/task lines during local chat inference.
   - [x] Incremental `pi thinking` stream chunks render inline in one status line (special structural markers stay separate).
   - [x] `models` command includes effective type1/type2 model configuration details (not only provider readiness), with fast-vs-deep split visible.
+  - [x] `models` command can list available pi model options and set/clear per-lane Type1/Type2 model overrides.
   - [x] Type 2 does not call model inference before the first interactive user turn.
   - [x] Type 2 keeps operating with heuristic fallback when provider invocations fail.
   - [x] After pairing, non-command text in terminal still receives chat replies.

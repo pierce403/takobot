@@ -66,6 +66,7 @@ CONFIGURABLE_API_KEY_VARS = tuple(
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 PI_TYPE1_THINKING_DEFAULT = "minimal"
 PI_TYPE2_THINKING_DEFAULT = "xhigh"
+PI_TYPE1_MODEL_DEFAULT = "openai/gpt-5.1-codex-mini"
 PI_PROMPT_MAX_LINE_CHARS = 320
 PI_PROMPT_MAX_CHARS = 80_000
 PI_PROMPT_TRUNCATION_MARKER = "\n[... prompt truncated for pi runtime safety ...]\n"
@@ -87,7 +88,21 @@ class InferenceSettings:
     preferred_provider: str = "auto"
     ollama_model: str = ""
     ollama_host: str = ""
+    type1_model: str = ""
+    type2_model: str = ""
     api_keys: dict[str, str] = field(default_factory=dict)
+
+
+def _clean_lane_model_setting(value: Any, *, allow_auto_literal: bool = True) -> str:
+    cleaned = " ".join(str(value or "").split()).strip()
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower()
+    if allow_auto_literal and lowered in {"auto", "default", "none"}:
+        return "auto"
+    if len(cleaned) > 180:
+        cleaned = cleaned[:180].rstrip()
+    return cleaned
 
 
 def load_inference_settings(path: Path | None = None) -> InferenceSettings:
@@ -103,6 +118,8 @@ def load_inference_settings(path: Path | None = None) -> InferenceSettings:
         preferred = "auto"
     ollama_model = " ".join(str(payload.get("ollama_model") or "").split()).strip()
     ollama_host = " ".join(str(payload.get("ollama_host") or "").split()).strip()
+    type1_model = _clean_lane_model_setting(payload.get("type1_model"), allow_auto_literal=True)
+    type2_model = _clean_lane_model_setting(payload.get("type2_model"), allow_auto_literal=True)
 
     raw_keys = payload.get("api_keys")
     api_keys: dict[str, str] = {}
@@ -121,6 +138,8 @@ def load_inference_settings(path: Path | None = None) -> InferenceSettings:
         preferred_provider=preferred or "auto",
         ollama_model=ollama_model,
         ollama_host=ollama_host,
+        type1_model=type1_model,
+        type2_model=type2_model,
         api_keys=api_keys,
     )
 
@@ -131,6 +150,8 @@ def save_inference_settings(settings: InferenceSettings, path: Path | None = Non
         "preferred_provider": settings.preferred_provider,
         "ollama_model": settings.ollama_model,
         "ollama_host": settings.ollama_host,
+        "type1_model": settings.type1_model,
+        "type2_model": settings.type2_model,
         "api_keys": dict(sorted(settings.api_keys.items())),
     }
     try:
@@ -158,6 +179,8 @@ def set_inference_preferred_provider(provider: str, path: Path | None = None) ->
         preferred_provider=candidate,
         ollama_model=settings.ollama_model,
         ollama_host=settings.ollama_host,
+        type1_model=settings.type1_model,
+        type2_model=settings.type2_model,
         api_keys=dict(settings.api_keys),
     )
     ok, message = save_inference_settings(updated, path=path)
@@ -173,6 +196,8 @@ def set_inference_ollama_model(model: str, path: Path | None = None) -> tuple[bo
         preferred_provider=settings.preferred_provider,
         ollama_model=cleaned,
         ollama_host=settings.ollama_host,
+        type1_model=settings.type1_model,
+        type2_model=settings.type2_model,
         api_keys=dict(settings.api_keys),
     )
     ok, message = save_inference_settings(updated, path=path)
@@ -190,6 +215,8 @@ def set_inference_ollama_host(host: str, path: Path | None = None) -> tuple[bool
         preferred_provider=settings.preferred_provider,
         ollama_model=settings.ollama_model,
         ollama_host=cleaned,
+        type1_model=settings.type1_model,
+        type2_model=settings.type2_model,
         api_keys=dict(settings.api_keys),
     )
     ok, message = save_inference_settings(updated, path=path)
@@ -216,6 +243,8 @@ def set_inference_api_key(env_var: str, value: str, path: Path | None = None) ->
         preferred_provider=settings.preferred_provider,
         ollama_model=settings.ollama_model,
         ollama_host=settings.ollama_host,
+        type1_model=settings.type1_model,
+        type2_model=settings.type2_model,
         api_keys=api_keys,
     )
     ok, message = save_inference_settings(updated, path=path)
@@ -236,6 +265,8 @@ def clear_inference_api_key(env_var: str, path: Path | None = None) -> tuple[boo
         preferred_provider=settings.preferred_provider,
         ollama_model=settings.ollama_model,
         ollama_host=settings.ollama_host,
+        type1_model=settings.type1_model,
+        type2_model=settings.type2_model,
         api_keys=api_keys,
     )
     ok, message = save_inference_settings(updated, path=path)
@@ -252,6 +283,8 @@ def format_inference_auth_inventory() -> list[str]:
     lines.append(f"preferred provider: {settings.preferred_provider}")
     lines.append(f"ollama model: {settings.ollama_model or '(auto)'}")
     lines.append(f"ollama host: {settings.ollama_host or '(default)'}")
+    lines.append(f"type1 model override: {settings.type1_model or '(auto)'}")
+    lines.append(f"type2 model override: {settings.type2_model or '(auto)'}")
 
     if settings.api_keys:
         lines.append("persisted API keys:")
@@ -269,6 +302,48 @@ def format_inference_auth_inventory() -> list[str]:
     else:
         lines.append("pi oauth providers: (none detected)")
     return lines
+
+
+def set_inference_type1_model(model: str, path: Path | None = None) -> tuple[bool, str]:
+    cleaned = _clean_lane_model_setting(model, allow_auto_literal=True)
+    if not cleaned:
+        return False, "type1 model cannot be empty (use `auto` to clear override)."
+    settings = load_inference_settings(path)
+    updated = InferenceSettings(
+        preferred_provider=settings.preferred_provider,
+        ollama_model=settings.ollama_model,
+        ollama_host=settings.ollama_host,
+        type1_model=cleaned,
+        type2_model=settings.type2_model,
+        api_keys=dict(settings.api_keys),
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    if cleaned == "auto":
+        return True, "type1 model override cleared (pi auto-select enabled for type1)."
+    return True, f"type1 model set to `{cleaned}`"
+
+
+def set_inference_type2_model(model: str, path: Path | None = None) -> tuple[bool, str]:
+    cleaned = _clean_lane_model_setting(model, allow_auto_literal=True)
+    if not cleaned:
+        return False, "type2 model cannot be empty (use `auto` to clear override)."
+    settings = load_inference_settings(path)
+    updated = InferenceSettings(
+        preferred_provider=settings.preferred_provider,
+        ollama_model=settings.ollama_model,
+        ollama_host=settings.ollama_host,
+        type1_model=settings.type1_model,
+        type2_model=cleaned,
+        api_keys=dict(settings.api_keys),
+    )
+    ok, message = save_inference_settings(updated, path=path)
+    if not ok:
+        return False, message
+    if cleaned == "auto":
+        return True, "type2 model override cleared (pi auto-select enabled for type2)."
+    return True, f"type2 model set to `{cleaned}`"
 
 
 def enumerate_pi_oauth_tokens() -> list[str]:
@@ -390,6 +465,24 @@ class PiModelProfile:
     thinking: str
     model_source: str
     thinking_source: str
+
+
+@dataclass(frozen=True)
+class PiAvailableModel:
+    provider: str
+    model: str
+    context_window: str
+    max_output_tokens: str
+    supports_thinking: bool
+    supports_images: bool
+
+    @property
+    def model_id(self) -> str:
+        provider = " ".join((self.provider or "").split()).strip()
+        model = " ".join((self.model or "").split()).strip()
+        if provider and model:
+            return f"{provider}/{model}"
+        return model or provider
 
 
 @dataclass(frozen=True)
@@ -627,6 +720,7 @@ def run_inference_prompt(
     *,
     timeout_s: float = 70.0,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> str:
     provider = runtime.selected_provider
     if not provider:
@@ -635,7 +729,7 @@ def run_inference_prompt(
     if not status or not status.ready:
         raise RuntimeError("selected inference provider is not ready")
 
-    return _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking)
+    return _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking, model=model)
 
 
 def run_inference_prompt_with_fallback(
@@ -644,6 +738,7 @@ def run_inference_prompt_with_fallback(
     *,
     timeout_s: float = 70.0,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> tuple[str, str]:
     order: list[str] = []
     if runtime.selected_provider:
@@ -664,7 +759,7 @@ def run_inference_prompt_with_fallback(
     failures: list[str] = []
     for provider in order:
         try:
-            text = _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking)
+            text = _run_with_provider(runtime, provider, prompt, timeout_s=timeout_s, thinking=thinking, model=model)
             return provider, text
         except Exception as exc:  # noqa: BLE001
             _log_unexpected_provider_exception(provider=provider, exc=exc, phase="run")
@@ -681,6 +776,7 @@ async def stream_inference_prompt_with_fallback(
     timeout_s: float = 70.0,
     on_event: StreamEventHook | None = None,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> tuple[str, str]:
     order: list[str] = []
     if runtime.selected_provider:
@@ -710,6 +806,7 @@ async def stream_inference_prompt_with_fallback(
                 timeout_s=timeout_s,
                 on_event=on_event,
                 thinking=thinking,
+                model=model,
             )
             return provider, text
         except Exception as exc:  # noqa: BLE001
@@ -745,6 +842,55 @@ def format_runtime_lines(runtime: InferenceRuntime) -> list[str]:
             f"source={status.key_source or 'none'}"
         )
     return lines
+
+
+def list_pi_available_models(
+    runtime: InferenceRuntime | None = None,
+    *,
+    search: str = "",
+    timeout_s: float = 12.0,
+) -> tuple[list[PiAvailableModel], str]:
+    active_runtime = runtime or discover_inference_runtime()
+    pi_status = active_runtime.statuses.get("pi")
+    if pi_status is None:
+        return [], "pi runtime is unavailable."
+    cli = (pi_status.cli_path if pi_status and pi_status.cli_path else "pi") or "pi"
+    if not pi_status.cli_installed:
+        return [], "pi CLI is not installed."
+
+    query = " ".join((search or "").split()).strip()
+    cmd = [cli, "--list-models"]
+    if query:
+        cmd.append(query)
+
+    env = _provider_env(active_runtime, "pi")
+    try:
+        proc = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=max(4.0, float(timeout_s)),
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        return [], f"model listing timed out after {int(timeout_s)}s."
+    except Exception as exc:  # noqa: BLE001
+        return [], f"failed to run model listing: {exc}"
+
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+        return [], _summarize_error_text(detail)
+
+    models = _parse_pi_model_list_output(proc.stdout)
+    if models:
+        return models, ""
+
+    output = " ".join((proc.stdout or "").split()).strip()
+    if output:
+        return [], f"pi returned unexpected model-list output: {_summarize_error_text(output)}"
+    return [], "pi returned no model options."
 
 
 def resolve_pi_model_profile() -> PiModelProfile:
@@ -791,24 +937,61 @@ def _effective_pi_type2_thinking(value: str = "") -> str:
     return _clean_thinking_setting(value) or PI_TYPE2_THINKING_DEFAULT
 
 
+def _effective_pi_type1_model(value: str = "") -> str:
+    cleaned = _clean_lane_model_setting(value, allow_auto_literal=True)
+    if cleaned == "auto":
+        return ""
+    if cleaned:
+        return cleaned
+    return PI_TYPE1_MODEL_DEFAULT
+
+
+def _effective_pi_type2_model(value: str = "") -> str:
+    cleaned = _clean_lane_model_setting(value, allow_auto_literal=True)
+    if cleaned == "auto":
+        return ""
+    return cleaned
+
+
+def inference_model_for_lane(lane: str, *, settings_path: Path | None = None) -> str:
+    settings = load_inference_settings(settings_path)
+    lane_name = " ".join((lane or "").split()).strip().lower()
+    if lane_name == "type1":
+        return _effective_pi_type1_model(settings.type1_model)
+    if lane_name == "type2":
+        configured = _effective_pi_type2_model(settings.type2_model)
+        if configured:
+            return configured
+        profile = resolve_pi_model_profile()
+        return _clean_lane_model_setting(profile.model, allow_auto_literal=False)
+    return ""
+
+
 def format_pi_model_plan_lines(
     *,
     type1_thinking_default: str = PI_TYPE1_THINKING_DEFAULT,
     type2_thinking_default: str = PI_TYPE2_THINKING_DEFAULT,
 ) -> list[str]:
+    settings = load_inference_settings()
     profile = resolve_pi_model_profile()
-    model = profile.model or "(auto-select)"
+    configured_type1_model = _clean_lane_model_setting(settings.type1_model, allow_auto_literal=True)
+    configured_type2_model = _clean_lane_model_setting(settings.type2_model, allow_auto_literal=True)
+    type1_model = _effective_pi_type1_model(settings.type1_model) or "(auto-select)"
+    type2_override = _effective_pi_type2_model(settings.type2_model)
+    type2_model = type2_override or profile.model or "(auto-select)"
     type1_thinking = _effective_pi_type1_thinking(type1_thinking_default)
     type2_thinking = _effective_pi_type2_thinking(type2_thinking_default)
     configured_thinking = _clean_thinking_setting(profile.thinking) or "medium"
 
     lines = [
         "pi model plan:",
-        f"- type1 model: {model}",
+        f"- type1 model: {type1_model}",
         f"- type1 thinking: {type1_thinking}",
-        f"- type2 model: {model}",
+        f"- type2 model: {type2_model}",
         f"- type2 thinking: {type2_thinking}",
         f"- configured base thinking: {configured_thinking}",
+        f"- type1 override source: {configured_type1_model or '(default fast model)'}",
+        f"- type2 override source: {configured_type2_model or '(none; using base model)'}",
     ]
     if profile.model_source:
         lines.append(f"- model source: {profile.model_source}")
@@ -819,6 +1002,34 @@ def format_pi_model_plan_lines(
     else:
         lines.append("- thinking source: default medium")
     return lines
+
+
+def _parse_pi_model_list_output(output: str) -> list[PiAvailableModel]:
+    models: list[PiAvailableModel] = []
+    for raw_line in (output or "").splitlines():
+        line = " ".join(raw_line.split()).strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered.startswith("provider ") or lowered == "provider":
+            continue
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        provider, model, context_window, max_output, thinking, images = parts[:6]
+        if not provider or not model:
+            continue
+        models.append(
+            PiAvailableModel(
+                provider=provider,
+                model=model,
+                context_window=context_window,
+                max_output_tokens=max_output,
+                supports_thinking=thinking.lower() in {"yes", "true", "1"},
+                supports_images=images.lower() in {"yes", "true", "1"},
+            )
+        )
+    return models
 
 
 def auto_repair_inference_runtime() -> list[str]:
@@ -1544,10 +1755,11 @@ def _run_with_provider(
     *,
     timeout_s: float,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> str:
     env = _provider_env(runtime, provider)
     if provider == "pi":
-        return _run_pi(runtime, prompt, env=env, timeout_s=timeout_s, thinking=thinking)
+        return _run_pi(runtime, prompt, env=env, timeout_s=timeout_s, thinking=thinking, model=model)
     if provider == "ollama":
         return _run_ollama(runtime, prompt, env=env, timeout_s=timeout_s)
     if provider == "codex":
@@ -1567,12 +1779,21 @@ async def _stream_with_provider(
     timeout_s: float,
     on_event: StreamEventHook | None,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> str:
     env = _provider_env(runtime, provider)
 
     if provider == "pi":
         try:
-            return await _stream_pi(runtime, prompt, env=env, timeout_s=timeout_s, on_event=on_event, thinking=thinking)
+            return await _stream_pi(
+                runtime,
+                prompt,
+                env=env,
+                timeout_s=timeout_s,
+                on_event=on_event,
+                thinking=thinking,
+                model=model,
+            )
         except Exception as stream_exc:  # noqa: BLE001
             if _is_interactive_prompt_failure(str(stream_exc)):
                 if on_event:
@@ -1580,7 +1801,15 @@ async def _stream_with_provider(
                 raise
             if on_event:
                 on_event("status", f"pi stream fallback: {_summarize_error_text(str(stream_exc))}")
-            text = await asyncio.to_thread(_run_pi, runtime, prompt, env=env, timeout_s=timeout_s, thinking=thinking)
+            text = await asyncio.to_thread(
+                _run_pi,
+                runtime,
+                prompt,
+                env=env,
+                timeout_s=timeout_s,
+                thinking=thinking,
+                model=model,
+            )
             await _simulate_stream(text, on_event=on_event)
             return text
     if provider == "ollama":
@@ -1607,6 +1836,7 @@ async def _stream_pi(
     timeout_s: float,
     on_event: StreamEventHook | None,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
@@ -1620,6 +1850,7 @@ async def _stream_pi(
         cmd.extend(["--mode", "json"])
     if _pi_help_supports(help_text, "--no-session"):
         cmd.append("--no-session")
+    cmd.extend(_pi_cli_model_args(cli, model, help_text=help_text))
     cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
     cmd.append(prepared_prompt)
 
@@ -2290,12 +2521,26 @@ def _pi_cli_thinking_args(cli: str, thinking: str, *, help_text: str | None = No
     return []
 
 
+def _pi_cli_model_args(cli: str, model: str, *, help_text: str | None = None) -> list[str]:
+    selected = _clean_lane_model_setting(model, allow_auto_literal=True)
+    if selected == "auto":
+        return []
+    if not selected:
+        return []
+    if help_text is None:
+        help_text = _pi_help_text(cli)
+    if "--model" not in help_text:
+        return []
+    return ["--model", selected]
+
+
 def _build_pi_command(
     cli: str,
     *,
     help_text: str,
     prepared_prompt: str,
     thinking: str,
+    model: str,
     include_optional_flags: bool = True,
 ) -> list[str]:
     cmd = [cli]
@@ -2306,6 +2551,7 @@ def _build_pi_command(
             cmd.extend(["--mode", "text"])
         if _pi_help_supports(help_text, "--no-session"):
             cmd.append("--no-session")
+    cmd.extend(_pi_cli_model_args(cli, model, help_text=help_text))
     cmd.extend(_pi_cli_thinking_args(cli, thinking, help_text=help_text))
     cmd.append(prepared_prompt)
     return cmd
@@ -2532,6 +2778,7 @@ def _run_pi(
     env: dict[str, str],
     timeout_s: float,
     thinking: str = PI_TYPE1_THINKING_DEFAULT,
+    model: str = "",
 ) -> str:
     status = runtime.statuses.get("pi")
     cli = (status.cli_path if status and status.cli_path else "pi") or "pi"
@@ -2542,6 +2789,7 @@ def _run_pi(
         help_text=help_text,
         prepared_prompt=prepared_prompt,
         thinking=thinking,
+        model=model,
         include_optional_flags=True,
     )
 
@@ -2571,6 +2819,25 @@ def _run_pi(
         if proc.returncode != 0 and not (proc.stderr or "").strip() and not (proc.stdout or "").strip():
             return True
         return False
+
+    def should_retry_without_model(proc: subprocess.CompletedProcess[str]) -> bool:
+        requested_model = _clean_lane_model_setting(model, allow_auto_literal=True)
+        if not requested_model or requested_model == "auto":
+            return False
+        merged = f"{proc.stderr or ''}\n{proc.stdout or ''}".lower()
+        model_signals = (
+            "model not found",
+            "no model found",
+            "no model matching",
+            "unknown model",
+            "unsupported model",
+            "model is not supported",
+            "invalid model",
+            "does not have access",
+            "not available for your account",
+            "not available to this user",
+        )
+        return any(signal in merged for signal in model_signals)
 
     def retry_thinking_override(proc: subprocess.CompletedProcess[str]) -> str:
         requested = _clean_thinking_setting(thinking)
@@ -2635,13 +2902,15 @@ def _run_pi(
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
 
-    if should_retry_with_compat_fallback(proc):
+    if should_retry_with_compat_fallback(proc) or should_retry_without_model(proc):
         retry_thinking = retry_thinking_override(proc) or thinking
+        retry_model = "auto" if should_retry_without_model(proc) else model
         retry_cmd = _build_pi_command(
             cli,
             help_text=help_text,
             prepared_prompt=prepared_prompt,
             thinking=retry_thinking,
+            model=retry_model,
             include_optional_flags=not should_retry_without_optional_flags(proc),
         )
         if retry_cmd != cmd:

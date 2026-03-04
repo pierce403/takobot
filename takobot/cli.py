@@ -41,6 +41,7 @@ from .inference import (
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_runtime_lines,
+    inference_model_for_lane,
     inference_reauth_guidance_lines,
     inference_error_log_path,
     prepare_pi_login_plan,
@@ -132,7 +133,7 @@ STREAM_POLL_INTERVAL_S = 3.0
 STREAM_POLL_STABLE_CYCLES = 4
 MESSAGE_HISTORY_PER_CONVERSATION = 80
 SEEN_MESSAGE_CACHE_MAX = 4096
-CHAT_INFERENCE_TIMEOUT_S = 75.0
+CHAT_INFERENCE_TIMEOUT_S = 180.0
 CHAT_REPLY_MAX_CHARS = 700
 CHAT_CONTEXT_USER_TURNS = 12
 CHAT_CONTEXT_MAX_CHARS = 8_000
@@ -1477,6 +1478,7 @@ async def _handle_incoming_message(
                     prompt,
                     timeout_s=timeout_s,
                     thinking=PI_TYPE2_THINKING_DEFAULT,
+                    model=inference_model_for_lane("type2"),
                 )
             infer = _infer
         result = await asyncio.to_thread(
@@ -1506,6 +1508,7 @@ async def _handle_incoming_message(
                     prompt,
                     timeout_s=timeout_s,
                     thinking=PI_TYPE2_THINKING_DEFAULT,
+                    model=inference_model_for_lane("type2"),
                 )
             infer = _infer
         report, provider, _err = prod_weekly.weekly_review_with_inference(review, infer=infer)
@@ -2491,6 +2494,7 @@ async def _chat_reply(
             inference_runtime,
             prompt,
             timeout_s=CHAT_INFERENCE_TIMEOUT_S,
+            model=inference_model_for_lane("type1"),
         )
 
     try:

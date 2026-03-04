@@ -11,14 +11,19 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 from takobot.inference import (
+    PI_TYPE1_MODEL_DEFAULT,
     InferenceRuntime,
     InferenceProviderStatus,
     InferenceSettings,
     PI_PROMPT_MAX_LINE_CHARS,
+    _parse_pi_model_list_output,
+    _pi_cli_model_args,
     _pi_cli_thinking_args,
     _stream_with_provider,
     _stream_pi,
     inference_reauth_guidance_lines,
+    inference_model_for_lane,
+    list_pi_available_models,
     looks_like_openai_oauth_refresh_failure,
     _codex_oauth_credential_from_auth,
     _ensure_workspace_pi_auth,
@@ -42,6 +47,8 @@ from takobot.inference import (
     set_inference_ollama_host,
     set_inference_ollama_model,
     set_inference_preferred_provider,
+    set_inference_type1_model,
+    set_inference_type2_model,
 )
 
 
@@ -427,6 +434,88 @@ class TestInferencePiRuntime(unittest.TestCase):
             args = _pi_cli_thinking_args("pi", "minimal")
         self.assertEqual(["--thinking-level", "low"], args)
 
+    def test_pi_cli_model_args_include_model_flag_when_supported(self) -> None:
+        with patch("takobot.inference._safe_help_text", return_value="usage: pi --model <pattern>"):
+            args = _pi_cli_model_args("pi", "openai/gpt-5.1-codex-mini")
+        self.assertEqual(["--model", "openai/gpt-5.1-codex-mini"], args)
+
+    def test_run_pi_retries_without_model_when_requested_model_is_unavailable(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            called_cmd = [str(part) for part in cmd]
+            calls.append(called_cmd)
+            if len(calls) == 1:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr="Model not found: openai/gpt-5.9-codex-superfast",
+                )
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        with (
+            patch(
+                "takobot.inference._safe_help_text",
+                return_value="usage: pi --print --mode <text|json> --no-session --model <pattern> --thinking <level>",
+            ),
+            patch("takobot.inference.subprocess.run", side_effect=fake_run),
+        ):
+            output = _run_pi(
+                runtime,
+                "hello world",
+                env={},
+                timeout_s=10.0,
+                thinking="minimal",
+                model="openai/gpt-5.9-codex-superfast",
+            )
+
+        self.assertEqual("ok", output)
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertIn("--model", calls[0])
+        self.assertIn("openai/gpt-5.9-codex-superfast", calls[0])
+        self.assertNotIn("--model", calls[1])
+
+    def test_parse_pi_model_list_output_parses_rows(self) -> None:
+        rows = _parse_pi_model_list_output(
+            "provider  model        context  max-out  thinking  images\n"
+            "openai    gpt-5-mini   400K     128K     yes       yes\n"
+            "openai    gpt-4o-mini  128K     16.4K    no        yes\n"
+        )
+        self.assertEqual(2, len(rows))
+        self.assertEqual("openai/gpt-5-mini", rows[0].model_id)
+        self.assertTrue(rows[0].supports_thinking)
+        self.assertFalse(rows[1].supports_thinking)
+
+    def test_list_pi_available_models_returns_parsed_models(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={"pi": self._status("pi", cli_installed=True, ready=True)},
+            selected_provider="pi",
+            selected_auth_kind="oauth",
+            selected_key_env_var=None,
+            selected_key_source="oauth",
+            _api_keys={},
+        )
+        with patch(
+            "takobot.inference.subprocess.run",
+            return_value=SimpleNamespace(
+                returncode=0,
+                stdout="provider  model        context  max-out  thinking  images\nopenai    gpt-5-mini   400K     128K     yes       yes\n",
+                stderr="",
+            ),
+        ):
+            models, detail = list_pi_available_models(runtime)
+        self.assertFalse(detail)
+        self.assertEqual(1, len(models))
+        self.assertEqual("openai/gpt-5-mini", models[0].model_id)
+
     def test_detects_openai_oauth_refresh_failure_signals(self) -> None:
         error_text = (
             "pi inference failed: [openai-codex] Token refresh failed: 401 "
@@ -495,6 +584,48 @@ class TestInferencePiRuntime(unittest.TestCase):
             self.assertTrue(ok_clear)
             settings_cleared = load_inference_settings(settings_path)
             self.assertNotIn("OPENAI_API_KEY", settings_cleared.api_keys)
+
+    def test_inference_settings_store_type1_and_type2_models(self) -> None:
+        with TemporaryDirectory() as tmp:
+            settings_path = Path(tmp) / "inference-settings.json"
+            ok_type1, _msg_type1 = set_inference_type1_model("openai/gpt-5.1-codex-mini", path=settings_path)
+            ok_type2, _msg_type2 = set_inference_type2_model("openai/gpt-5.3-codex", path=settings_path)
+            self.assertTrue(ok_type1)
+            self.assertTrue(ok_type2)
+
+            settings = load_inference_settings(settings_path)
+            self.assertEqual("openai/gpt-5.1-codex-mini", settings.type1_model)
+            self.assertEqual("openai/gpt-5.3-codex", settings.type2_model)
+
+            ok_type1_auto, _msg_type1_auto = set_inference_type1_model("auto", path=settings_path)
+            self.assertTrue(ok_type1_auto)
+            settings_auto = load_inference_settings(settings_path)
+            self.assertEqual("auto", settings_auto.type1_model)
+
+    def test_inference_model_for_lane_uses_fast_default_and_respects_auto(self) -> None:
+        with patch(
+            "takobot.inference.load_inference_settings",
+            return_value=InferenceSettings(preferred_provider="pi", type1_model="", type2_model=""),
+        ):
+            self.assertEqual(PI_TYPE1_MODEL_DEFAULT, inference_model_for_lane("type1"))
+
+        with (
+            patch(
+                "takobot.inference.load_inference_settings",
+                return_value=InferenceSettings(preferred_provider="pi", type1_model="auto", type2_model=""),
+            ),
+            patch(
+                "takobot.inference.resolve_pi_model_profile",
+                return_value=SimpleNamespace(
+                    model="openai/gpt-5.3-codex",
+                    thinking="medium",
+                    model_source="~/.pi/agent/settings.json",
+                    thinking_source="~/.pi/agent/settings.json",
+                ),
+            ),
+        ):
+            self.assertEqual("", inference_model_for_lane("type1"))
+            self.assertEqual("openai/gpt-5.3-codex", inference_model_for_lane("type2"))
 
     def test_discover_runtime_attempts_workspace_bootstrap_when_pi_missing(self) -> None:
         pi_status = self._status("pi", cli_installed=False, ready=False, note="install workspace-local pi runtime")
@@ -795,18 +926,28 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertTrue(profile.thinking_source.endswith(".pi/settings.json"))
 
     def test_format_pi_model_plan_lines_includes_type1_and_type2(self) -> None:
-        with patch(
-            "takobot.inference.resolve_pi_model_profile",
-            return_value=SimpleNamespace(
-                model="openai/gpt-5.3-codex",
-                thinking="medium",
-                model_source="~/.pi/agent/settings.json",
-                thinking_source="~/.pi/agent/settings.json",
+        with (
+            patch(
+                "takobot.inference.resolve_pi_model_profile",
+                return_value=SimpleNamespace(
+                    model="openai/gpt-5.3-codex",
+                    thinking="medium",
+                    model_source="~/.pi/agent/settings.json",
+                    thinking_source="~/.pi/agent/settings.json",
+                ),
+            ),
+            patch(
+                "takobot.inference.load_inference_settings",
+                return_value=InferenceSettings(
+                    preferred_provider="pi",
+                    type1_model="openai/gpt-5.1-codex-mini",
+                    type2_model="openai/gpt-5.3-codex",
+                ),
             ),
         ):
             lines = format_pi_model_plan_lines(type2_thinking_default="high")
         rendered = "\n".join(lines)
-        self.assertIn("type1 model: openai/gpt-5.3-codex", rendered)
+        self.assertIn("type1 model: openai/gpt-5.1-codex-mini", rendered)
         self.assertIn("type2 model: openai/gpt-5.3-codex", rendered)
         self.assertIn("type1 thinking: minimal", rendered)
         self.assertIn("type2 thinking: high", rendered)

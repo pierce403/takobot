@@ -48,7 +48,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Research visibility: during streamed inference, inferred tool steps (for example web browsing/search/tool calls) are surfaced as live "active work" in the Tasks panel
 - TUI input history recall: press `↑` / `↓` in the input box to cycle previously submitted local messages
 - TUI quit shortcuts: `Ctrl+Q` always exits app mode; `Ctrl+C` remains available when not running under GNU `screen`
-- Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for pi/inference auth config, `/jobs` for schedule control, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
+- Slash-command UX in the TUI: typing `/` opens a dropdown under the input field with command shortcuts; includes `/models` for Type1/Type2 model plan + model-option listing + lane overrides, `/jobs` for schedule control, `/upgrade` as update alias, `/stats` for runtime counters, and `/dose ...` for direct DOSE level tuning
 - TUI command entry supports `Tab` autocomplete for command names (with candidate cycling on repeated `Tab`)
 - Local TUI input is now queued: long-running turns no longer block new message entry, and pending input count is shown in status/sensors
 - XMTP outbound replies are mirrored into the local TUI transcript/activity feed so remote conversations stay visible in one place
@@ -56,11 +56,11 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Runtime writes deterministic world notes under `memory/world/YYYY-MM-DD.md` and daily mission snapshots under `memory/world/mission-review/YYYY-MM-DD.md`
 - Focus-aware memory recall on every inference: DOSE emotional state drives how much semantic RAG context is pulled from `memory/` via `ragrep` (minimal context when focused, broader context when diffuse)
 - Prompt context stack parity across channels: local TUI chat and XMTP chat now both include `SOUL.md`/`SKILLS.md`/`TOOLS.md` excerpts, live skills/tools inventories, `MEMORY.md` frontmatter, focus summary, semantic RAG context, and recent conversation history
-- Effective thinking defaults are split by cognition lane: Type1 uses fast `minimal` thinking, Type2 uses deep `xhigh` thinking
+- Effective defaults are split by cognition lane: Type1 uses fast `minimal` thinking with a fast coding model default (`openai/gpt-5.1-codex-mini` unless overridden), Type2 uses deep `xhigh` thinking and follows base/override model settings
 - Life-stage model (`hatchling`, `child`, `teen`, `adult`) persisted in `tako.toml` with stage policies for routines/cadence/budgets
 - Bubble stream now shows the active request focus + elapsed time while thinking/responding so long responses stay transparent
 - Incremental `pi thinking` stream chunks now render inline in one evolving status line (instead of newline-per-token); structural markers stay on separate lines
-- Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with a bounded total local-chat timeout to avoid indefinite spinner stalls
+- Inference debug telemetry is now more verbose by default (ready-provider list, periodic waiting updates, app-log traces) with expanded local-chat timeout budgets (`180s` provider window, `420s` total) to avoid premature timeout fallback on slow turns
 - TUI right-click on selected transcript/stream text now triggers in-app copy-to-clipboard without clearing the selection
 - XMTP daemon resilience: retries transient send failures and auto-rebuilds XMTP client sessions after repeated stream/poll failures
 - Local/XMTP chat prompts now enforce canonical identity naming from workspace/identity state, so self-introductions stay consistent after renames

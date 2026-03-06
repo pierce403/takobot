@@ -63,7 +63,7 @@ Readiness checks include:
 - workspace-local `.tako/pi/agent/auth.json`
 - fallback auth files in `~/.pi/**` (copied into workspace on first use when possible)
 - local Codex OAuth session tokens from `~/.codex/auth.json` (auto-synced into `.tako/pi/agent/auth.json` as `openai-codex` when available)
-- assisted login workflow (`inference login`) that starts pi login and forwards interactive prompts back to operator input (`inference login answer <text>`)
+- assisted login workflow (`inference login`) when the installed `pi` CLI exposes a supported `login`/`auth login` command; otherwise Takobot reports manual auth/API-key recovery guidance and expects auth to be completed outside Takobot before `inference refresh`
 
 For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.json` and surfaces them through `inference auth`.
 

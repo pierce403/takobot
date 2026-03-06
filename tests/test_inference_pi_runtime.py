@@ -35,6 +35,7 @@ from takobot.inference import (
     _sync_workspace_agent_capabilities,
     _workspace_node_bin_dir,
     auto_repair_inference_runtime,
+    build_pi_login_env,
     discover_inference_runtime,
     clear_inference_api_key,
     format_inference_auth_inventory,
@@ -158,6 +159,36 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertEqual(str(nvm_dir), env["NVM_DIR"])
         self.assertEqual(str(agent_dir), env["PI_CODING_AGENT_DIR"])
         self.assertEqual("1", env["CI"])
+
+    def test_build_pi_login_env_keeps_pi_agent_dir_but_not_ci(self) -> None:
+        runtime = InferenceRuntime(
+            statuses={},
+            selected_provider=None,
+            selected_auth_kind="none",
+            selected_key_env_var=None,
+            selected_key_source=None,
+            _api_keys={},
+        )
+
+        with TemporaryDirectory() as tmp:
+            node_bin = Path(tmp) / "node-bin"
+            node_bin.mkdir(parents=True, exist_ok=True)
+            nvm_dir = Path(tmp) / "nvm"
+            agent_dir = Path(tmp) / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            with (
+                patch("takobot.inference._workspace_node_bin_dir", return_value=node_bin),
+                patch("takobot.inference._workspace_nvm_dir", return_value=nvm_dir),
+                patch("takobot.inference._workspace_pi_agent_dir", return_value=agent_dir),
+                patch("takobot.inference._ensure_workspace_pi_auth"),
+                patch.dict(os.environ, {"PATH": "/usr/bin", "CI": "1"}, clear=False),
+            ):
+                env = build_pi_login_env(runtime)
+
+        self.assertTrue(env["PATH"].startswith(str(node_bin) + os.pathsep))
+        self.assertEqual(str(nvm_dir), env["NVM_DIR"])
+        self.assertEqual(str(agent_dir), env["PI_CODING_AGENT_DIR"])
+        self.assertNotIn("CI", env)
 
     def test_sync_workspace_agent_capabilities_moves_legacy_tools_symlink_to_extensions(self) -> None:
         if os.name == "nt":
@@ -889,6 +920,27 @@ class TestInferencePiRuntime(unittest.TestCase):
         self.assertTrue(any("repair note" in note for note in plan.notes))
         self.assertGreaterEqual(len(plan.commands), 1)
         self.assertIn("pi auth is already available", plan.reason)
+
+    def test_prepare_pi_login_plan_reports_missing_supported_login_subcommand(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace_dir = Path(tmp)
+            workspace_cli = workspace_dir / "pi"
+            workspace_cli.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            with (
+                patch("takobot.inference._ensure_workspace_pi_runtime_if_needed", return_value=""),
+                patch("takobot.inference._ensure_workspace_pi_auth", return_value=[]),
+                patch("takobot.inference._workspace_pi_agent_dir", return_value=workspace_dir),
+                patch("takobot.inference._workspace_pi_cli_path", return_value=workspace_cli),
+                patch(
+                    "takobot.inference._safe_help_text",
+                    return_value="usage: pi --print --mode <text|json> --no-session",
+                ),
+            ):
+                plan = prepare_pi_login_plan()
+
+        self.assertFalse(plan.auth_ready)
+        self.assertEqual((), plan.commands)
+        self.assertIn("does not expose a supported login/auth subcommand", plan.reason)
 
     def test_resolve_pi_model_profile_prefers_project_override(self) -> None:
         with TemporaryDirectory() as tmp:

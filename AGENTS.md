@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-03-06 — Assisted pi login no longer invents unsupported subcommands
+
+- What happened: fresh or auth-missing workspaces could hit `inference login`, but Takobot was fabricating `pi auth login` / `pi login` candidates even when the installed `pi` CLI exposed neither command, while also reusing the non-interactive inference env (`CI=1`) for login attempts.
+- Fix: login planning now only offers assisted login when the installed `pi` help output advertises a supported login command, the login env no longer inherits `CI=1`, and operator guidance now falls back to manual auth/API-key recovery when assisted login is unsupported.
+- Prevention: keep assisted-login detection tied to actual CLI-advertised commands, separate interactive auth env from non-interactive inference env, and preserve regression tests for unsupported-login-command detection.
+
 ### 2026-03-04 — Type1 model lane now defaults to a fast coding model and `/models` is writable
 
 - What happened: first-turn Type1 chat could still run on auto-selected heavier models (surfacing medium-thinking status and timing out), while `/models` only reported plan/auth and could not set lane-specific model choices or show live options.

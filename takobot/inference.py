@@ -509,7 +509,14 @@ def prepare_pi_login_plan(runtime: InferenceRuntime | None = None) -> PiLoginPla
     if auth_ready:
         reason = "pi auth is already available in workspace runtime state."
     elif not commands:
-        reason = "pi CLI is unavailable; run `inference refresh` to bootstrap workspace-local pi runtime first."
+        if cli_path:
+            reason = (
+                "this pi CLI does not expose a supported login/auth subcommand; "
+                "use imported local auth, set an API key with `inference key set <ENV_VAR> <value>`, "
+                "or complete pi auth outside Takobot and then run `inference refresh`."
+            )
+        else:
+            reason = "pi CLI is unavailable; run `inference refresh` to bootstrap workspace-local pi runtime first."
 
     return PiLoginPlan(
         auth_ready=auth_ready,
@@ -528,7 +535,9 @@ def build_pi_login_env(runtime: InferenceRuntime | None = None) -> dict[str, str
         selected_key_source=None,
         _api_keys={},
     )
-    return _provider_env(active_runtime, "pi")
+    env = _provider_env(active_runtime, "pi", interactive=True)
+    env.pop("CI", None)
+    return env
 
 
 def discover_inference_runtime() -> InferenceRuntime:
@@ -636,9 +645,6 @@ def _pi_login_commands(cli_path: str | None) -> list[list[str]]:
     elif " login" in help_text or "login " in help_text:
         candidates.append([cli_path, "login"])
         candidates.append([cli_path, "auth", "login"])
-    else:
-        candidates.append([cli_path, "auth", "login"])
-        candidates.append([cli_path, "login"])
 
     deduped: list[list[str]] = []
     seen: set[str] = set()
@@ -3002,7 +3008,7 @@ def _ollama_model_for_runtime(status: InferenceProviderStatus | None) -> str:
     return ""
 
 
-def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
+def _provider_env(runtime: InferenceRuntime, provider: str, *, interactive: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     env.update(runtime.env_overrides_for(provider))
     tmp_dir = _workspace_tmp_dir()
@@ -3015,7 +3021,8 @@ def _provider_env(runtime: InferenceRuntime, provider: str) -> dict[str, str]:
         _sync_workspace_agent_capabilities(pi_agent_dir)
         _ensure_workspace_pi_auth(pi_agent_dir)
         env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
-        env.setdefault("CI", "1")
+        if not interactive:
+            env.setdefault("CI", "1")
         node_bin_dir = _workspace_node_bin_dir()
         if node_bin_dir is not None:
             current_path = env.get("PATH", "")

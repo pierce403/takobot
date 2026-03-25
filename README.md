@@ -14,6 +14,7 @@ Tako is **your highly autonomous octopus friend** built in **Python** with a doc
 - Pi chat turn summaries are now written to logs (`.tako/logs/runtime.log` and `.tako/logs/app.log`) so operator prompts/replies are traceable during long runs
 - Inference command-level failures now log invoked command + output tails to `.tako/logs/error.log`
 - Inference fallback replies now detect OpenAI refresh-token failures and provide non-inference reauth steps (`inference login force`, `inference login answer <text>`, `inference refresh`, `inference auth`), and XMTP chat paths attempt automatic inference runtime repair before fallback.
+- Operator plain-text chat can now save or clear runtime-local OpenAI/Venice API keys directly (for example `set my openai api key to ...`, `clear my venice api key`), and stored transcript/history lines redact the secret value.
 - Name-intent inference checks now run only when messages hint at rename/profile changes (for example `name`, `rename`, `display name`, `xmtp profile`) and use a short timeout, so smalltalk does not trigger extra classifier calls.
 - Explicit XMTP profile requests without a replacement name (for example `can you set your display name on XMTP yet?`) now trigger an immediate profile-sync attempt to current identity instead of falling through to generic model chat.
 - Prompt history context now compacts verbose inference-unavailable fallback diagnostics into a short marker line to avoid repeated fallback copy bloating later inference prompts.
@@ -183,6 +184,7 @@ Workspace configuration lives in `tako.toml` (no secrets).
 - In `child` stage, world-watch also performs random curiosity sampling from Reddit, Hacker News, and Wikipedia.
 - Use `config` (local TUI) or XMTP `config` to get a guided explanation of all `tako.toml` options and current values.
 - Inference auth/provider settings are runtime-local in `.tako/state/inference-settings.json` and can be managed directly with `inference ...` commands (provider preference `auto|pi`, API keys, pi OAuth inventory).
+- Operator plain chat can also set or clear runtime-local OpenAI/Venice inference keys without command syntax; Takobot redacts the raw key from transcript/history storage.
 - `doctor` runs local/offline inference diagnostics (CLI probes + recent inference error scan), attempts automatic workspace-local inference repair first, and does not depend on inference being available.
 - Extension downloads are always HTTPS; non-HTTPS is not allowed.
 - Security permission defaults for enabled extensions are now permissive by default (`network/shell/xmtp/filesystem = true`), and can be tightened in `tako.toml`.

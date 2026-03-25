@@ -41,9 +41,12 @@ from .inference import (
     discover_inference_runtime,
     format_inference_auth_inventory,
     format_runtime_lines,
+    inference_api_key_label,
     inference_model_for_lane,
     inference_reauth_guidance_lines,
     inference_error_log_path,
+    mask_sensitive_inference_text,
+    parse_inference_api_key_request,
     prepare_pi_login_plan,
     run_inference_prompt_with_fallback,
     set_inference_api_key,
@@ -1157,6 +1160,8 @@ async def _handle_incoming_message(
         return
 
     if not _looks_like_command(text):
+        if await _maybe_handle_operator_inference_key_update(text, inference_runtime, convo, hooks=hooks):
+            return
         if await _maybe_handle_operator_identity_update(
             text,
             inference_runtime,
@@ -1814,6 +1819,47 @@ async def _maybe_handle_operator_identity_update(
             update_mission_objectives([parsed_role])
     append_daily_note(daily_root(), date.today(), f"Identity purpose updated via XMTP: {current_role} -> {parsed_role}")
     await convo.send("ink dried. purpose updated in `SOUL.md`.")
+    return True
+
+
+async def _maybe_handle_operator_inference_key_update(
+    text: str,
+    inference_runtime: InferenceRuntime,
+    convo,
+    *,
+    hooks: RuntimeHooks | None,
+) -> bool:
+    request = parse_inference_api_key_request(text)
+    if request is None:
+        return False
+
+    label = inference_api_key_label(request.env_var)
+    if request.action == "clear":
+        ok, summary = clear_inference_api_key(request.env_var)
+        if ok:
+            _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+            _emit_runtime_log(f"inference key cleared: {request.env_var}", hooks=hooks)
+            append_daily_note(daily_root(), date.today(), f"Cleared runtime-local inference key via XMTP: {request.env_var}")
+            await convo.send(f"ink dried. {summary}")
+        else:
+            await convo.send(summary)
+        return True
+
+    if not request.value:
+        await convo.send(
+            f"I can do that. send the exact {label}, for example: "
+            f"`set my {label.lower()} to <key>`."
+        )
+        return True
+
+    ok, summary = set_inference_api_key(request.env_var, request.value)
+    if ok:
+        _replace_inference_runtime(inference_runtime, discover_inference_runtime())
+        _emit_runtime_log(f"inference key saved: {request.env_var}", hooks=hooks)
+        append_daily_note(daily_root(), date.today(), f"Saved runtime-local inference key via XMTP: {request.env_var}")
+        await convo.send(f"ink dried. {summary}")
+    else:
+        await convo.send(summary)
     return True
 
 
@@ -2714,7 +2760,7 @@ def _record_chat_turn(
     hooks: RuntimeHooks | None,
 ) -> None:
     try:
-        conversations.append_user_assistant(session_key, user_text, assistant_text)
+        conversations.append_user_assistant(session_key, mask_sensitive_inference_text(user_text), assistant_text)
     except Exception as exc:  # noqa: BLE001
         _emit_runtime_log(
             f"conversation history save warning: {_summarize_stream_error(exc)}",

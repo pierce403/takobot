@@ -5,6 +5,7 @@ import base64
 import contextlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ PI_MIN_NODE_MAJOR = NODE_RUNTIME_MIN_MAJOR
 KNOWN_INFERENCE_PROVIDERS = ("pi", "ollama", "codex", "claude", "gemini")
 PI_KEY_ENV_VARS = (
     "OPENAI_API_KEY",
+    "VENICE_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
@@ -63,6 +65,15 @@ CONFIGURABLE_API_KEY_VARS = tuple(
         }
     )
 )
+_CONFIGURABLE_API_KEY_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(item) for item in sorted(CONFIGURABLE_API_KEY_VARS, key=len, reverse=True)) + r")\b",
+    flags=re.IGNORECASE,
+)
+_OPENAI_API_KEY_ALIAS_PATTERN = re.compile(r"\bopen\s*ai(?:\s+api)?(?:\s+key)?\b", flags=re.IGNORECASE)
+_VENICE_API_KEY_ALIAS_PATTERN = re.compile(r"\bvenice(?:\s+api)?(?:\s+key)?\b", flags=re.IGNORECASE)
+_INFERENCE_API_KEY_SET_WORDS = ("set", "save", "store", "use", "configure", "update", "add")
+_INFERENCE_API_KEY_CLEAR_WORDS = ("clear", "remove", "delete", "unset", "wipe")
+_INFERENCE_API_KEY_HINT_WORDS = ("api key", "key", "token", "credential")
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 PI_TYPE1_THINKING_DEFAULT = "minimal"
 PI_TYPE2_THINKING_DEFAULT = "xhigh"
@@ -91,6 +102,13 @@ class InferenceSettings:
     type1_model: str = ""
     type2_model: str = ""
     api_keys: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class InferenceApiKeyRequest:
+    action: str
+    env_var: str
+    value: str = ""
 
 
 def _clean_lane_model_setting(value: Any, *, allow_auto_literal: bool = True) -> str:
@@ -251,6 +269,76 @@ def set_inference_api_key(env_var: str, value: str, path: Path | None = None) ->
     if not ok:
         return False, message
     return True, f"inference API key saved for `{key_name}`"
+
+
+def inference_api_key_label(env_var: str) -> str:
+    key_name = (env_var or "").strip().upper()
+    labels = {
+        "OPENAI_API_KEY": "OpenAI API key",
+        "VENICE_API_KEY": "Venice API key",
+    }
+    return labels.get(key_name, key_name or "API key")
+
+
+def parse_inference_api_key_request(text: str) -> InferenceApiKeyRequest | None:
+    cleaned = " ".join((text or "").split()).strip()
+    if not cleaned:
+        return None
+
+    command_match = re.match(
+        r"^(?:/?(?:takobot|tako)\s+)?/?inference\s+key\s+(set|clear)\s+([A-Za-z0-9_]+)(?:\s+(.+))?$",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if command_match:
+        action = command_match.group(1).strip().lower()
+        env_var = command_match.group(2).strip().upper()
+        if env_var not in CONFIGURABLE_API_KEY_VARS:
+            return None
+        value = _clean_inference_api_key_candidate(command_match.group(3) or "")
+        return InferenceApiKeyRequest(action=action, env_var=env_var, value=value)
+
+    env_var, matched_direct_env_var = _extract_inference_api_key_env_var(cleaned)
+    if not env_var:
+        return None
+
+    lowered = cleaned.lower()
+    if not matched_direct_env_var and not _has_inference_api_key_context(lowered):
+        return None
+
+    if any(word in lowered for word in _INFERENCE_API_KEY_CLEAR_WORDS):
+        return InferenceApiKeyRequest(action="clear", env_var=env_var)
+
+    value = _extract_inference_api_key_value(cleaned, env_var)
+    if value:
+        return InferenceApiKeyRequest(action="set", env_var=env_var, value=value)
+    if any(word in lowered for word in _INFERENCE_API_KEY_SET_WORDS):
+        return InferenceApiKeyRequest(action="set", env_var=env_var)
+    return None
+
+
+def mask_sensitive_inference_text(text: str) -> str:
+    raw = text or ""
+    command_match = re.match(
+        r"^((?:/?(?:takobot|tako)\s+)?/?inference\s+key\s+set\s+\S+\s+)(.+)$",
+        raw.strip(),
+        flags=re.IGNORECASE,
+    )
+    if command_match:
+        return f"{command_match.group(1)}********"
+
+    request = parse_inference_api_key_request(raw)
+    if request is None or request.action != "set" or not request.value:
+        return raw
+    masked = re.sub(
+        re.escape(request.value) + r"(?=[\s\"'`.,;!?)]|$)",
+        _mask_secret(request.value),
+        raw,
+        count=1,
+    )
+    if masked != raw:
+        return masked
+    return raw.replace(request.value, _mask_secret(request.value), 1)
 
 
 def clear_inference_api_key(env_var: str, path: Path | None = None) -> tuple[bool, str]:
@@ -3490,6 +3578,100 @@ def _format_epoch_ms(value: Any) -> str:
         return datetime.fromtimestamp(float(stamp), tz=timezone.utc).replace(microsecond=0).isoformat()
     except Exception:
         return "unknown"
+
+
+def _extract_inference_api_key_env_var(text: str) -> tuple[str, bool]:
+    direct = _CONFIGURABLE_API_KEY_PATTERN.search(text or "")
+    if direct:
+        return direct.group(1).strip().upper(), True
+    if _OPENAI_API_KEY_ALIAS_PATTERN.search(text or ""):
+        return "OPENAI_API_KEY", False
+    if _VENICE_API_KEY_ALIAS_PATTERN.search(text or ""):
+        return "VENICE_API_KEY", False
+    return "", False
+
+
+def _has_inference_api_key_context(lowered: str) -> bool:
+    return any(token in (lowered or "") for token in _INFERENCE_API_KEY_HINT_WORDS)
+
+
+def _inference_api_key_target_pattern(env_var: str) -> str:
+    key_name = (env_var or "").strip().upper()
+    if key_name == "OPENAI_API_KEY":
+        return r"(?:OPENAI_API_KEY|open\s*ai(?:\s+api)?(?:\s+key)?)"
+    if key_name == "VENICE_API_KEY":
+        return r"(?:VENICE_API_KEY|venice(?:\s+api)?(?:\s+key)?)"
+    return re.escape(key_name)
+
+
+def _extract_inference_api_key_value(text: str, env_var: str) -> str:
+    target = _inference_api_key_target_pattern(env_var)
+    patterns = (
+        rf"\b(?:set|save|store|configure|update|add)\b.{{0,120}}?\b(?:{target})\b.{{0,40}}?(?:to|as|=|:)\s*([^\s\"'`]+)",
+        rf"\b(?:{target})\b.{{0,40}}?(?:=|:|is|to|as)\s*([^\s\"'`]+)",
+        rf"\buse\s+[\"'`]?([^\s\"'`]+)[\"'`]?\s+as\s+(?:my\s+|the\s+)?(?:{target})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = _clean_inference_api_key_candidate(match.group(1))
+        if candidate:
+            return candidate
+    return ""
+
+
+def _clean_inference_api_key_candidate(value: str) -> str:
+    candidate = " ".join((value or "").split()).strip()
+    if not candidate:
+        return ""
+    quote_pairs = {
+        "`": "`",
+        '"': '"',
+        "'": "'",
+        "<": ">",
+        "(": ")",
+        "[": "]",
+        "{": "}",
+    }
+    while len(candidate) >= 2:
+        end = quote_pairs.get(candidate[0])
+        if not end or candidate[-1] != end:
+            break
+        candidate = candidate[1:-1].strip()
+    candidate = candidate.rstrip(".,;!?")
+    if not _looks_like_api_key_value(candidate):
+        return ""
+    return candidate
+
+
+def _looks_like_api_key_value(value: str) -> bool:
+    candidate = (value or "").strip()
+    if not candidate or len(candidate) < 6 or any(ch.isspace() for ch in candidate):
+        return False
+    lowered = candidate.lower()
+    blocked = {
+        "none",
+        "null",
+        "empty",
+        "missing",
+        "unknown",
+        "unset",
+        "clear",
+        "set",
+        "configured",
+        "supported",
+        "working",
+        "broken",
+        "<key>",
+        "<value>",
+    }
+    if lowered in blocked:
+        return False
+    has_alpha = any(ch.isalpha() for ch in candidate)
+    has_digit = any(ch.isdigit() for ch in candidate)
+    has_symbol = any(ch in "-_=.:/" for ch in candidate)
+    return len(candidate) >= 10 or (has_alpha and has_digit) or (has_alpha and has_symbol)
 
 
 def _mask_secret(value: str) -> str:

@@ -81,6 +81,8 @@
   - Detects required local `pi` runtime/auth at startup (and still reports other provider probes for diagnostics).
   - Enforces pi-only inference execution (no non-pi fallback for model calls).
   - Supports runtime-local inference configuration via `inference ...` commands (provider preference `auto|pi`, persisted API keys, pi OAuth inventory).
+  - Operator plain-text chat can set or clear runtime-local OpenAI/Venice inference keys directly without falling back to command syntax.
+  - Local TUI/XMTP transcript and conversation-history storage redact API key values from both command-style and plain-text key update requests.
   - Supports assisted pi login in TUI via `inference login` only when the installed `pi` CLI exposes a supported `login`/`auth login` command; otherwise Takobot reports manual auth/API-key recovery guidance instead of attempting unsupported subcommands. `inference login force` still bypasses stale "auth-ready" detection when assisted login is supported.
   - Inference execution is pi-runtime-only; non-pi CLIs are diagnostic-only and never used for model reply generation.
   - Keeps inference execution gated until the first interactive chat turn (onboarding turn for new sessions).

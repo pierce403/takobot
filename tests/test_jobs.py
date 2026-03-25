@@ -72,9 +72,7 @@ class TestJobs(unittest.TestCase):
             self.assertTrue(ok)
             assert created is not None
 
-            local_tz = datetime.now().astimezone().tzinfo
-            assert local_tz is not None
-            first_tick = datetime(2026, 2, 19, 15, 1, tzinfo=local_tz)
+            first_tick = datetime.now().astimezone().replace(hour=15, minute=1, second=0, microsecond=0)
             second_day = first_tick + timedelta(days=1)
 
             first_due = claim_due_jobs(state_dir, now=first_tick)

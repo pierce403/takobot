@@ -59,13 +59,14 @@ Before invoking pi, Takobot now applies a prompt safety guard:
 Readiness checks include:
 
 - common provider API-key env vars
-- runtime-local API keys from `.tako/state/inference-settings.json` (set via `inference key set ...`)
+- runtime-local API keys from `.tako/state/inference-settings.json` (set via `inference key set ...` or operator plain chat like `set my openai api key to ...`)
 - workspace-local `.tako/pi/agent/auth.json`
 - fallback auth files in `~/.pi/**` (copied into workspace on first use when possible)
 - local Codex OAuth session tokens from `~/.codex/auth.json` (auto-synced into `.tako/pi/agent/auth.json` as `openai-codex` when available)
 - assisted login workflow (`inference login`) when the installed `pi` CLI exposes a supported `login`/`auth login` command; otherwise Takobot reports manual auth/API-key recovery guidance and expects auth to be completed outside Takobot before `inference refresh`
 
 For `pi`, Takobot also enumerates provider-specific OAuth entries from pi `auth.json` and surfaces them through `inference auth`.
+Runtime-local plain-chat key management is currently first-class for OpenAI (`OPENAI_API_KEY`) and Venice (`VENICE_API_KEY`), and transcript/history storage redacts the raw key value after capture.
 
 ## Ollama integration
 

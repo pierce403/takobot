@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from takobot.inference import (
     PI_TYPE1_MODEL_DEFAULT,
     InferenceRuntime,
+    InferenceApiKeyRequest,
     InferenceProviderStatus,
     InferenceSettings,
     PI_PROMPT_MAX_LINE_CHARS,
@@ -41,6 +42,8 @@ from takobot.inference import (
     format_inference_auth_inventory,
     format_pi_model_plan_lines,
     load_inference_settings,
+    mask_sensitive_inference_text,
+    parse_inference_api_key_request,
     prepare_pi_login_plan,
     resolve_pi_model_profile,
     run_inference_prompt_with_fallback,
@@ -598,23 +601,53 @@ class TestInferencePiRuntime(unittest.TestCase):
             ok_model, _msg_model = set_inference_ollama_model("llama3.2", path=settings_path)
             ok_host, _msg_host = set_inference_ollama_host("http://127.0.0.1:11434", path=settings_path)
             ok_key, _msg_key = set_inference_api_key("OPENAI_API_KEY", "sk-test-value", path=settings_path)
+            ok_venice_key, _msg_venice_key = set_inference_api_key("VENICE_API_KEY", "venice-test-12345", path=settings_path)
 
             self.assertFalse(ok_provider)
             self.assertTrue(ok_provider_pi)
             self.assertTrue(ok_model)
             self.assertTrue(ok_host)
             self.assertTrue(ok_key)
+            self.assertTrue(ok_venice_key)
 
             settings = load_inference_settings(settings_path)
             self.assertEqual("pi", settings.preferred_provider)
             self.assertEqual("llama3.2", settings.ollama_model)
             self.assertEqual("http://127.0.0.1:11434", settings.ollama_host)
             self.assertEqual("sk-test-value", settings.api_keys.get("OPENAI_API_KEY"))
+            self.assertEqual("venice-test-12345", settings.api_keys.get("VENICE_API_KEY"))
 
             ok_clear, _msg_clear = clear_inference_api_key("OPENAI_API_KEY", path=settings_path)
             self.assertTrue(ok_clear)
             settings_cleared = load_inference_settings(settings_path)
             self.assertNotIn("OPENAI_API_KEY", settings_cleared.api_keys)
+
+    def test_parse_inference_api_key_request_handles_openai_and_venice_plain_text(self) -> None:
+        openai = parse_inference_api_key_request("set my openai api key to sk-test-value")
+        self.assertEqual(
+            InferenceApiKeyRequest(action="set", env_var="OPENAI_API_KEY", value="sk-test-value"),
+            openai,
+        )
+
+        venice = parse_inference_api_key_request("my venice api key is venice-live-12345")
+        self.assertEqual(
+            InferenceApiKeyRequest(action="set", env_var="VENICE_API_KEY", value="venice-live-12345"),
+            venice,
+        )
+
+        clear_request = parse_inference_api_key_request("please clear my openai api key")
+        self.assertEqual(
+            InferenceApiKeyRequest(action="clear", env_var="OPENAI_API_KEY", value=""),
+            clear_request,
+        )
+
+    def test_mask_sensitive_inference_text_masks_commands_and_plain_text(self) -> None:
+        command = mask_sensitive_inference_text("inference key set OPENAI_API_KEY sk-super-secret-value")
+        self.assertEqual("inference key set OPENAI_API_KEY ********", command)
+
+        natural = mask_sensitive_inference_text("my venice api key is venice-live-12345.")
+        self.assertNotIn("venice-live-12345", natural)
+        self.assertIn("veni...2345", natural)
 
     def test_inference_settings_store_type1_and_type2_models(self) -> None:
         with TemporaryDirectory() as tmp:

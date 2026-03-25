@@ -17,7 +17,9 @@ from takobot.cli import (
     _chat_prompt,
     _close_xmtp_client,
     _looks_like_command,
+    _maybe_handle_operator_inference_key_update,
     _notify_update_applied,
+    _record_chat_turn,
     _is_retryable_xmtp_error,
     _rebuild_xmtp_client,
     _send_operator_startup_presence,
@@ -186,6 +188,41 @@ class TestCliXmtpResilience(unittest.TestCase):
             auto_repair_attempted=True,
         )
         self.assertIn("already attempted automatic inference recovery", reply)
+
+    def test_operator_plain_text_key_update_routes_without_model_chat(self) -> None:
+        convo = _DummyConversation()
+        runtime = self._pi_runtime_not_ready()
+        with (
+            patch("takobot.cli.set_inference_api_key", return_value=(True, "inference API key saved for `VENICE_API_KEY`")) as set_mock,
+            patch("takobot.cli.discover_inference_runtime", return_value=self._pi_runtime()),
+            patch("takobot.cli.append_daily_note"),
+        ):
+            handled = asyncio.run(
+                _maybe_handle_operator_inference_key_update(
+                    "set my venice api key to venice-live-12345",
+                    runtime,
+                    convo,
+                    hooks=RuntimeHooks(emit_console=False),
+                )
+            )
+        self.assertTrue(handled)
+        set_mock.assert_called_once_with("VENICE_API_KEY", "venice-live-12345")
+        self.assertTrue(any("VENICE_API_KEY" in str(item) for item in convo.sent))
+
+    def test_record_chat_turn_masks_sensitive_key_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            conversations = ConversationStore(Path(tmp))
+            _record_chat_turn(
+                conversations,
+                "xmtp:demo",
+                "my openai api key is sk-super-secret-value",
+                "saved",
+                hooks=RuntimeHooks(emit_console=False),
+            )
+            history = conversations.format_prompt_context("xmtp:demo")
+        self.assertIn("User: my openai api key is", history)
+        self.assertNotIn("sk-super-secret-value", history)
+        self.assertIn("sk-s...alue", history)
 
     def test_child_followups_suppressed_when_inference_is_unavailable(self) -> None:
         fallback = _fallback_chat_reply(

@@ -23,6 +23,7 @@ Common commands:
 - `install`, `review pending`, `enable`, `draft`, `extensions`
 - `safe on`, `safe off`
 - `inference login` starts an assisted pi login workflow. When prompts appear, answer with `inference login answer <text>` or cancel with `inference login cancel`.
+- Operator plain chat can also set or clear runtime-local OpenAI/Venice keys without command syntax (for example `set my openai api key to <key>`, `clear my venice api key`); transcript/history storage redacts the raw key value.
 - `models` reports the effective Type1/Type2 pi model plan and the last streamed model observed in TUI. Defaults are tuned for split cognition: Type1 fast (`minimal`), Type2 deep (`xhigh`).
 - Natural-language scheduling also works in plain chat text (for example: `every day at 3pm explore ai news`, `at 09:30 every weekday run doctor`).
 - Identity rename requests in plain chat are inference-classified (not phrase-gated). If a rename request does not include the target name, Tako asks for the exact replacement.

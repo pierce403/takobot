@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +18,7 @@ from takobot.app import (
     _format_explore_completion_message,
     _local_chat_unavailable_message,
     _looks_like_local_command,
+    _mask_sensitive_inference_command,
     _parse_command,
     _parse_dose_set_request,
     _running_inside_screen,
@@ -26,6 +29,7 @@ from takobot.app import (
     TakoTerminalApp,
     run_terminal_app,
 )
+from takobot.conversation import ConversationStore
 
 
 class TestAppCommands(unittest.TestCase):
@@ -316,6 +320,24 @@ class TestAppCommands(unittest.TestCase):
         self.assertIn("Run `doctor` to auto-repair runtime/auth.", message)
         self.assertIn("Last inference error: inference timed out.", message)
         self.assertIn("Detailed command errors are logged at: .tako/logs/error.log.", message)
+
+    def test_mask_sensitive_inference_command_masks_plain_text_keys(self) -> None:
+        masked = _mask_sensitive_inference_command("set my openai api key to sk-super-secret-value")
+        self.assertNotIn("sk-super-secret-value", masked)
+        self.assertIn("sk-s...alue", masked)
+
+    def test_record_local_chat_turn_masks_sensitive_key_values(self) -> None:
+        app = TakoTerminalApp(interval=5.0)
+        with TemporaryDirectory() as tmp:
+            app.conversations = ConversationStore(Path(tmp))
+            app._record_local_chat_turn(
+                user_text="my venice api key is venice-live-12345",
+                assistant_text="saved",
+            )
+            history = app.conversations.format_prompt_context("terminal:main")
+        self.assertIn("User: my venice api key is", history)
+        self.assertNotIn("venice-live-12345", history)
+        self.assertIn("veni...2345", history)
 
 
 if __name__ == "__main__":

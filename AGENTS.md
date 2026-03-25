@@ -74,6 +74,12 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - Fix:
 - Prevention:
 
+### 2026-03-25 — Operator chat key updates now work without leaking transcript secrets
+
+- What happened: operator chat could only persist inference API keys through explicit `inference key set ...` command syntax, and plain-text requests could fall through to normal chat while raw key material remained eligible for transcript/history logging.
+- Fix: added deterministic operator plain-text key handling for runtime-local OpenAI/Venice API keys across terminal + XMTP chat, refreshed inference runtime state after writes, and redacted key values from local transcript/app-log/input-history and conversation-history storage.
+- Prevention: keep credential-changing chat flows deterministic-first (not model-dependent), extend supported pi key inventories explicitly, and ensure any path that stores operator messages runs the same secret redaction helper.
+
 ### 2026-03-06 — Assisted pi login no longer invents unsupported subcommands
 
 - What happened: fresh or auth-missing workspaces could hit `inference login`, but Takobot was fabricating `pi auth login` / `pi login` candidates even when the installed `pi` CLI exposed neither command, while also reusing the non-interactive inference env (`CI=1`) for login attempts.

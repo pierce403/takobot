@@ -62,10 +62,13 @@ from .inference import (
     format_inference_auth_inventory,
     format_pi_model_plan_lines,
     format_runtime_lines,
+    inference_api_key_label,
     inference_model_for_lane,
     inference_reauth_guidance_lines,
     inference_error_log_path,
     list_pi_available_models,
+    mask_sensitive_inference_text,
+    parse_inference_api_key_request,
     prepare_pi_login_plan,
     persist_inference_runtime,
     run_inference_prompt_with_fallback,
@@ -735,10 +738,11 @@ class TakoTerminalApp(App[None]):
             return
         self._hide_slash_menu()
         self._reset_tab_completion_state()
-        self.input_history.add(text)
+        safe_text = _mask_sensitive_inference_command(text)
+        self.input_history.add(safe_text)
         event.input.value = ""
 
-        self._write_user(text)
+        self._write_user(safe_text)
         pending_before = self._queued_input_total()
         pending_after = self._enqueue_local_input(text)
         if pending_before > 0:
@@ -2878,6 +2882,8 @@ class TakoTerminalApp(App[None]):
                 return
             if self._maybe_handle_inline_role_info_query(text):
                 return
+            if await self._maybe_handle_inline_inference_key_update(text):
+                return
             if await self._maybe_handle_inline_name_change(text):
                 return
             if await self._maybe_handle_inline_role_change(text):
@@ -4858,7 +4864,11 @@ class TakoTerminalApp(App[None]):
         if self.conversations is None:
             return
         try:
-            self.conversations.append_user_assistant("terminal:main", user_text, assistant_text)
+            self.conversations.append_user_assistant(
+                "terminal:main",
+                _mask_sensitive_inference_command(user_text),
+                assistant_text,
+            )
         except Exception as exc:  # noqa: BLE001
             self._add_activity("memory", f"conversation save warning: {_summarize_error(exc)}")
 
@@ -5188,6 +5198,52 @@ class TakoTerminalApp(App[None]):
             self._write_tako(
                 "I don't have a clear purpose line yet. share one like `your purpose is ...` and I'll write it to `SOUL.md`."
             )
+        return True
+
+    async def _maybe_handle_inline_inference_key_update(self, text: str) -> bool:
+        request = parse_inference_api_key_request(text)
+        if request is None:
+            return False
+
+        label = inference_api_key_label(request.env_var)
+        if request.action == "clear":
+            ok, summary = clear_inference_api_key(request.env_var)
+            if ok:
+                self._initialize_inference_runtime()
+                self._add_activity("inference", f"{request.env_var} cleared from runtime-local settings")
+                self._record_event(
+                    "inference.key.cleared",
+                    f"{request.env_var} cleared from runtime-local inference settings.",
+                    source="terminal",
+                    metadata={"env_var": request.env_var},
+                )
+                append_daily_note(daily_root(), date.today(), f"Cleared runtime-local inference key: {request.env_var}")
+                self._write_tako(f"ink dried. {summary}")
+            else:
+                self._write_tako(summary)
+            return True
+
+        if not request.value:
+            self._write_tako(
+                f"I can do that. send the exact {label}, for example: "
+                f"`set my {label.lower()} to <key>`."
+            )
+            return True
+
+        ok, summary = set_inference_api_key(request.env_var, request.value)
+        if ok:
+            self._initialize_inference_runtime()
+            self._add_activity("inference", f"{request.env_var} saved in runtime-local settings")
+            self._record_event(
+                "inference.key.saved",
+                f"{request.env_var} saved in runtime-local inference settings.",
+                source="terminal",
+                metadata={"env_var": request.env_var},
+            )
+            append_daily_note(daily_root(), date.today(), f"Saved runtime-local inference key: {request.env_var}")
+            self._write_tako(f"ink dried. {summary}")
+        else:
+            self._write_tako(summary)
         return True
 
     async def _maybe_handle_inline_job_schedule(self, text: str) -> bool:
@@ -5870,13 +5926,7 @@ def _parse_command(text: str) -> tuple[str, str]:
 
 
 def _mask_sensitive_inference_command(text: str) -> str:
-    cmd, rest = _parse_command(text)
-    if cmd != "inference":
-        return text
-    parts = rest.strip().split(maxsplit=3)
-    if len(parts) == 4 and parts[0].lower() == "key" and parts[1].lower() == "set":
-        return f"inference key set {parts[2]} ********"
-    return text
+    return mask_sensitive_inference_text(text)
 
 
 def _slash_command_matches(query: str, *, limit: int = SLASH_MENU_MAX_ITEMS) -> list[tuple[str, str]]:

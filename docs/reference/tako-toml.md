@@ -33,6 +33,19 @@ title: "tako.toml Reference"
 
 - `auto_apply` — auto-apply package updates and restart app mode
 
+## `[learning]`
+
+- `enabled` — capture operator experiences and propose procedural skills (default `true`)
+- `review_every` — fresh meaningful turns between automatic reviews (default `5`, range `1..100`)
+- `daily_call_budget` — generation plus evaluation calls per UTC day (default `12`, range `0..100`)
+- `cooldown_seconds` — minimum review spacing (default `300`, range `0..86400`)
+- `max_context_chars` — learned context budget (default `2400`, range `200..8000`)
+- `max_active_skills` — maximum relevant revisions supplied per turn (default `3`, range `0..10`)
+- `auto_promote` — evaluate generated candidates and activate only passing revisions (default `false`)
+
+Activation requires an operator-authored evaluation suite; see the
+[learning guide](../concepts/self-improvement.md) for schema and examples.
+
 ## `[world_watch]`
 
 - `feeds` — RSS/Atom feed URLs for world-watch monitoring

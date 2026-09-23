@@ -537,6 +537,7 @@
               </p>
               <div class="chips" aria-label="Project highlights">
                 <span class="chip"><b>Memory</b> system</span>
+                <span class="chip"><b>Skills</b> learned from experience</span>
                 <span class="chip"><b>Emotion</b> system (DOSE)</span>
                 <span class="chip"><b>Productivity</b> system (GTD + PARA)</span>
                 <span class="chip"><b>Type 1/2</b> cognition</span>
@@ -744,6 +745,18 @@ curl -fsSL https://tako.bot/setup.sh | bash
             </div>
 
             <div class="card panel" style="margin-top: 18px">
+              <h2>Learning from experience</h2>
+              <p>
+                Tako can turn operator conversations into reusable procedures, compare candidate revisions
+                against fixed examples, and recall relevant skills in later conversations. Outcome feedback
+                guides the next revision; rollback restores an earlier validated procedure when a change fails.
+                Background reviews have explicit budgets. Automatic activation is opt-in and requires your evaluation suite.
+              </p>
+              <p>
+                Use <code>learn status</code> in the terminal or paired XMTP chat.
+                Read the <a href="https://github.com/pierce403/takobot/blob/main/docs/concepts/self-improvement.md">learning guide</a>
+                and <a href="https://github.com/pierce403/takobot/blob/main/resources/self-improvement-research-2026-09-23.md">research decisions</a>.
+              </p>
               <h2>Feature tracker</h2>
               <p>
                 This repo keeps a living <code>FEATURES.md</code> file (inspired by
@@ -867,6 +880,7 @@ curl -fsSL https://tako.bot/setup.sh | bash
                 After pairing, operator commands include:
                 <code>help</code>, <code>status</code>, <code>doctor</code>,
                 <code>config</code>,
+                <code>learn</code>,
                 <code>jobs</code>,
                 <code>task</code>/<code>tasks</code>/<code>done</code>,
                 <code>morning</code>/<code>outcomes</code>/<code>compress</code>/<code>weekly</code>/<code>promote</code>,

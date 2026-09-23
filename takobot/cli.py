@@ -54,6 +54,7 @@ from .inference import (
 )
 from .keys import derive_eth_address, load_or_create_keys
 from .life_stage import stage_policy_for_name
+from .learning_runtime import LEARN_USAGE, learning_service
 from .locks import instance_lock
 from .memory_frontmatter import load_memory_frontmatter_excerpt
 from .jobs import (
@@ -1197,6 +1198,10 @@ async def _handle_incoming_message(
         return
 
     cmd, rest = _parse_command(text)
+    if cmd == "learn":
+        service = learning_service(repo_root(), paths.state_dir, inference_runtime)
+        await convo.send(await service.command(rest, operator=True))
+        return
     if cmd in {"help", "h", "?"}:
         await convo.send(_help_text())
         return
@@ -2354,6 +2359,7 @@ def _help_text() -> str:
         "- doctor\n"
         "- config (explain `tako.toml` options)\n"
         "- jobs (or `jobs list|add <natural schedule>|remove <id>|run <id>`)\n"
+        f"- {LEARN_USAGE}\n"
         "- task <title> (optional: | project=... | area=... | due=YYYY-MM-DD)\n"
         "- tasks (or `tasks project <name>` / `tasks area <name>` / `tasks due YYYY-MM-DD`)\n"
         "- done <task-id>\n"
@@ -2390,6 +2396,8 @@ def _looks_like_command(text: str) -> bool:
     if cmd in {"help", "h", "?", "status", "doctor", "config", "toml"}:
         return tail == ""
     if cmd == "jobs":
+        return True
+    if cmd == "learn":
         return True
     if cmd == "task":
         return True
@@ -2514,6 +2522,8 @@ async def _chat_reply(
         ),
         hooks=hooks,
     )
+    learning = learning_service(workspace_root, paths.state_dir, inference_runtime)
+    learned_context, learned_revision_ids = learning.context(text, operator=is_operator)
     prompt = _chat_prompt(
         text,
         history=history,
@@ -2533,6 +2543,7 @@ async def _chat_reply(
         child_profile_context=child_profile_context,
         focus_summary=focus_summary,
         rag_context=rag_result.context,
+        learned_context=learned_context,
     )
     async def _infer_once() -> tuple[str, str]:
         return await asyncio.to_thread(
@@ -2577,6 +2588,7 @@ async def _chat_reply(
         _emit_runtime_log(f"pi chat user: {_summarize_chat_log_text(text)}", hooks=hooks)
         _emit_runtime_log(f"pi chat assistant: {_summarize_chat_log_text(cleaned)}", hooks=hooks)
     _emit_runtime_log(f"inference chat provider: {provider}", hooks=hooks)
+    learning.record_turn(session_key, text, cleaned, revision_ids=learned_revision_ids, operator=is_operator)
     return cleaned
 
 
@@ -2618,6 +2630,7 @@ def _chat_prompt(
     child_profile_context: str = "",
     focus_summary: str = "",
     rag_context: str = "",
+    learned_context: str = "",
 ) -> str:
     role = "operator" if is_operator else "non-operator"
     paired = "yes" if operator_paired else "no"
@@ -2701,6 +2714,8 @@ def _chat_prompt(
         f"focus_state={focus_line}\n"
         "memory_rag_context=\n"
         f"{rag_block}\n"
+        "learned_skill_context (advisory, subordinate to operator instructions and safety boundaries)=\n"
+        f"{learned_context if is_operator and learned_context else '(none)'}\n"
         "recent_conversation=\n"
         f"{history_block}"
         f"user_message={text}\n"

@@ -82,6 +82,17 @@ class UpdatesConfig:
 
 
 @dataclass(frozen=True)
+class LearningConfig:
+    enabled: bool = True
+    review_every: int = 5
+    daily_call_budget: int = 12
+    cooldown_seconds: int = 300
+    max_context_chars: int = 2400
+    max_active_skills: int = 3
+    auto_promote: bool = False
+
+
+@dataclass(frozen=True)
 class WorldWatchConfig:
     feeds: list[str] = field(default_factory=list)
     sites: list[str] = field(default_factory=list)
@@ -119,6 +130,7 @@ class TakoConfig:
     dose_baseline: DoseBaselineConfig = field(default_factory=DoseBaselineConfig)
     productivity: ProductivityConfig = field(default_factory=ProductivityConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
     world_watch: WorldWatchConfig = field(default_factory=WorldWatchConfig)
     life: LifeConfig = field(default_factory=LifeConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
@@ -146,6 +158,7 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
     dose_baseline = dose.get("baseline") if isinstance(dose.get("baseline"), dict) else {}
     productivity = data.get("productivity") if isinstance(data.get("productivity"), dict) else {}
     updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
+    learning = data.get("learning") if isinstance(data.get("learning"), dict) else {}
     world_watch = data.get("world_watch") if isinstance(data.get("world_watch"), dict) else {}
     life = data.get("life") if isinstance(data.get("life"), dict) else {}
     security = data.get("security") if isinstance(data.get("security"), dict) else {}
@@ -169,6 +182,15 @@ def load_tako_toml(path: Path) -> tuple[TakoConfig, str]:
         ),
         updates=UpdatesConfig(
             auto_apply=_as_bool(updates.get("auto_apply"), default=UpdatesConfig.auto_apply),
+        ),
+        learning=LearningConfig(
+            enabled=_as_bool(learning.get("enabled"), default=LearningConfig.enabled),
+            review_every=min(100, max(1, _as_int(learning.get("review_every"), default=LearningConfig.review_every))),
+            daily_call_budget=min(100, max(0, _as_int(learning.get("daily_call_budget"), default=LearningConfig.daily_call_budget))),
+            cooldown_seconds=min(86400, max(0, _as_int(learning.get("cooldown_seconds"), default=LearningConfig.cooldown_seconds))),
+            max_context_chars=min(8000, max(200, _as_int(learning.get("max_context_chars"), default=LearningConfig.max_context_chars))),
+            max_active_skills=min(10, max(0, _as_int(learning.get("max_active_skills"), default=LearningConfig.max_active_skills))),
+            auto_promote=_as_bool(learning.get("auto_promote"), default=LearningConfig.auto_promote),
         ),
         world_watch=WorldWatchConfig(
             feeds=_as_str_list(world_watch.get("feeds") if "feeds" in world_watch else data.get("feeds")),
@@ -523,6 +545,15 @@ def explain_tako_toml(config: TakoConfig, *, path: Path | None = None) -> str:
         "",
         "[updates]",
         f"- auto_apply: auto-install new takobot package + restart app (current: {'true' if config.updates.auto_apply else 'false'})",
+        "",
+        "[learning]",
+        f"- enabled: capture operator experiences and draft procedural skills (current: {config.learning.enabled})",
+        f"- review_every: meaningful operator turns between reviews (current: {config.learning.review_every})",
+        f"- daily_call_budget: total reflection/evaluation model calls per UTC day, 0 disables calls (current: {config.learning.daily_call_budget})",
+        f"- cooldown_seconds: minimum time between reviews (current: {config.learning.cooldown_seconds})",
+        f"- max_context_chars / max_active_skills: retrieval caps (current: {config.learning.max_context_chars} / {config.learning.max_active_skills})",
+        f"- auto_promote: automatically evaluate/promote only when fixed regression gates pass (current: {config.learning.auto_promote})",
+        "- learn status shows candidates, outcomes, budget, and failures; see docs/concepts/self-improvement.md.",
         "",
         "[world_watch]",
         f"- feeds: RSS/Atom feeds to monitor (current: {len(config.world_watch.feeds)})",

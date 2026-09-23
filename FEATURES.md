@@ -443,6 +443,19 @@
   - [x] Startup health-check issues can trigger Type 2 escalation.
   - [x] Runtime error events can trigger Type 2 escalation.
 
+### Evaluated procedural self-improvement
+- **Stability**: experimental
+- **Description**: Learn reusable text procedures from operator experience, compare revisions, and feed independently reported outcomes into later revisions.
+- **Properties**:
+  - Terminal and paired XMTP chat share bounded experience capture, relevant procedure retrieval, and `learn` controls.
+  - Candidate procedures have immutable provenance and parent lineage; unknown outcomes are not counted as successes.
+  - Reflection and replay use a tool-free pi-ai completion with persisted call budgets and cooldowns.
+  - Activation requires development improvement, no per-case holdout regression, and at least one holdout pass; results bind the procedure, model, and fixed suite.
+  - Operator failure feedback deactivates implicated revisions and can restore a validated ancestor; later reviews can produce child revisions.
+  - This evaluates text-response behavior, not arbitrary code modifications or full tool-task performance.
+- **Test Criteria**:
+  - [x] A generated candidate passes comparative replay before retrieval, and failure feedback removes it from active context.
+
 ### “Eat the crab” importer
 - **Stability**: planned
 - **Description**: Import OpenClaw-style layouts into the new contract (SOUL/memory/tools).

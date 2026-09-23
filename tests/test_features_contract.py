@@ -376,7 +376,17 @@ def _probe_draft_extensions() -> bool:
         )
 
 
+def _probe_evaluated_learning() -> bool:
+    # Reuse the behavioral integration fixture instead of a source-text proxy.
+    from tests.test_learning import TestLearning
+
+    result = unittest.TestResult()
+    TestLearning("test_real_generation_replay_promotion_and_exact_failure_feedback").run(result)
+    return result.wasSuccessful()
+
+
 PROBES = {
+    "evaluated_learning": _probe_evaluated_learning,
     "docs_contract": _probe_docs_contract,
     "legacy_runner": _probe_legacy_runner,
     "setup_script_contract": _probe_setup_script_contract,
@@ -402,6 +412,7 @@ PROBES = {
 
 
 SECTION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Evaluated procedural self-improvement", ("evaluated_learning",)),
     ("Docs-first repo contract", ("docs_contract",)),
     ("Legacy repo runner", ("legacy_runner",)),
     ("Workspace bootstrap", ("setup_script_contract", "fresh_workspace_bootstrap")),

@@ -18,6 +18,8 @@ Common commands:
 - `dose`, `dose calm`, `dose explore`, `dose <d|o|s|e|dopamine|oxytocin|serotonin|endorphins> <0..1>`
 - `explore`, `explore <topic>` (manual exploration tick; auto-selects a mission-aligned topic when omitted, bypasses normal poll windows, avoids immediate auto-topic repeats, and for explicit topics writes structured research notes plus a synthesized mission-linked insight from evidence)
 - `jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`
+- `learn status|review|list|show <revision-id>|evaluate <revision-id>|promote <revision-id>|rollback <revision-id>`
+- `learn feedback <experience-id> success|failure [note]` — independent outcome feedback for the [learning loop](../concepts/self-improvement.md)
 - `web <url>`, `run <command>`
 - `task`, `tasks`, `done`, `morning`, `outcomes`, `compress`, `weekly`, `promote`
 - `install`, `review pending`, `enable`, `draft`, `extensions`
@@ -57,6 +59,7 @@ Primary commands:
 - `help`, `status`, `doctor`
 - `config`
 - `jobs` (`jobs list|add <natural schedule>|remove <id>|run <id>`)
+- `learn` (same learning controls as local TUI; operator-only)
 - `update`
 - `web <url>`
 - `run <command>`

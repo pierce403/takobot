@@ -20,6 +20,17 @@ weekly_review_day = "sun"
 # Auto-apply package updates and restart TUI when a newer takobot release is detected.
 auto_apply = true
 
+[learning]
+# Draft reusable skills from operator experiences; activation requires measured evaluation.
+enabled = true
+review_every = 5
+daily_call_budget = 12
+cooldown_seconds = 300
+max_context_chars = 2400
+max_active_skills = 3
+# Set true to evaluate/promote automatically against your fixed evaluations.json suite.
+auto_promote = false
+
 [world_watch]
 # RSS/Atom feeds to monitor for world-watch notes + briefings.
 feeds = []

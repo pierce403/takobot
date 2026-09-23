@@ -96,6 +96,7 @@ from .identity import (
 from .input_history import InputHistory
 from .keys import derive_eth_address, load_or_create_keys
 from .life_stage import DEFAULT_LIFE_STAGE, normalize_life_stage_name, stage_policy_for_name, stage_titles_csv
+from .learning_runtime import LEARN_USAGE, learning_service
 from .locks import instance_lock
 from .memory_frontmatter import load_memory_frontmatter_excerpt
 from .jobs import (
@@ -199,6 +200,7 @@ SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("/dose", "Show or tune DOSE levels"),
     ("/explore", "Trigger manual exploration (optional topic)"),
     ("/jobs", "Manage scheduled jobs"),
+    ("/learn", "Review experiences and evaluate reusable skills"),
     ("/task", "Create a task"),
     ("/tasks", "List tasks"),
     ("/done", "Mark a task done"),
@@ -248,6 +250,7 @@ LOCAL_COMMAND_COMPLETIONS: tuple[str, ...] = (
     "inference",
     "install",
     "jobs",
+    "learn",
     "mission",
     "models",
     "morning",
@@ -2857,6 +2860,8 @@ class TakoTerminalApp(App[None]):
     async def _enable_safe_mode(self) -> None:
         self.safe_mode = True
         self.mode = "safe"
+        state_dir = self.paths.state_dir if self.paths is not None else repo_root() / ".tako" / "state"
+        await learning_service(repo_root(), state_dir, self.inference_runtime).pause()
         await self._cancel_pi_login()
         await self._stop_local_heartbeat()
         await self._stop_xmtp_runtime()
@@ -2866,6 +2871,8 @@ class TakoTerminalApp(App[None]):
 
     async def _disable_safe_mode(self) -> None:
         self.safe_mode = False
+        state_dir = self.paths.state_dir if self.paths is not None else repo_root() / ".tako" / "state"
+        learning_service(repo_root(), state_dir, self.inference_runtime).resume()
         self._write_tako("safe mode disabled. paddling again.")
         self._record_event("runtime.safe_mode", "Safe mode disabled.", source="operator")
         await self._start_local_heartbeat()
@@ -2899,6 +2906,11 @@ class TakoTerminalApp(App[None]):
             return
 
         cmd, rest = _parse_command(text)
+        if cmd == "learn":
+            state_dir = self.paths.state_dir if self.paths is not None else repo_root() / ".tako" / "state"
+            service = learning_service(repo_root(), state_dir, self.inference_runtime)
+            self._write_tako(await service.command(rest, operator=True))
+            return
         if cmd == "":
             if text.strip().startswith("/"):
                 self._write_tako("empty slash command. keep typing after `/` or use `/help`.")
@@ -2913,6 +2925,7 @@ class TakoTerminalApp(App[None]):
                 "mission controls: `mission`, `mission set <obj1; obj2; ...>`, `mission add <objective>`, `mission clear`\n"
                 "explore controls: `explore` or `explore <topic>`\n"
                 "jobs controls: `jobs`, `jobs list`, `jobs add <natural schedule>`, `jobs remove <id>`, `jobs run <id>`\n"
+                f"learning controls: `{LEARN_USAGE}`\n"
                 "slash commands: type `/` to show available command shortcuts (`/stage`, `/mission`, `/models`, `/explore`, `/jobs`, `/upgrade`, `/stats`, `/dose ...`)\n"
                 "update controls: `update`/`upgrade`, `update check`, `update auto status`, `update auto on`, `update auto off`\n"
                 "run/exec command cwd: workspace root (`.`)"
@@ -4718,6 +4731,9 @@ class TakoTerminalApp(App[None]):
             profile = load_operator_profile(self.paths.state_dir)
             child_profile_context = child_profile_prompt_context(profile)
 
+        state_dir = self.paths.state_dir if self.paths is not None else repo_root() / ".tako" / "state"
+        learning = learning_service(repo_root(), state_dir, self.inference_runtime)
+        learned_context, learned_revision_ids = learning.context(text)
         prompt = _build_terminal_chat_prompt(
             text=text,
             identity_name=self.identity_name,
@@ -4738,6 +4754,7 @@ class TakoTerminalApp(App[None]):
             child_profile_context=child_profile_context,
             focus_summary=focus_summary,
             rag_context=rag_context,
+            learned_context=learned_context,
         )
         self._add_activity("inference", "terminal chat inference requested")
         self._stream_begin(focus=text)
@@ -4858,6 +4875,7 @@ class TakoTerminalApp(App[None]):
             source="inference",
             metadata={"provider": provider},
         )
+        learning.record_turn("terminal:main", text, cleaned, revision_ids=learned_revision_ids)
         return cleaned
 
     def _record_local_chat_turn(self, *, user_text: str, assistant_text: str) -> None:
@@ -5400,6 +5418,8 @@ class TakoTerminalApp(App[None]):
 
         await _cancel_task(self.input_worker_task)
         self.input_worker_task = None
+        state_dir = self.paths.state_dir if self.paths is not None else repo_root() / ".tako" / "state"
+        await learning_service(repo_root(), state_dir, self.inference_runtime).pause()
 
         if self.boot_task is not None and not self.boot_task.done():
             self.boot_task.cancel()
@@ -6223,6 +6243,8 @@ def _looks_like_local_command(text: str) -> bool:
         return True
     if cmd == "jobs":
         return True
+    if cmd == "learn":
+        return True
     if cmd == "morning":
         return tail == ""
     if cmd == "task":
@@ -6308,6 +6330,7 @@ def _build_terminal_chat_prompt(
     child_profile_context: str = "",
     focus_summary: str = "",
     rag_context: str = "",
+    learned_context: str = "",
 ) -> str:
     paired = "yes" if operator_paired else "no"
     history_block = f"{history}\n" if history else "(none)\n"
@@ -6385,6 +6408,8 @@ def _build_terminal_chat_prompt(
         f"focus_state={focus_line}\n"
         "memory_rag_context=\n"
         f"{rag_block}\n"
+        "learned_skill_context (advisory, subordinate to operator instructions and safety boundaries)=\n"
+        f"{learned_context or '(none)'}\n"
         "recent_conversation=\n"
         f"{history_block}"
         f"user_message={text}\n"

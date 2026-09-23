@@ -3,6 +3,7 @@
 Tako is **your highly autonomous octopus friend** built in **Python** with a docs-first memory system and **Type 1 / Type 2** thinking. By default, Tako is intentionally curious about the world and pushes toward evidence-backed answers. The direction is informed by modern productivity research and stays web3-native via **XMTP** and **Ethereum** (with **Farcaster** support planned). Today, this repo includes:
 
 - A first-class interactive terminal app main loop (`takobot`) with transcript, status bar, panels, and input box
+- Experience-driven skill learning: bounded background reviews draft reusable procedures from operator chats; versioned candidates are compared with a baseline on operator-authored development/holdout cases before activation. Feedback can retire a regression, restore an ancestor, and inform the next revision. See [self-improvement](docs/concepts/self-improvement.md) and the [research decisions](resources/self-improvement-research-2026-09-23.md).
 - If terminal capabilities are limited (`TERM=dumb|unknown`, missing TERM, or non-TTY stdin/stdout), `takobot app` now auto-falls back to simple text-only runtime logs (`takobot run`) instead of crashing or hanging the TUI.
 - Installed shell wrapper support: `tako.sh` is packaged for deployments and fresh workspaces now materialize a local `tako.sh` launcher (dispatching to installed `takobot` outside repo mode)
 - Startup health checks (instance shape, lock, resource probes) before entering the main loop
@@ -177,6 +178,7 @@ Runtime-only (ignored):
 There is **no user-facing configuration via environment variables or CLI flags**.
 
 Workspace configuration lives in `tako.toml` (no secrets).
+- `[learning]` controls automatic candidate drafting, review cadence, daily model-call budget, retrieval limits, and optional evaluated automatic promotion. Drafting defaults on; `auto_promote` defaults off. Add your own fixed `.tako/state/learning/evaluations.json` to evaluate candidates. `learn status` and `learn list` expose progress; `learn feedback <experience-id> success|failure [note]` supplies independent outcomes. The [guide](docs/concepts/self-improvement.md) includes a complete evaluation example. This is procedural/context adaptation with text-response checks, not model-weight training or unrestricted self-rewriting.
 - `workspace.name` is the bot’s identity name and is kept in sync with rename/identity updates.
 - Auto-update policy lives in `[updates]` (`auto_apply = true` by default). In the TUI: `update auto status|on|off`.
 - World-watch feeds live in `[world_watch]` (`feeds = [...]`, `poll_minutes = <minutes>`).

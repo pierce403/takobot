@@ -68,6 +68,12 @@ Root directories (must exist):
 
 Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullets:
 
+### 2026-09-23 — Keep skill proposals separate from their evaluation
+
+- What happened: reusable procedural learning needs independent outcomes; successful model generation does not prove task success.
+- Fix: added a bounded, versioned candidate archive, fixed development/holdout replay, model/body/suite binding, and outcome-driven rollback. Learning uses direct pi-ai completions because pinned pi 0.52.12 still loads project context with `--no-tools`.
+- Prevention: never replace the isolated learning runner with ordinary tool-enabled inference, never feed expected answers into proposal prompts, and require regression evidence before activation.
+
 ### YYYY-MM-DD — Title
 
 - What happened:

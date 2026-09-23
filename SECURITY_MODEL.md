@@ -60,3 +60,12 @@ On enable:
 - Built-in starter skills are auto-enabled so Tako has immediate capability coverage.
 - Operator-approved installs are enabled immediately after `install accept`.
 - Permission checks must still be enforced at execution time (network/shell/xmtp/files).
+
+## Procedural Learning
+
+- Only operator chat contributes learning evidence or receives learned context. `learn` controls use the existing operator boundary.
+- Generated procedures remain in the ignored learning archive, outside pi's automatically discovered `skills/` tree. They grant no tool or control-plane authority.
+- Reflection and text replay call pi-ai directly with no agent session, tool definitions, extensions, or workspace context loading. They cannot write the evaluation suite. Command-based credential/config resolvers are refused for these calls.
+- Fixed operator-authored evaluation cases, exact candidate content, and the selected model are bound to promotion reports. A model's own approval or confidence never activates a procedure.
+- Learning inherits operator-configured inference credentials and uses redacted, bounded conversation excerpts. Redaction is best effort, not a guarantee that all private content is removed; storage remains runtime-only.
+- These are application-level boundaries, not an OS sandbox against another process or an operator with write access to the same files.

@@ -18,6 +18,7 @@ OpenClaw-style documentation tree for Takobot.
 - [Runtime Model](concepts/runtime-model.md) — engine/workspace/runtime separation.
 - [Conversation Context](concepts/conversation-context.md) — session transcripts, history windows, and prompt context.
 - [Inference Providers](concepts/inference-providers.md) — provider selection, fallback, and pi runtime integration.
+- [Self-Improvement](concepts/self-improvement.md) — automatic skill drafting, fixed evaluations, revision feedback, and rollback.
 
 ## Reference
 

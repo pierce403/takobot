@@ -465,8 +465,8 @@
   - [ ] Imports a sample layout without losing provenance.
 
 ### Native static website hosting
-- **Stability**: in-progress
+- **Stability**: stable
 - **Description**: Cloudflare publishes the existing public landing page and installer; the bot runtime remains local.
 - **Test Criteria**:
-  - [ ] Locked isolated build and Worker dry run pass.
-  - [ ] Exact native release, HTTPS/assets/404, browser privacy and request metrics pass.
+  - [x] Locked isolated build and Worker dry run pass.
+  - [x] Exact native release, HTTPS/assets/404, browser privacy and request metrics pass.

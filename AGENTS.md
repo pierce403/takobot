@@ -571,3 +571,13 @@ Add new notes at the top using `YYYY-MM-DD`, with a short title and a few bullet
 - What happened: local `*.db3` files were easy to accidentally leave in the repo root.
 - Fix: ignore `*.db3`, `*.db3-wal`, and `*.db3-shm`.
 - Prevention: treat all local XMTP DB artifacts and `.tako/keys.json` (and legacy `.tako/config.json`) as sensitive runtime state.
+
+## Static hosting scope
+
+Native Cloudflare Git builds publish only the allowlisted public site from
+/cloudflare, with SKIP_DEPENDENCY_INSTALL=1 and explicit npm ci. Credentials remain
+in Cloudflare and previews stay off. Keep zone-only request metrics and no-transform.
+The owner-authorized hosting migration does not change the packaged application,
+so preserve its current version, release artifact and signing identity. The runtime
+release checklist applies when application behavior changes. Run the isolated
+locked build/dry run and large-file runtime checks when present.

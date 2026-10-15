@@ -463,3 +463,10 @@
   - Produces an `IMPORT_REPORT.md`.
 - **Test Criteria**:
   - [ ] Imports a sample layout without losing provenance.
+
+### Native static website hosting
+- **Stability**: in-progress
+- **Description**: Cloudflare publishes the existing public landing page and installer; the bot runtime remains local.
+- **Test Criteria**:
+  - [ ] Locked isolated build and Worker dry run pass.
+  - [ ] Exact native release, HTTPS/assets/404, browser privacy and request metrics pass.

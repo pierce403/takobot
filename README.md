@@ -228,3 +228,11 @@ Any change that affects identity/config/tools/sensors/routines must be initiated
 - Web reads are fetched with the built-in `web` tool and logged into the daily notes stream for traceability.
 - Semantic memory recall uses `ragrep` when installed (`ragrep` CLI); index state is runtime-only at `.tako/state/ragrep-memory.db`.
 - XMTP transport is runtime-managed via npm (`@xmtp/cli@0.2.0` under `.tako/xmtp/node`); if runtime health reports XMTP unavailable, run `doctor` and ensure Node `>=22` is available (system or `.tako/nvm`).
+
+## Website hosting
+
+Native Cloudflare main builds publish the unchanged public site from /cloudflare.
+Run npm ci and npm run check:deploy in that directory, plus npm run test:hosting
+where present. Deployment credentials stay in Cloudflare and previews remain off.
+Usage uses zone requests without browser analytics. The packaged application and
+its existing release/signing identity remain unchanged; Pages/source is retained.

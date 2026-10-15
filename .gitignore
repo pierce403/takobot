@@ -24,3 +24,9 @@ code/
 .DS_Store
 .idea/
 .vscode/
+
+# Isolated native static publishing
+/cloudflare/node_modules/
+/cloudflare/.wrangler/
+/cloudflare/large-assets.generated.json
+/dist/
